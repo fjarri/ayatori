@@ -5,8 +5,6 @@ use core::any::Any;
 use core::fmt::{self, Debug, Display};
 use core::marker::PhantomData;
 
-use super::union_types::*;
-
 pub trait PartyId: 'static + Debug + Clone {}
 
 impl<T: 'static + Debug + Clone> PartyId for T {}
@@ -57,12 +55,6 @@ impl<Id: PartyId> Args<Id> {
     }
 }
 
-pub(crate) trait Node {
-    // Creates another hard link to the same underlying node.
-    // TODO: better name?
-    fn get_strong_ref(&self) -> Self;
-}
-
 pub(crate) struct WrappedFunction<Id: PartyId, P: Protocol<Id>> {
     function: Box<dyn Fn(&P::SharedData, &Args<Id>) -> Box<dyn Any>>,
     name: String,
@@ -89,78 +81,49 @@ impl<Id: PartyId, P: Protocol<Id>> WrappedFunction<Id, P> {
 }
 
 #[derive(Debug)]
-pub(crate) struct ComputeScalarNodeInner<Id: PartyId, P: Protocol<Id>> {
-    store_in: Tag, // TODO: can only be internal tag. Restrict the type?
-    function: WrappedFunction<Id, P>,
-    args: Vec<Arg<Id, P>>,
-    dependencies: Vec<Dependency<Id, P>>,
-}
+pub struct Node<Id: PartyId, P: Protocol<Id>>(Arc<TypedNode<Id, P>>);
 
-#[derive(Debug)]
-pub struct ComputeScalarNode<Id: PartyId, P: Protocol<Id>>(Arc<ComputeScalarNodeInner<Id, P>>);
-
-impl<Id: PartyId, P: Protocol<Id>> Node for ComputeScalarNode<Id, P> {
-    fn get_strong_ref(&self) -> Self {
+impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
+    // Creates another hard link to the same underlying node.
+    // TODO: better name? Or just impl Clone?
+    pub fn get_strong_ref(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct SendNodeInner<Id: PartyId, P: Protocol<Id>> {
-    store_in: Tag, // TODO: can only be internal tag. Restrict the type?
-    send_as: Tag,  // can only be external
-    data: ComputeScalarNode<Id, P>,
-    group: PartyGroup<Id>,
-    dependencies: Vec<Dependency<Id, P>>,
-}
-
-#[derive(Debug)]
-pub struct SendNode<Id: PartyId, P: Protocol<Id>>(Arc<SendNodeInner<Id, P>>);
-
-impl<Id: PartyId, P: Protocol<Id>> Node for SendNode<Id, P> {
-    fn get_strong_ref(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct CollectNodeInner<Id: PartyId, P: Protocol<Id>> {
-    store_in: Tag, // TODO: can only be internal tag. Restrict the type?
-    values: Collectable<Id, P>,
-    dependencies: Vec<Dependency<Id, P>>,
-}
-
-#[derive(Debug)]
-pub struct CollectNode<Id: PartyId, P: Protocol<Id>>(Arc<CollectNodeInner<Id, P>>);
-
-impl<Id: PartyId, P: Protocol<Id>> Node for CollectNode<Id, P> {
-    fn get_strong_ref(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct ReceiveNodeInner<Id: PartyId> {
-    store_in: Tag,
-    group: PartyGroup<Id>,
-}
-
-#[derive(Debug)]
-pub struct ReceiveNode<Id: PartyId>(Arc<ReceiveNodeInner<Id>>);
-
-impl<Id: PartyId> Node for ReceiveNode<Id> {
-    fn get_strong_ref(&self) -> Self {
-        Self(self.0.clone())
-    }
+pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
+    ComputeScalar {
+        store_in: Tag, // TODO: can only be internal tag. Restrict the type?
+        function: WrappedFunction<Id, P>,
+        args: Vec<Node<Id, P>>,
+        dependencies: Vec<Node<Id, P>>,
+    },
+    Send {
+        store_in: Tag, // TODO: can only be internal tag. Restrict the type?
+        send_as: Tag,  // can only be external
+        data: Node<Id, P>,
+        group: PartyGroup<Id>,
+        dependencies: Vec<Node<Id, P>>,
+    },
+    Collect {
+        store_in: Tag, // TODO: can only be internal tag. Restrict the type?
+        values: Node<Id, P>,
+        dependencies: Vec<Node<Id, P>>,
+    },
+    Receive {
+        store_in: Tag,
+        group: PartyGroup<Id>,
+    },
 }
 
 pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any>(
     name: &str,
     function: impl 'static + Fn(&P::SharedData, &Args<Id>) -> Ret,
-    args: &[Arg<Id, P>],
-    dependencies: &[Dependency<Id, P>],
-) -> ComputeScalarNode<Id, P> {
-    let inner = ComputeScalarNodeInner {
+    args: &[Node<Id, P>],
+    dependencies: &[Node<Id, P>],
+) -> Node<Id, P> {
+    let inner = TypedNode::ComputeScalar {
         store_in: Tag {
             name: name.into(),
             kind: TagKind::Internal,
@@ -172,15 +135,15 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any>(
             .map(|dep| dep.get_strong_ref())
             .collect(),
     };
-    ComputeScalarNode(Arc::new(inner))
+    Node(Arc::new(inner))
 }
 
 pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
     name: &str,
-    scalar: &ComputeScalarNode<Id, P>,
+    scalar: &Node<Id, P>,
     group: &PartyGroup<Id>,
-    dependencies: &[Dependency<Id, P>],
-) -> CollectNode<Id, P> {
+    dependencies: &[Node<Id, P>],
+) -> Node<Id, P> {
     let sent = Tag {
         name: name.into(),
         kind: TagKind::Sent,
@@ -193,7 +156,7 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
         name: name.into(),
         kind: TagKind::AllSent,
     };
-    let send_node = SendNode(Arc::new(SendNodeInner {
+    let send_node = Node(Arc::new(TypedNode::Send {
         store_in: sent,
         send_as,
         data: scalar.get_strong_ref(),
@@ -203,15 +166,15 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
             .map(|dep| dep.get_strong_ref())
             .collect(),
     }));
-    CollectNode(Arc::new(CollectNodeInner {
+    Node(Arc::new(TypedNode::Collect {
         store_in: sent_all,
-        values: Collectable::Send(send_node),
+        values: send_node.get_strong_ref(),
         dependencies: Vec::new(),
     }))
 }
 
-pub fn receive<Id: PartyId>(name: &str, group: &PartyGroup<Id>) -> ReceiveNode<Id> {
-    ReceiveNode(Arc::new(ReceiveNodeInner {
+pub fn receive<Id: PartyId, P: Protocol<Id>>(name: &str, group: &PartyGroup<Id>) -> Node<Id, P> {
+    Node(Arc::new(TypedNode::Receive {
         store_in: Tag {
             name: name.into(),
             kind: TagKind::External,
@@ -222,10 +185,10 @@ pub fn receive<Id: PartyId>(name: &str, group: &PartyGroup<Id>) -> ReceiveNode<I
 
 pub fn collect<Id: PartyId, P: Protocol<Id>>(
     name: &str,
-    values: &Collectable<Id, P>,
-    dependencies: &[Dependency<Id, P>],
-) -> CollectNode<Id, P> {
-    CollectNode(Arc::new(CollectNodeInner {
+    values: &Node<Id, P>,
+    dependencies: &[Node<Id, P>],
+) -> Node<Id, P> {
+    Node(Arc::new(TypedNode::Collect {
         store_in: Tag {
             name: name.into(),
             kind: TagKind::Internal,
@@ -242,5 +205,5 @@ pub trait Protocol<Id: PartyId>: Sized + Debug {
     type SharedData;
     type Output;
 
-    fn build(my_id: &Id, shared_data: &Self::SharedData) -> ComputeScalarNode<Id, Self>;
+    fn build(my_id: &Id, shared_data: &Self::SharedData) -> Node<Id, Self>;
 }

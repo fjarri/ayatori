@@ -27,7 +27,7 @@ pub struct Ruleset<Id: PartyId, P: Protocol<Id>> {
 }
 
 impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
-    pub fn new(output_node: ComputeScalarNode<Id, P>) -> Self {
+    pub fn new(output_node: Node<Id, P>) -> Self {
         todo!()
     }
 }

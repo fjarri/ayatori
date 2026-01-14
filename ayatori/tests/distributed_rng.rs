@@ -20,17 +20,13 @@ fn gen_output<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: &Args<
 impl<Id: PartyId> Protocol<Id> for DistributedRNG {
     type SharedData = DistributedRNGShared<Id>;
     type Output = u64;
-    fn build(_my_id: &Id, shared_data: &Self::SharedData) -> ComputeScalarNode<Id, Self> {
+    fn build(_my_id: &Id, shared_data: &Self::SharedData) -> Node<Id, Self> {
         let all_parties = PartyGroup::new(&shared_data.parties);
         let my_x = compute_scalar("my_x", gen_x, &[], &[]);
         let x_broadcasted = broadcast("x", &my_x, &all_parties, &[]);
         let x = receive("x", &all_parties);
-        let all_x = collect(
-            "all_x",
-            &Collectable::Receive(x),
-            &[Dependency::Collect(x_broadcasted)],
-        );
-        compute_scalar("output", gen_output, &[all_x.into()], &[])
+        let all_x = collect("all_x", &x, &[x_broadcasted]);
+        compute_scalar("output", gen_output, &[all_x], &[])
     }
 }
 
