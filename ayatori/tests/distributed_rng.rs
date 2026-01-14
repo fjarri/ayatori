@@ -25,20 +25,19 @@ impl<Id: PartyId> Protocol<Id> for DistributedRNG {
         let my_x = compute_scalar("my_x", gen_x, &[], &[]);
         let x_broadcasted = broadcast("x", &my_x, &all_parties, &[]);
         let x = receive("x", &all_parties);
-        let all_x = collect("all_x", &x, &[x_broadcasted]);
-        compute_scalar("output", gen_output, &[all_x], &[])
+        let all_x = collect("all_x", &x, &[&x_broadcasted]);
+        compute_scalar("output", gen_output, &[&all_x], &[])
     }
 }
 
 #[test]
 fn build_tree() {
     let ids = (1..4).map(TestPartyId::new).collect::<Vec<_>>();
-    let shared_data = DistributedRNGShared {
-        parties: ids.clone(),
-    };
+    let shared_data = DistributedRNGShared { parties: ids.clone() };
     let output_node = DistributedRNG::build(&ids[0], &shared_data);
     println!("{:?}", output_node);
 
     let ruleset = Ruleset::new(output_node);
     println!("{:?}", ruleset);
+    println!("{}", ruleset);
 }

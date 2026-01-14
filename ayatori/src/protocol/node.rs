@@ -5,6 +5,8 @@ use core::any::Any;
 use core::fmt::{self, Debug, Display};
 use core::marker::PhantomData;
 
+use itertools::Itertools;
+
 pub trait PartyId: 'static + Debug + Clone {}
 
 impl<T: 'static + Debug + Clone> PartyId for T {}
@@ -17,6 +19,17 @@ pub struct PartyGroup<Id: PartyId> {
 impl<Id: PartyId> PartyGroup<Id> {
     pub fn new(ids: &[Id]) -> Self {
         Self { ids: ids.into() }
+    }
+
+    pub fn ids(&self) -> &[Id] {
+        &self.ids
+    }
+}
+
+impl<Id: PartyId> Display for PartyGroup<Id> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        let ids = self.ids.iter().map(|id| format!("{:?}", id)).join(", ");
+        write!(f, "{{{ids}}}")
     }
 }
 
@@ -56,7 +69,7 @@ impl<Id: PartyId> Args<Id> {
 }
 
 pub(crate) struct WrappedFunction<Id: PartyId, P: Protocol<Id>> {
-    function: Box<dyn Fn(&P::SharedData, &Args<Id>) -> Box<dyn Any>>,
+    function: Arc<dyn Fn(&P::SharedData, &Args<Id>) -> Box<dyn Any>>,
     name: String,
 }
 
@@ -66,13 +79,26 @@ impl<Id: PartyId, P: Protocol<Id>> Debug for WrappedFunction<Id, P> {
     }
 }
 
+impl<Id: PartyId, P: Protocol<Id>> Display for WrappedFunction<Id, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Clone for WrappedFunction<Id, P> {
+    fn clone(&self) -> Self {
+        Self {
+            function: self.function.clone(),
+            name: self.name.clone(),
+        }
+    }
+}
+
 impl<Id: PartyId, P: Protocol<Id>> WrappedFunction<Id, P> {
     pub fn new<Ret: Any>(function: impl 'static + Fn(&P::SharedData, &Args<Id>) -> Ret) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
-        let wrapped: Box<dyn Fn(&P::SharedData, &Args<Id>) -> Box<dyn Any>> =
-            Box::new(move |shared_data: &P::SharedData, args: &Args<Id>| {
-                Box::new(function(shared_data, args))
-            });
+        let wrapped: Arc<dyn Fn(&P::SharedData, &Args<Id>) -> Box<dyn Any>> =
+            Arc::new(move |shared_data: &P::SharedData, args: &Args<Id>| Box::new(function(shared_data, args)));
         Self {
             function: wrapped,
             name,
@@ -89,10 +115,20 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
     pub fn get_strong_ref(&self) -> Self {
         Self(self.0.clone())
     }
+
+    pub(crate) fn id(&self) -> usize {
+        // A little hacky. Is there a better way?
+        Arc::as_ptr(&self.0) as usize
+    }
+
+    pub(crate) fn as_ref(&self) -> &TypedNode<Id, P> {
+        &self.0
+    }
 }
 
 #[derive(Debug)]
 pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
+    // TODO: should `store_in` and `dependencies` be common for all nodes?
     ComputeScalar {
         store_in: Tag, // TODO: can only be internal tag. Restrict the type?
         function: WrappedFunction<Id, P>,
@@ -117,11 +153,31 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
     },
 }
 
+impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
+    pub fn dependencies(&self) -> &[Node<Id, P>] {
+        match self {
+            Self::ComputeScalar { dependencies, .. } => &dependencies,
+            Self::Send { dependencies, .. } => &dependencies,
+            Self::Collect { dependencies, .. } => &dependencies,
+            Self::Receive { .. } => &[],
+        }
+    }
+
+    pub fn store_in(&self) -> &Tag {
+        match self {
+            Self::ComputeScalar { store_in, .. } => &store_in,
+            Self::Send { store_in, .. } => &store_in,
+            Self::Collect { store_in, .. } => &store_in,
+            Self::Receive { store_in, .. } => &store_in,
+        }
+    }
+}
+
 pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any>(
     name: &str,
     function: impl 'static + Fn(&P::SharedData, &Args<Id>) -> Ret,
-    args: &[Node<Id, P>],
-    dependencies: &[Node<Id, P>],
+    args: &[&Node<Id, P>],
+    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeScalar {
         store_in: Tag {
@@ -130,10 +186,7 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any>(
         },
         function: WrappedFunction::new(function),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
-        dependencies: dependencies
-            .iter()
-            .map(|dep| dep.get_strong_ref())
-            .collect(),
+        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
     Node(Arc::new(inner))
 }
@@ -161,10 +214,7 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
         send_as,
         data: scalar.get_strong_ref(),
         group: group.clone(),
-        dependencies: dependencies
-            .iter()
-            .map(|dep| dep.get_strong_ref())
-            .collect(),
+        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     }));
     Node(Arc::new(TypedNode::Collect {
         store_in: sent_all,
@@ -186,7 +236,7 @@ pub fn receive<Id: PartyId, P: Protocol<Id>>(name: &str, group: &PartyGroup<Id>)
 pub fn collect<Id: PartyId, P: Protocol<Id>>(
     name: &str,
     values: &Node<Id, P>,
-    dependencies: &[Node<Id, P>],
+    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     Node(Arc::new(TypedNode::Collect {
         store_in: Tag {
