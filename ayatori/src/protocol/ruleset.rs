@@ -7,12 +7,19 @@ use itertools::Itertools;
 
 #[derive(Debug, Clone)]
 enum Condition<Id: PartyId> {
-    ValueReady { tag: Tag },
-    ArrayReady { tag: Tag, group: PartyGroup<Id> },
+    ValueReady {
+        tag: Tag,
+    },
+    // TODO: kind of weird to keep `got_ids` here, keep it separate?
+    ArrayReady {
+        tag: Tag,
+        group: PartyGroup<Id>,
+        got_ids: BTreeSet<Id>,
+    },
 }
 
 #[derive(Debug)]
-enum Action<Id: PartyId, P: Protocol<Id>> {
+pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
     ComputeScalar {
         store_in: Tag,
         function: WrappedFunction<Id, P>,
@@ -37,12 +44,15 @@ struct Rule<Id: PartyId, P: Protocol<Id>> {
 }
 
 #[derive(Debug)]
-pub struct Ruleset<Id: PartyId, P: Protocol<Id>> {
+pub(crate) struct Ruleset<Id: PartyId, P: Protocol<Id>> {
+    output_tag: Tag,
     rules: Vec<Rule<Id, P>>,
 }
 
 impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
     pub fn new(output_node: Node<Id, P>) -> Self {
+        let output_tag = output_node.as_ref().store_in().clone();
+
         let mut nodes_to_process = vec![output_node];
         let mut rules = Vec::new();
 
@@ -95,6 +105,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     conditions.push(Condition::ArrayReady {
                         tag: values.as_ref().store_in().clone(),
                         group: group.clone(),
+                        got_ids: BTreeSet::new(),
                     });
                     nodes_to_process.push(values.get_strong_ref());
                 }
@@ -147,7 +158,84 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
             }
         }
 
-        Self { rules }
+        Self { rules, output_tag }
+    }
+
+    pub fn value_ready(&mut self, tag: &Tag, id: Option<&Id>) {
+        // TODO: split in two methods, for scalars and arrays?
+        for rule in self.rules.iter_mut() {
+            // TODO: have a Conditions struct with a `partially_eval` or `update` method
+            let mut new_conditions = Vec::new();
+            for condition in rule.conditions.iter().cloned() {
+                let mut condition = condition;
+                match id {
+                    Some(id) => match &mut condition {
+                        Condition::ArrayReady {
+                            tag: condition_tag,
+                            group,
+                            got_ids,
+                        } => {
+                            if condition_tag == tag {
+                                got_ids.insert(id.clone());
+                                if group.has_quorum(&got_ids) {
+                                    continue;
+                                }
+                            }
+                        }
+                        Condition::ValueReady { tag: condition_tag } => {
+                            if condition_tag == tag {
+                                panic!()
+                            }
+                        }
+                    },
+                    None => match &condition {
+                        Condition::ArrayReady { tag: condition_tag, .. } => {
+                            if condition_tag == tag {
+                                panic!()
+                            }
+                        }
+                        Condition::ValueReady { tag: condition_tag } => {
+                            if condition_tag == tag {
+                                continue;
+                            }
+                        }
+                    },
+                }
+                new_conditions.push(condition);
+            }
+
+            rule.conditions = new_conditions;
+        }
+    }
+
+    fn pop_send_action(&mut self) -> Option<Action<Id, P>> {
+        self.rules
+            .extract_if(.., |rule| {
+                matches!(rule.action, Action::Send { .. }) && rule.conditions.is_empty()
+            })
+            .next()
+            .map(|rule| rule.action)
+    }
+
+    fn pop_local_action(&mut self) -> Option<Action<Id, P>> {
+        self.rules
+            .extract_if(.., |rule| {
+                !matches!(rule.action, Action::Send { .. }) && rule.conditions.is_empty()
+            })
+            .next()
+            .map(|rule| rule.action)
+    }
+
+    pub fn pop_action(&mut self) -> Option<Action<Id, P>> {
+        self.pop_local_action().or_else(|| self.pop_send_action())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    pub fn output_tag(&self) -> &Tag {
+        &self.output_tag
     }
 }
 
@@ -157,8 +245,8 @@ impl<Id: PartyId> Display for Condition<Id> {
             Self::ValueReady { tag } => {
                 write!(f, "ready({tag})")
             }
-            Self::ArrayReady { tag, group } => {
-                write!(f, "all_ready({tag}, {group})")
+            Self::ArrayReady { tag, group, got_ids } => {
+                write!(f, "all-ready({tag}, {group}) [have: {got_ids:?}]")
             }
         }
     }

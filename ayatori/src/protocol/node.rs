@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::sync::Arc;
 use core::any::Any;
@@ -7,13 +7,13 @@ use core::marker::PhantomData;
 
 use itertools::Itertools;
 
-pub trait PartyId: 'static + Debug + Clone {}
+pub trait PartyId: 'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Sync {}
 
-impl<T: 'static + Debug + Clone> PartyId for T {}
+impl<T: 'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Sync> PartyId for T {}
 
 #[derive(Debug, Clone)]
 pub struct PartyGroup<Id: PartyId> {
-    ids: Vec<Id>,
+    ids: Vec<Id>, // TODO: keep as BTreeSet
 }
 
 impl<Id: PartyId> PartyGroup<Id> {
@@ -23,6 +23,10 @@ impl<Id: PartyId> PartyGroup<Id> {
 
     pub fn ids(&self) -> &[Id] {
         &self.ids
+    }
+
+    pub fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool {
+        &self.ids.iter().cloned().collect::<BTreeSet<_>>() == ids
     }
 }
 
@@ -58,18 +62,50 @@ impl Display for Tag {
     }
 }
 
-pub struct Args<Id> {
-    phantom: PhantomData<Id>,
+#[derive(Clone)]
+pub struct Value(Arc<dyn Any + Send + Sync>);
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "<value>")
+    }
 }
 
-impl<Id: PartyId> Args<Id> {
-    pub fn get_map<T>(&self, name: &str) -> Option<BTreeMap<Id, T>> {
-        todo!()
+impl Value {
+    pub(crate) fn new<T: Any + Send + Sync>(value: T) -> Self {
+        Self(Arc::new(value))
+    }
+
+    pub(crate) fn downcast<T: Clone + Any + Send + Sync>(&self) -> T {
+        Arc::unwrap_or_clone(self.0.clone().downcast::<T>().unwrap())
+    }
+}
+
+pub struct Args {
+    values: BTreeMap<Tag, Value>,
+}
+
+impl Args {
+    pub(crate) fn new(values: BTreeMap<Tag, Value>) -> Self {
+        Self { values }
+    }
+
+    pub fn get_map<Id: PartyId, T: Clone + Any + Send + Sync>(&self, name: &str) -> BTreeMap<Id, T> {
+        // TODO: are there possibilities of name clashes? Tags with the same name but different kinds?
+        let tag = Tag {
+            name: name.to_string(),
+            kind: TagKind::Internal,
+        };
+        let value_map = self.values.get(&tag).unwrap().downcast::<BTreeMap<Id, Value>>();
+        value_map
+            .into_iter()
+            .map(|(id, value)| (id, value.downcast::<T>()))
+            .collect()
     }
 }
 
 pub(crate) struct WrappedFunction<Id: PartyId, P: Protocol<Id>> {
-    function: Arc<dyn Fn(&P::SharedData, &Args<Id>) -> Box<dyn Any>>,
+    function: Arc<dyn Fn(&P::SharedData, &Args) -> Value>,
     name: String,
 }
 
@@ -95,14 +131,18 @@ impl<Id: PartyId, P: Protocol<Id>> Clone for WrappedFunction<Id, P> {
 }
 
 impl<Id: PartyId, P: Protocol<Id>> WrappedFunction<Id, P> {
-    pub fn new<Ret: Any>(function: impl 'static + Fn(&P::SharedData, &Args<Id>) -> Ret) -> Self {
+    pub fn new<Ret: Any + Send + Sync>(function: impl 'static + Fn(&P::SharedData, &Args) -> Ret) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
-        let wrapped: Arc<dyn Fn(&P::SharedData, &Args<Id>) -> Box<dyn Any>> =
-            Arc::new(move |shared_data: &P::SharedData, args: &Args<Id>| Box::new(function(shared_data, args)));
+        let wrapped: Arc<dyn Fn(&P::SharedData, &Args) -> Value> =
+            Arc::new(move |shared_data: &P::SharedData, args: &Args| Value::new(function(shared_data, args)));
         Self {
             function: wrapped,
             name,
         }
+    }
+
+    pub fn call(&self, shared_data: &P::SharedData, args: &Args) -> Value {
+        (self.function)(shared_data, args)
     }
 }
 
@@ -173,9 +213,9 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     }
 }
 
-pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any>(
+pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     name: &str,
-    function: impl 'static + Fn(&P::SharedData, &Args<Id>) -> Ret,
+    function: impl 'static + Fn(&P::SharedData, &Args) -> Ret,
     args: &[&Node<Id, P>],
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
@@ -253,7 +293,7 @@ pub fn collect<Id: PartyId, P: Protocol<Id>>(
 
 pub trait Protocol<Id: PartyId>: Sized + Debug {
     type SharedData;
-    type Output;
+    type Output: 'static + Clone + Any + Send + Sync;
 
     fn build(my_id: &Id, shared_data: &Self::SharedData) -> Node<Id, Self>;
 }

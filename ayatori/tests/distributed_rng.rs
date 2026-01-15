@@ -1,19 +1,21 @@
-use ayatori::dev::TestPartyId;
+use ayatori::dev::{TestPartyId, run_sessions_sync};
 use ayatori::protocol::*;
+use ayatori::session::*;
 
 #[derive(Debug)]
 struct DistributedRNG;
 
+#[derive(Clone)]
 struct DistributedRNGShared<Id> {
     parties: Vec<Id>,
 }
 
-fn gen_x<Id>(_shared_data: &DistributedRNGShared<Id>, _args: &Args<Id>) -> u64 {
+fn gen_x<Id>(_shared_data: &DistributedRNGShared<Id>, _args: &Args) -> u64 {
     1
 }
 
-fn gen_output<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: &Args<Id>) -> u64 {
-    let xs = args.get_map::<u64>("x").unwrap();
+fn gen_output<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: &Args) -> u64 {
+    let xs = args.get_map::<Id, u64>("all_x");
     xs.values().sum()
 }
 
@@ -31,13 +33,17 @@ impl<Id: PartyId> Protocol<Id> for DistributedRNG {
 }
 
 #[test]
-fn build_tree() {
+fn run_protocol() {
     let ids = (1..4).map(TestPartyId::new).collect::<Vec<_>>();
     let shared_data = DistributedRNGShared { parties: ids.clone() };
-    let output_node = DistributedRNG::build(&ids[0], &shared_data);
-    println!("{:?}", output_node);
 
-    let ruleset = Ruleset::new(output_node);
-    println!("{:?}", ruleset);
-    println!("{}", ruleset);
+    let sessions = ids
+        .iter()
+        .map(|id| Session::<_, DistributedRNG>::new(id, shared_data.clone()))
+        .collect::<Vec<_>>();
+    let results = run_sessions_sync(sessions);
+
+    let value = results[&ids[0]];
+    assert_eq!(results[&ids[1]], value);
+    assert_eq!(results[&ids[2]], value);
 }
