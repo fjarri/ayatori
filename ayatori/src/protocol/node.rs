@@ -14,20 +14,22 @@ impl<T: 'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Syn
 
 #[derive(Debug, Clone)]
 pub struct PartyGroup<Id: PartyId> {
-    ids: Vec<Id>, // TODO: keep as BTreeSet
+    ids: BTreeSet<Id>,
 }
 
 impl<Id: PartyId> PartyGroup<Id> {
     pub fn new(ids: &[Id]) -> Self {
-        Self { ids: ids.into() }
+        Self {
+            ids: ids.iter().cloned().collect(),
+        }
     }
 
-    pub fn ids(&self) -> &[Id] {
-        &self.ids
+    pub fn ids(&self) -> impl Iterator<Item = &Id> {
+        self.ids.iter()
     }
 
     pub fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool {
-        &self.ids.iter().cloned().collect::<BTreeSet<_>>() == ids
+        &self.ids == ids
     }
 }
 
