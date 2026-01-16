@@ -182,7 +182,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                 }
                 Action::Collect { store_in, values } => {
                     self.storage.set(&store_in, self.storage.get_dict(&values));
-                    self.ruleset.value_ready(&store_in, None);
+                    self.ruleset.update_with_value_ready(&store_in);
                 }
             }
         }
@@ -192,18 +192,18 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
 
     pub fn add_message(&mut self, source: &Id, tag: &Tag, message: Value) {
         self.storage.set_elem(tag, source, message);
-        self.ruleset.value_ready(tag, Some(source));
+        self.ruleset.update_with_array_element_ready(tag, source);
     }
 
     pub fn add_result(&mut self, result: TaskResult<Id>) {
         match result {
             TaskResult::Send { store_in, destination } => {
                 self.storage.set_elem(&store_in, &destination, Value::new(true));
-                self.ruleset.value_ready(&store_in, Some(&destination));
+                self.ruleset.update_with_array_element_ready(&store_in, &destination);
             }
             TaskResult::Compute { store_in, result } => {
                 self.storage.set(&store_in, result);
-                self.ruleset.value_ready(&store_in, None);
+                self.ruleset.update_with_value_ready(&store_in);
             }
         }
     }

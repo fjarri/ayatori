@@ -5,20 +5,8 @@ use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use crate::protocol::{Node, PartyGroup, PartyId, Protocol, Tag, TypedNode, WrappedFunction};
-
-#[derive(Debug, Clone)]
-enum Condition<Id: PartyId> {
-    ValueReady {
-        tag: Tag,
-    },
-    // TODO: kind of weird to keep `got_ids` here, keep it separate?
-    ArrayReady {
-        tag: Tag,
-        group: PartyGroup<Id>,
-        got_ids: BTreeSet<Id>,
-    },
-}
+use super::conditions::{Condition, LeafCondition};
+use crate::protocol::{Node, PartyId, Protocol, Tag, TypedNode, WrappedFunction};
 
 #[derive(Debug)]
 pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
@@ -41,7 +29,7 @@ pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
 
 #[derive(Debug)]
 struct Rule<Id: PartyId, P: Protocol<Id>> {
-    conditions: Vec<Condition<Id>>,
+    condition: Condition<Id>,
     action: Action<Id, P>,
 }
 
@@ -71,10 +59,10 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                 continue;
             }
 
-            let mut conditions = Vec::new();
+            let mut condition = Condition::empty();
 
             for dependency in node.as_ref().dependencies() {
-                conditions.push(Condition::ValueReady {
+                condition.and(LeafCondition::ValueReady {
                     tag: dependency.as_ref().store_in().clone(),
                 });
                 nodes_to_process.push(dependency.get_strong_ref());
@@ -83,14 +71,14 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
             match node.as_ref() {
                 TypedNode::ComputeScalar { args, .. } => {
                     for arg in args.iter() {
-                        conditions.push(Condition::ValueReady {
+                        condition.and(LeafCondition::ValueReady {
                             tag: arg.as_ref().store_in().clone(),
                         });
                         nodes_to_process.push(arg.get_strong_ref());
                     }
                 }
                 TypedNode::Send { data, .. } => {
-                    conditions.push(Condition::ValueReady {
+                    condition.and(LeafCondition::ValueReady {
                         tag: data.as_ref().store_in().clone(),
                     });
                     nodes_to_process.push(data.get_strong_ref());
@@ -102,7 +90,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         _ => panic!(),
                     };
 
-                    conditions.push(Condition::ArrayReady {
+                    condition.and(LeafCondition::ArrayReady {
                         tag: values.as_ref().store_in().clone(),
                         group: group.clone(),
                         got_ids: BTreeSet::new(),
@@ -155,7 +143,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
 
             for action in actions {
                 rules.push(Rule {
-                    conditions: conditions.clone(),
+                    condition: condition.clone(),
                     action,
                 });
             }
@@ -164,57 +152,22 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
         Self { rules, output_tag }
     }
 
-    pub fn value_ready(&mut self, tag: &Tag, id: Option<&Id>) {
-        // TODO: split in two methods, for scalars and arrays?
+    pub fn update_with_value_ready(&mut self, tag: &Tag) {
         for rule in self.rules.iter_mut() {
-            // TODO: have a Conditions struct with a `partially_eval` or `update` method
-            let mut new_conditions = Vec::new();
-            for condition in rule.conditions.iter().cloned() {
-                let mut condition = condition;
-                match id {
-                    Some(id) => match &mut condition {
-                        Condition::ArrayReady {
-                            tag: condition_tag,
-                            group,
-                            got_ids,
-                        } => {
-                            if condition_tag == tag {
-                                got_ids.insert(id.clone());
-                                if group.has_quorum(got_ids) {
-                                    continue;
-                                }
-                            }
-                        }
-                        Condition::ValueReady { tag: condition_tag } => {
-                            if condition_tag == tag {
-                                panic!()
-                            }
-                        }
-                    },
-                    None => match &condition {
-                        Condition::ArrayReady { tag: condition_tag, .. } => {
-                            if condition_tag == tag {
-                                panic!()
-                            }
-                        }
-                        Condition::ValueReady { tag: condition_tag } => {
-                            if condition_tag == tag {
-                                continue;
-                            }
-                        }
-                    },
-                }
-                new_conditions.push(condition);
-            }
+            rule.condition.update_with_value_ready(tag);
+        }
+    }
 
-            rule.conditions = new_conditions;
+    pub fn update_with_array_element_ready(&mut self, tag: &Tag, id: &Id) {
+        for rule in self.rules.iter_mut() {
+            rule.condition.update_with_array_element_ready(tag, id);
         }
     }
 
     fn pop_send_action(&mut self) -> Option<Action<Id, P>> {
         self.rules
             .extract_if(.., |rule| {
-                matches!(rule.action, Action::Send { .. }) && rule.conditions.is_empty()
+                matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
             })
             .next()
             .map(|rule| rule.action)
@@ -223,7 +176,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
     fn pop_local_action(&mut self) -> Option<Action<Id, P>> {
         self.rules
             .extract_if(.., |rule| {
-                !matches!(rule.action, Action::Send { .. }) && rule.conditions.is_empty()
+                !matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
             })
             .next()
             .map(|rule| rule.action)
@@ -239,19 +192,6 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
 
     pub fn output_tag(&self) -> &Tag {
         &self.output_tag
-    }
-}
-
-impl<Id: PartyId> Display for Condition<Id> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::ValueReady { tag } => {
-                write!(f, "ready({tag})")
-            }
-            Self::ArrayReady { tag, group, got_ids } => {
-                write!(f, "all-ready({tag}, {group}) [have: {got_ids:?}]")
-            }
-        }
     }
 }
 
@@ -283,16 +223,7 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
 
 impl<Id: PartyId, P: Protocol<Id>> Display for Rule<Id, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        if self.conditions.is_empty() {
-            writeln!(f, "if True:")?;
-        } else {
-            let conditions = self
-                .conditions
-                .iter()
-                .map(|condition| condition.to_string())
-                .join(" AND ");
-            writeln!(f, "if {conditions}:")?;
-        }
+        writeln!(f, "if {}:", self.condition)?;
         write!(f, "  {}", self.action)
     }
 }
