@@ -2,7 +2,8 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use core::any::Any;
 
-use crate::protocol::{Action, Args, PartyId, Protocol, Ruleset, Tag, Value, WrappedFunction};
+use super::ruleset::{Action, Ruleset};
+use crate::protocol::{Args, PartyId, Protocol, Tag, Value, WrappedFunction};
 
 struct Storage<Id> {
     scalars: BTreeMap<Tag, Value>,

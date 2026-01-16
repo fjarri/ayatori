@@ -1,10 +1,11 @@
-use super::node::{Node, PartyGroup, PartyId, Protocol, Tag, TypedNode, WrappedFunction};
 use alloc::collections::BTreeSet;
 use alloc::string::ToString;
 use alloc::{vec, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
+
+use crate::protocol::{Node, PartyGroup, PartyId, Protocol, Tag, TypedNode, WrappedFunction};
 
 #[derive(Debug, Clone)]
 enum Condition<Id: PartyId> {
