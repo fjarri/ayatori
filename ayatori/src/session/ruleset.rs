@@ -55,7 +55,6 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
             nodes_seen.insert(node.id());
 
             if let TypedNode::Receive { .. } = node.as_ref() {
-                // TODO: we can collect the tags we expect to receive here
                 continue;
             }
 

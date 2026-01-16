@@ -94,7 +94,6 @@ impl Args {
     }
 
     pub fn get_map<Id: PartyId, T: Clone + Any + Send + Sync>(&self, name: &str) -> BTreeMap<Id, T> {
-        // TODO: are there possibilities of name clashes? Tags with the same name but different kinds?
         let tag = Tag {
             name: name.to_string(),
             kind: TagKind::Internal,
@@ -154,8 +153,7 @@ pub struct Node<Id: PartyId, P: Protocol<Id>>(Arc<TypedNode<Id, P>>);
 
 impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
     // Creates another hard link to the same underlying node.
-    // TODO: better name? Or just impl Clone?
-    pub fn get_strong_ref(&self) -> Self {
+    pub(crate) fn get_strong_ref(&self) -> Self {
         Self(self.0.clone())
     }
 
@@ -171,22 +169,21 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
 
 #[derive(Debug)]
 pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
-    // TODO: should `store_in` and `dependencies` be common for all nodes?
     ComputeScalar {
-        store_in: Tag, // TODO: can only be internal tag. Restrict the type?
+        store_in: Tag,
         function: WrappedFunction<Id, P>,
         args: Vec<Node<Id, P>>,
         dependencies: Vec<Node<Id, P>>,
     },
     Send {
-        store_in: Tag, // TODO: can only be internal tag. Restrict the type?
-        send_as: Tag,  // can only be external
+        store_in: Tag,
+        send_as: Tag,
         data: Node<Id, P>,
         group: PartyGroup<Id>,
         dependencies: Vec<Node<Id, P>>,
     },
     Collect {
-        store_in: Tag, // TODO: can only be internal tag. Restrict the type?
+        store_in: Tag,
         values: Node<Id, P>,
         dependencies: Vec<Node<Id, P>>,
     },
