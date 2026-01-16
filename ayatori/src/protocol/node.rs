@@ -1,9 +1,10 @@
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::string::String;
+use alloc::format;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt::{self, Debug, Display};
-use core::marker::PhantomData;
 
 use itertools::Itertools;
 
@@ -105,6 +106,7 @@ impl Args {
 }
 
 pub(crate) struct WrappedFunction<Id: PartyId, P: Protocol<Id>> {
+    #[allow(clippy::type_complexity)]
     function: Arc<dyn Fn(&P::SharedData, &Args) -> Value>,
     name: String,
 }
@@ -133,8 +135,7 @@ impl<Id: PartyId, P: Protocol<Id>> Clone for WrappedFunction<Id, P> {
 impl<Id: PartyId, P: Protocol<Id>> WrappedFunction<Id, P> {
     pub fn new<Ret: Any + Send + Sync>(function: impl 'static + Fn(&P::SharedData, &Args) -> Ret) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
-        let wrapped: Arc<dyn Fn(&P::SharedData, &Args) -> Value> =
-            Arc::new(move |shared_data: &P::SharedData, args: &Args| Value::new(function(shared_data, args)));
+        let wrapped = Arc::new(move |shared_data: &P::SharedData, args: &Args| Value::new(function(shared_data, args)));
         Self {
             function: wrapped,
             name,
@@ -196,19 +197,19 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
 impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     pub fn dependencies(&self) -> &[Node<Id, P>] {
         match self {
-            Self::ComputeScalar { dependencies, .. } => &dependencies,
-            Self::Send { dependencies, .. } => &dependencies,
-            Self::Collect { dependencies, .. } => &dependencies,
+            Self::ComputeScalar { dependencies, .. } => dependencies,
+            Self::Send { dependencies, .. } => dependencies,
+            Self::Collect { dependencies, .. } => dependencies,
             Self::Receive { .. } => &[],
         }
     }
 
     pub fn store_in(&self) -> &Tag {
         match self {
-            Self::ComputeScalar { store_in, .. } => &store_in,
-            Self::Send { store_in, .. } => &store_in,
-            Self::Collect { store_in, .. } => &store_in,
-            Self::Receive { store_in, .. } => &store_in,
+            Self::ComputeScalar { store_in, .. } => store_in,
+            Self::Send { store_in, .. } => store_in,
+            Self::Collect { store_in, .. } => store_in,
+            Self::Receive { store_in, .. } => store_in,
         }
     }
 }

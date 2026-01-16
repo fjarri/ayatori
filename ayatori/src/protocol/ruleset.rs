@@ -1,6 +1,7 @@
-use super::node::*;
+use super::node::{Node, PartyGroup, PartyId, Protocol, Tag, TypedNode, WrappedFunction};
 use alloc::collections::BTreeSet;
-use core::any::Any;
+use alloc::string::ToString;
+use alloc::{vec, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
@@ -58,15 +59,13 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
 
         let mut nodes_seen = BTreeSet::<usize>::new();
 
-        while !nodes_to_process.is_empty() {
-            let node = nodes_to_process.pop().unwrap();
-
+        while let Some(node) = nodes_to_process.pop() {
             if nodes_seen.contains(&node.id()) {
                 continue;
             }
             nodes_seen.insert(node.id());
 
-            if let TypedNode::Receive { store_in, .. } = node.as_ref() {
+            if let TypedNode::Receive { .. } = node.as_ref() {
                 // TODO: we can collect the tags we expect to receive here
                 continue;
             }
@@ -124,7 +123,10 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     actions.push(Action::ComputeScalar {
                         store_in: store_in.clone(),
                         function: function.clone(),
-                        args: args.iter().map(|arg| arg.as_ref().store_in().clone()).collect(),
+                        args: args
+                            .iter()
+                            .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
+                            .collect(),
                     });
                 }
                 TypedNode::Send {
@@ -177,7 +179,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         } => {
                             if condition_tag == tag {
                                 got_ids.insert(id.clone());
-                                if group.has_quorum(&got_ids) {
+                                if group.has_quorum(got_ids) {
                                     continue;
                                 }
                             }

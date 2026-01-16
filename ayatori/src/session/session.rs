@@ -2,7 +2,7 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use core::any::Any;
 
-use crate::protocol::*;
+use crate::protocol::{Action, Args, PartyId, Protocol, Ruleset, Tag, Value, WrappedFunction};
 
 struct Storage<Id> {
     scalars: BTreeMap<Tag, Value>,
@@ -132,7 +132,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
     }
 
     pub fn make_task(&mut self) -> Option<Task<Id, P>> {
-        if self.storage.contains(&self.ruleset.output_tag()) {
+        if self.storage.contains(self.ruleset.output_tag()) {
             return Some(Task::Finalize(FinalizeTask {
                 outcome: self.storage.get(self.ruleset.output_tag()),
             }));
@@ -169,7 +169,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                 } => {
                     let arg_values = args
                         .iter()
-                        .map(|arg| (arg.clone(), self.storage.get(arg)))
+                        .map(|arg: &Tag| (arg.clone(), self.storage.get(arg)))
                         .collect::<BTreeMap<_, _>>();
                     let args = Args::new(arg_values);
                     return Some(Task::Compute(ComputeTask {

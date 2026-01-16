@@ -1,4 +1,5 @@
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 use crate::protocol::{PartyId, Protocol, Tag, Value};
 use crate::session::{Session, Task};
