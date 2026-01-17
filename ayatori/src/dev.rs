@@ -1,6 +1,8 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use rand_core::CryptoRng;
+
 use crate::protocol::{PartyId, Protocol, Tag, Value};
 use crate::session::{Session, Task};
 
@@ -19,7 +21,10 @@ struct Message<Id> {
     data: Value,
 }
 
-pub fn run_sessions_sync<Id: PartyId, P: Protocol<Id>>(sessions: Vec<Session<Id, P>>) -> BTreeMap<Id, P::Output> {
+pub fn run_sessions_sync<Id: PartyId, P: Protocol<Id>>(
+    rng: &mut impl CryptoRng,
+    sessions: Vec<Session<Id, P>>,
+) -> BTreeMap<Id, P::Output> {
     let mut sessions = sessions
         .into_iter()
         .map(|session| (session.id().clone(), session))
@@ -41,6 +46,10 @@ pub fn run_sessions_sync<Id: PartyId, P: Protocol<Id>>(sessions: Vec<Session<Id,
             match session.make_task() {
                 Some(Task::Compute(task)) => {
                     let result = task.compute();
+                    session.add_result(result);
+                }
+                Some(Task::ComputeWithRng(task)) => {
+                    let result = task.compute(rng);
                     session.add_result(result);
                 }
                 Some(Task::Send(task)) => {

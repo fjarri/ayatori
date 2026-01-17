@@ -1,9 +1,10 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use core::any::Any;
+use rand_core::CryptoRng;
 
 use super::ruleset::{Action, Ruleset};
-use crate::protocol::{Args, PartyId, Protocol, Tag, Value, WrappedFunction};
+use crate::protocol::{Args, PartyId, Protocol, Tag, Value, WrappedFunction, WrappedFunctionPrivate};
 
 struct Storage<Id> {
     scalars: BTreeMap<Tag, Value>,
@@ -52,8 +53,25 @@ pub struct ComputeTask<Id: PartyId, P: Protocol<Id>> {
 }
 
 impl<Id: PartyId, P: Protocol<Id>> ComputeTask<Id, P> {
-    pub fn compute(&self) -> TaskResult<Id> {
-        let result = self.function.call(&self.shared_data, &self.args);
+    pub fn compute(self) -> TaskResult<Id> {
+        let result = self.function.call(&self.shared_data, self.args);
+        TaskResult::Compute {
+            store_in: self.store_in.clone(),
+            result,
+        }
+    }
+}
+
+pub struct ComputeWithRngTask<Id: PartyId, P: Protocol<Id>> {
+    store_in: Tag,
+    function: WrappedFunctionPrivate<Id, P>,
+    args: Args,
+    shared_data: Arc<P::SharedData>,
+}
+
+impl<Id: PartyId, P: Protocol<Id>> ComputeWithRngTask<Id, P> {
+    pub fn compute(self, rng: &mut impl CryptoRng) -> TaskResult<Id> {
+        let result = self.function.call(rng, &self.shared_data, self.args);
         TaskResult::Compute {
             store_in: self.store_in.clone(),
             result,
@@ -99,6 +117,7 @@ impl FinalizeTask {
 pub enum Task<Id: PartyId, P: Protocol<Id>> {
     Send(SendTask<Id>),
     Compute(ComputeTask<Id, P>),
+    ComputeWithRng(ComputeWithRngTask<Id, P>),
     Finalize(FinalizeTask),
 }
 
@@ -174,6 +193,23 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                         .collect::<BTreeMap<_, _>>();
                     let args = Args::new(arg_values);
                     return Some(Task::Compute(ComputeTask {
+                        store_in,
+                        function,
+                        args,
+                        shared_data: self.shared_data.clone(),
+                    }));
+                }
+                Action::ComputeScalarPrivate {
+                    store_in,
+                    function,
+                    args,
+                } => {
+                    let arg_values = args
+                        .iter()
+                        .map(|arg: &Tag| (arg.clone(), self.storage.get(arg)))
+                        .collect::<BTreeMap<_, _>>();
+                    let args = Args::new(arg_values);
+                    return Some(Task::ComputeWithRng(ComputeWithRngTask {
                         store_in,
                         function,
                         args,

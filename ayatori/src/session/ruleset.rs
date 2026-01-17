@@ -6,13 +6,18 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use super::conditions::{Condition, LeafCondition};
-use crate::protocol::{Node, PartyId, Protocol, Tag, TypedNode, WrappedFunction};
+use crate::protocol::{Node, PartyId, Protocol, Tag, TypedNode, WrappedFunction, WrappedFunctionPrivate};
 
 #[derive(Debug)]
 pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
     ComputeScalar {
         store_in: Tag,
         function: WrappedFunction<Id, P>,
+        args: Vec<Tag>,
+    },
+    ComputeScalarPrivate {
+        store_in: Tag,
+        function: WrappedFunctionPrivate<Id, P>,
         args: Vec<Tag>,
     },
     Send {
@@ -76,6 +81,14 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         nodes_to_process.push(arg.get_strong_ref());
                     }
                 }
+                TypedNode::ComputeScalarPrivate { args, .. } => {
+                    for arg in args.iter() {
+                        condition.and(LeafCondition::ValueReady {
+                            tag: arg.as_ref().store_in().clone(),
+                        });
+                        nodes_to_process.push(arg.get_strong_ref());
+                    }
+                }
                 TypedNode::Send { data, .. } => {
                     condition.and(LeafCondition::ValueReady {
                         tag: data.as_ref().store_in().clone(),
@@ -109,6 +122,21 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     ..
                 } => {
                     actions.push(Action::ComputeScalar {
+                        store_in: store_in.clone(),
+                        function: function.clone(),
+                        args: args
+                            .iter()
+                            .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
+                            .collect(),
+                    });
+                }
+                TypedNode::ComputeScalarPrivate {
+                    store_in,
+                    function,
+                    args,
+                    ..
+                } => {
+                    actions.push(Action::ComputeScalarPrivate {
                         store_in: store_in.clone(),
                         function: function.clone(),
                         args: args
@@ -204,6 +232,14 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
             } => {
                 let joined_args = args.iter().map(|arg| arg.to_string()).join(", ");
                 write!(f, "{store_in} = {function}({joined_args})")
+            }
+            Self::ComputeScalarPrivate {
+                store_in,
+                function,
+                args,
+            } => {
+                let joined_args = args.iter().map(|arg| arg.to_string()).join(", ");
+                write!(f, "{store_in} = {function}(RNG, {joined_args})")
             }
             Self::Send {
                 store_in,

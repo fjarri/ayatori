@@ -7,6 +7,7 @@ use core::any::Any;
 use core::fmt::{self, Debug, Display};
 
 use itertools::Itertools;
+use rand_core::CryptoRng;
 
 pub trait PartyId: 'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Sync {}
 
@@ -108,7 +109,7 @@ impl Args {
 
 pub(crate) struct WrappedFunction<Id: PartyId, P: Protocol<Id>> {
     #[allow(clippy::type_complexity)]
-    function: Arc<dyn Fn(&P::SharedData, &Args) -> Value>,
+    function: Arc<dyn Fn(&P::SharedData, Args) -> Value>,
     name: String,
 }
 
@@ -134,17 +135,67 @@ impl<Id: PartyId, P: Protocol<Id>> Clone for WrappedFunction<Id, P> {
 }
 
 impl<Id: PartyId, P: Protocol<Id>> WrappedFunction<Id, P> {
-    pub fn new<Ret: Any + Send + Sync>(function: impl 'static + Fn(&P::SharedData, &Args) -> Ret) -> Self {
+    pub fn new<Ret: Any + Send + Sync>(function: impl 'static + Fn(&P::SharedData, Args) -> Ret) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
-        let wrapped = Arc::new(move |shared_data: &P::SharedData, args: &Args| Value::new(function(shared_data, args)));
+        let wrapped = Arc::new(move |shared_data: &P::SharedData, args: Args| Value::new(function(shared_data, args)));
         Self {
             function: wrapped,
             name,
         }
     }
 
-    pub fn call(&self, shared_data: &P::SharedData, args: &Args) -> Value {
+    pub fn call(&self, shared_data: &P::SharedData, args: Args) -> Value {
         (self.function)(shared_data, args)
+    }
+}
+
+pub(crate) struct WrappedFunctionPrivate<Id: PartyId, P: Protocol<Id>> {
+    #[allow(clippy::type_complexity)]
+    function: Arc<dyn Fn(&mut dyn CryptoRng, &P::SharedData, Args) -> Value>,
+    name: String,
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Debug for WrappedFunctionPrivate<Id, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "WrappedFunctionPrivate {{ function: {} }}", self.name)
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Display for WrappedFunctionPrivate<Id, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Clone for WrappedFunctionPrivate<Id, P> {
+    fn clone(&self) -> Self {
+        Self {
+            function: self.function.clone(),
+            name: self.name.clone(),
+        }
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> WrappedFunctionPrivate<Id, P> {
+    pub fn new<Ret, F>(function: F) -> Self
+    where
+        F: 'static + Fn(&mut dyn CryptoRng, &P::SharedData, Args) -> Ret,
+        Ret: Any + Send + Sync,
+    {
+        let name = core::any::type_name_of_val(&function).to_string();
+        let wrapped = Arc::new(
+            move |rng: &mut dyn CryptoRng, shared_data: &P::SharedData, args: Args| {
+                Value::new(function(rng, shared_data, args))
+            },
+        );
+        Self {
+            function: wrapped,
+            name,
+        }
+    }
+
+    pub fn call(&self, rng: &mut impl CryptoRng, shared_data: &P::SharedData, args: Args) -> Value {
+        (self.function)(rng, shared_data, args)
     }
 }
 
@@ -175,6 +226,12 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
         args: Vec<Node<Id, P>>,
         dependencies: Vec<Node<Id, P>>,
     },
+    ComputeScalarPrivate {
+        store_in: Tag,
+        function: WrappedFunctionPrivate<Id, P>,
+        args: Vec<Node<Id, P>>,
+        dependencies: Vec<Node<Id, P>>,
+    },
     Send {
         store_in: Tag,
         send_as: Tag,
@@ -197,6 +254,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     pub fn dependencies(&self) -> &[Node<Id, P>] {
         match self {
             Self::ComputeScalar { dependencies, .. } => dependencies,
+            Self::ComputeScalarPrivate { dependencies, .. } => dependencies,
             Self::Send { dependencies, .. } => dependencies,
             Self::Collect { dependencies, .. } => dependencies,
             Self::Receive { .. } => &[],
@@ -206,6 +264,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     pub fn store_in(&self) -> &Tag {
         match self {
             Self::ComputeScalar { store_in, .. } => store_in,
+            Self::ComputeScalarPrivate { store_in, .. } => store_in,
             Self::Send { store_in, .. } => store_in,
             Self::Collect { store_in, .. } => store_in,
             Self::Receive { store_in, .. } => store_in,
@@ -215,7 +274,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
 
 pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     name: &str,
-    function: impl 'static + Fn(&P::SharedData, &Args) -> Ret,
+    function: impl 'static + Fn(&P::SharedData, Args) -> Ret,
     args: &[&Node<Id, P>],
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
@@ -225,6 +284,24 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
             kind: TagKind::Internal,
         },
         function: WrappedFunction::new(function),
+        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
+        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+    };
+    Node(Arc::new(inner))
+}
+
+pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
+    name: &str,
+    function: impl 'static + Fn(&mut dyn CryptoRng, &P::SharedData, Args) -> Ret,
+    args: &[&Node<Id, P>],
+    dependencies: &[&Node<Id, P>],
+) -> Node<Id, P> {
+    let inner = TypedNode::ComputeScalarPrivate {
+        store_in: Tag {
+            name: name.into(),
+            kind: TagKind::Internal,
+        },
+        function: WrappedFunctionPrivate::new(function),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
