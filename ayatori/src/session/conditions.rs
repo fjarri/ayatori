@@ -9,10 +9,14 @@ use crate::protocol::{PartyGroup, PartyId, Tag};
 
 #[derive(Debug, Clone)]
 pub(crate) enum LeafCondition<Id: PartyId> {
-    ValueReady {
+    Value {
         tag: Tag,
     },
-    ArrayReady {
+    ArrayElement {
+        tag: Tag,
+        id: Id,
+    },
+    Array {
         tag: Tag,
         group: PartyGroup<Id>,
         got_ids: BTreeSet<Id>,
@@ -37,21 +41,31 @@ impl<Id: PartyId> Condition<Id> {
         self.all_of.push(leaf);
     }
 
+    pub fn and_condition(&mut self, condition: Condition<Id>) {
+        self.all_of.extend(condition.all_of);
+    }
+
     pub fn update_with_value_ready(&mut self, tag: &Tag) {
         self.all_of.retain_mut(|leaf| match leaf {
-            LeafCondition::ArrayReady { tag: condition_tag, .. } => {
+            LeafCondition::Array { tag: condition_tag, .. } => {
                 if condition_tag == tag {
                     panic!()
                 }
                 true
             }
-            LeafCondition::ValueReady { tag: condition_tag } => condition_tag != tag,
+            LeafCondition::ArrayElement { tag: condition_tag, .. } => {
+                if condition_tag == tag {
+                    panic!()
+                }
+                true
+            }
+            LeafCondition::Value { tag: condition_tag } => condition_tag != tag,
         });
     }
 
     pub fn update_with_array_element_ready(&mut self, tag: &Tag, id: &Id) {
         self.all_of.retain_mut(|leaf| match leaf {
-            LeafCondition::ArrayReady {
+            LeafCondition::Array {
                 tag: condition_tag,
                 group,
                 got_ids,
@@ -63,7 +77,11 @@ impl<Id: PartyId> Condition<Id> {
                     true
                 }
             }
-            LeafCondition::ValueReady { tag: condition_tag } => {
+            LeafCondition::ArrayElement {
+                tag: condition_tag,
+                id: condition_id,
+            } => !(condition_tag == tag && condition_id == id),
+            LeafCondition::Value { tag: condition_tag } => {
                 if condition_tag == tag {
                     panic!()
                 }
@@ -76,10 +94,13 @@ impl<Id: PartyId> Condition<Id> {
 impl<Id: PartyId> Display for LeafCondition<Id> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Self::ValueReady { tag } => {
+            Self::Value { tag } => {
                 write!(f, "ready({tag})")
             }
-            Self::ArrayReady { tag, group, got_ids } => {
+            Self::ArrayElement { tag, id } => {
+                write!(f, "ready({tag}, {id:?})")
+            }
+            Self::Array { tag, group, got_ids } => {
                 write!(f, "all-ready({tag}, {group}) [have: {got_ids:?}]")
             }
         }

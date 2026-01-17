@@ -1,12 +1,20 @@
 use alloc::collections::BTreeSet;
 use alloc::string::ToString;
-use alloc::{vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
 use super::conditions::{Condition, LeafCondition};
-use crate::protocol::{Node, PartyId, Protocol, Tag, TypedNode, WrappedFunction, WrappedFunctionPrivate};
+use crate::protocol::{
+    Node, PartyId, Protocol, Tag, TypedNode, WrappedArrayFunction, WrappedFunction, WrappedFunctionPrivate,
+};
+
+#[derive(Debug)]
+pub(crate) enum Arg {
+    Scalar(Tag),
+    ArrayElem(Tag),
+}
 
 #[derive(Debug)]
 pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
@@ -19,6 +27,12 @@ pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
         store_in: Tag,
         function: WrappedFunctionPrivate<Id, P>,
         args: Vec<Tag>,
+    },
+    ComputeArrayElement {
+        store_in: Tag,
+        index: Id,
+        function: WrappedArrayFunction<Id, P>,
+        args: Vec<Arg>,
     },
     Send {
         store_in: Tag,
@@ -63,53 +77,13 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                 continue;
             }
 
-            let mut condition = Condition::empty();
+            let mut shared_condition = Condition::empty();
 
             for dependency in node.as_ref().dependencies() {
-                condition.and(LeafCondition::ValueReady {
+                shared_condition.and(LeafCondition::Value {
                     tag: dependency.as_ref().store_in().clone(),
                 });
                 nodes_to_process.push(dependency.get_strong_ref());
-            }
-
-            match node.as_ref() {
-                TypedNode::ComputeScalar { args, .. } => {
-                    for arg in args.iter() {
-                        condition.and(LeafCondition::ValueReady {
-                            tag: arg.as_ref().store_in().clone(),
-                        });
-                        nodes_to_process.push(arg.get_strong_ref());
-                    }
-                }
-                TypedNode::ComputeScalarPrivate { args, .. } => {
-                    for arg in args.iter() {
-                        condition.and(LeafCondition::ValueReady {
-                            tag: arg.as_ref().store_in().clone(),
-                        });
-                        nodes_to_process.push(arg.get_strong_ref());
-                    }
-                }
-                TypedNode::Send { data, .. } => {
-                    condition.and(LeafCondition::ValueReady {
-                        tag: data.as_ref().store_in().clone(),
-                    });
-                    nodes_to_process.push(data.get_strong_ref());
-                }
-                TypedNode::Collect { values, .. } => {
-                    let group = match values.as_ref() {
-                        TypedNode::Send { group, .. } => group,
-                        TypedNode::Receive { group, .. } => group,
-                        _ => panic!(),
-                    };
-
-                    condition.and(LeafCondition::ArrayReady {
-                        tag: values.as_ref().store_in().clone(),
-                        group: group.clone(),
-                        got_ids: BTreeSet::new(),
-                    });
-                    nodes_to_process.push(values.get_strong_ref());
-                }
-                TypedNode::Receive { .. } => {}
             }
 
             let mut actions = Vec::new();
@@ -121,14 +95,24 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     args,
                     ..
                 } => {
-                    actions.push(Action::ComputeScalar {
-                        store_in: store_in.clone(),
-                        function: function.clone(),
-                        args: args
-                            .iter()
-                            .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
-                            .collect(),
-                    });
+                    let mut specific_condition = Condition::empty();
+                    for arg in args.iter() {
+                        specific_condition.and(LeafCondition::Value {
+                            tag: arg.as_ref().store_in().clone(),
+                        });
+                        nodes_to_process.push(arg.get_strong_ref());
+                    }
+                    actions.push((
+                        Action::ComputeScalar {
+                            store_in: store_in.clone(),
+                            function: function.clone(),
+                            args: args
+                                .iter()
+                                .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
+                                .collect(),
+                        },
+                        specific_condition,
+                    ));
                 }
                 TypedNode::ComputeScalarPrivate {
                     store_in,
@@ -136,14 +120,67 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     args,
                     ..
                 } => {
-                    actions.push(Action::ComputeScalarPrivate {
-                        store_in: store_in.clone(),
-                        function: function.clone(),
-                        args: args
-                            .iter()
-                            .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
-                            .collect(),
-                    });
+                    let mut specific_condition = Condition::empty();
+                    for arg in args.iter() {
+                        specific_condition.and(LeafCondition::Value {
+                            tag: arg.as_ref().store_in().clone(),
+                        });
+                        nodes_to_process.push(arg.get_strong_ref());
+                    }
+                    actions.push((
+                        Action::ComputeScalarPrivate {
+                            store_in: store_in.clone(),
+                            function: function.clone(),
+                            args: args
+                                .iter()
+                                .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
+                                .collect(),
+                        },
+                        specific_condition,
+                    ));
+                }
+                TypedNode::ComputeArray {
+                    store_in,
+                    function,
+                    args,
+                    group,
+                    ..
+                } => {
+                    for id in group.ids() {
+                        let mut specific_condition = Condition::empty();
+                        for arg in args.iter() {
+                            if arg.as_ref().group().is_some() {
+                                specific_condition.and(LeafCondition::ArrayElement {
+                                    tag: arg.as_ref().store_in().clone(),
+                                    id: id.clone(),
+                                });
+                            } else {
+                                specific_condition.and(LeafCondition::Value {
+                                    tag: arg.as_ref().store_in().clone(),
+                                });
+                            }
+                        }
+
+                        actions.push((
+                            Action::ComputeArrayElement {
+                                store_in: store_in.clone(),
+                                function: function.clone(),
+                                index: id.clone(),
+                                args: args
+                                    .iter()
+                                    .map(|arg: &Node<Id, P>| {
+                                        let tag = arg.as_ref().store_in().clone();
+                                        if arg.as_ref().group().is_some() {
+                                            Arg::ArrayElem(tag)
+                                        } else {
+                                            Arg::Scalar(tag)
+                                        }
+                                    })
+                                    .collect(),
+                            },
+                            specific_condition,
+                        ));
+                    }
                 }
                 TypedNode::Send {
                     store_in,
@@ -152,27 +189,48 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     group,
                     ..
                 } => {
+                    let mut specific_condition = Condition::empty();
+                    specific_condition.and(LeafCondition::Value {
+                        tag: data.as_ref().store_in().clone(),
+                    });
+                    nodes_to_process.push(data.get_strong_ref());
                     for id in group.ids() {
-                        actions.push(Action::Send {
-                            store_in: store_in.clone(),
-                            send_as: send_as.clone(),
-                            to_send: data.as_ref().store_in().clone(),
-                            destination: id.clone(),
-                        });
+                        actions.push((
+                            Action::Send {
+                                store_in: store_in.clone(),
+                                send_as: send_as.clone(),
+                                to_send: data.as_ref().store_in().clone(),
+                                destination: id.clone(),
+                            },
+                            specific_condition.clone(),
+                        ));
                     }
                 }
-                TypedNode::Collect { store_in, values, .. } => actions.push(Action::Collect {
-                    store_in: store_in.clone(),
-                    values: values.as_ref().store_in().clone(),
-                }),
+                TypedNode::Collect { store_in, values, .. } => {
+                    let mut specific_condition = Condition::empty();
+                    let group = values.as_ref().group().unwrap();
+                    specific_condition.and(LeafCondition::Array {
+                        tag: values.as_ref().store_in().clone(),
+                        group: group.clone(),
+                        got_ids: BTreeSet::new(),
+                    });
+                    nodes_to_process.push(values.get_strong_ref());
+
+                    actions.push((
+                        Action::Collect {
+                            store_in: store_in.clone(),
+                            values: values.as_ref().store_in().clone(),
+                        },
+                        specific_condition,
+                    ))
+                }
                 TypedNode::Receive { .. } => {}
             }
 
-            for action in actions {
-                rules.push(Rule {
-                    condition: condition.clone(),
-                    action,
-                });
+            for (action, specific_condition) in actions {
+                let mut condition = shared_condition.clone();
+                condition.and_condition(specific_condition);
+                rules.push(Rule { condition, action });
             }
         }
 
@@ -241,13 +299,31 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
                 let joined_args = args.iter().map(|arg| arg.to_string()).join(", ");
                 write!(f, "{store_in} = {function}(RNG, {joined_args})")
             }
+            Self::ComputeArrayElement {
+                store_in,
+                index,
+                function,
+                args,
+            } => {
+                let joined_args = args
+                    .iter()
+                    .map(|arg| match arg {
+                        Arg::Scalar(tag) => tag.to_string(),
+                        Arg::ArrayElem(tag) => format!("{tag}[{index:?}]"),
+                    })
+                    .join(", ");
+                write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")
+            }
             Self::Send {
                 store_in,
                 send_as,
                 to_send,
                 destination,
             } => {
-                write!(f, "{store_in} = send({to_send}) as {send_as} to {destination:?}")
+                write!(
+                    f,
+                    "{store_in}[{destination:?}] = send({to_send}) as {send_as} to {destination:?}"
+                )
             }
             Self::Collect { store_in, values } => {
                 write!(f, "{store_in} = collect({values})")

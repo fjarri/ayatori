@@ -3,8 +3,10 @@ use alloc::sync::Arc;
 use core::any::Any;
 use rand_core::CryptoRng;
 
-use super::ruleset::{Action, Ruleset};
-use crate::protocol::{Args, PartyId, Protocol, Tag, Value, WrappedFunction, WrappedFunctionPrivate};
+use super::ruleset::{Action, Arg, Ruleset};
+use crate::protocol::{
+    Args, PartyId, Protocol, Tag, Value, WrappedArrayFunction, WrappedFunction, WrappedFunctionPrivate,
+};
 
 struct Storage<Id> {
     scalars: BTreeMap<Tag, Value>,
@@ -36,6 +38,10 @@ impl<Id: PartyId> Storage<Id> {
         Value::new(dict)
     }
 
+    fn get_elem(&self, tag: &Tag, id: &Id) -> Value {
+        self.mappings.get(tag).unwrap().get(id).unwrap().clone()
+    }
+
     fn set_elem(&mut self, tag: &Tag, id: &Id, value: Value) {
         if self.mappings.contains_key(tag) {
             self.mappings.get_mut(tag).unwrap().insert(id.clone(), value);
@@ -45,19 +51,41 @@ impl<Id: PartyId> Storage<Id> {
     }
 }
 
+enum ComputeFunction<Id: PartyId, P: Protocol<Id>> {
+    Scalar {
+        function: WrappedFunction<Id, P>,
+    },
+    Array {
+        function: WrappedArrayFunction<Id, P>,
+        id: Id,
+    },
+}
+
 pub struct ComputeTask<Id: PartyId, P: Protocol<Id>> {
     store_in: Tag,
-    function: WrappedFunction<Id, P>,
+    function: ComputeFunction<Id, P>,
     args: Args,
     shared_data: Arc<P::SharedData>,
 }
 
 impl<Id: PartyId, P: Protocol<Id>> ComputeTask<Id, P> {
     pub fn compute(self) -> TaskResult<Id> {
-        let result = self.function.call(&self.shared_data, self.args);
-        TaskResult::Compute {
-            store_in: self.store_in.clone(),
-            result,
+        match self.function {
+            ComputeFunction::Scalar { function } => {
+                let result = function.call(&self.shared_data, self.args);
+                TaskResult::Compute {
+                    store_in: self.store_in.clone(),
+                    result,
+                }
+            }
+            ComputeFunction::Array { function, id } => {
+                let result = function.call(&id, &self.shared_data, self.args);
+                TaskResult::ComputeArray {
+                    store_in: self.store_in.clone(),
+                    id,
+                    result,
+                }
+            }
         }
     }
 }
@@ -125,6 +153,7 @@ pub enum Task<Id: PartyId, P: Protocol<Id>> {
 pub enum TaskResult<Id> {
     Send { store_in: Tag, destination: Id },
     Compute { store_in: Tag, result: Value },
+    ComputeArray { store_in: Tag, id: Id, result: Value },
 }
 
 pub struct Session<Id: PartyId, P: Protocol<Id>> {
@@ -138,6 +167,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
     pub fn new(my_id: &Id, shared_data: P::SharedData) -> Self {
         let output_node = P::build(my_id, &shared_data);
         let ruleset = Ruleset::new(output_node);
+
         let storage = Storage::new();
         Self {
             my_id: my_id.clone(),
@@ -194,7 +224,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                     let args = Args::new(arg_values);
                     return Some(Task::Compute(ComputeTask {
                         store_in,
-                        function,
+                        function: ComputeFunction::Scalar { function },
                         args,
                         shared_data: self.shared_data.clone(),
                     }));
@@ -212,6 +242,27 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                     return Some(Task::ComputeWithRng(ComputeWithRngTask {
                         store_in,
                         function,
+                        args,
+                        shared_data: self.shared_data.clone(),
+                    }));
+                }
+                Action::ComputeArrayElement {
+                    store_in,
+                    function,
+                    index,
+                    args,
+                } => {
+                    let arg_values = args
+                        .iter()
+                        .map(|arg: &Arg| match arg {
+                            Arg::Scalar(tag) => (tag.clone(), self.storage.get(tag)),
+                            Arg::ArrayElem(tag) => (tag.clone(), self.storage.get_elem(tag, &index)),
+                        })
+                        .collect::<BTreeMap<_, _>>();
+                    let args = Args::new(arg_values);
+                    return Some(Task::Compute(ComputeTask {
+                        store_in,
+                        function: ComputeFunction::Array { function, id: index },
                         args,
                         shared_data: self.shared_data.clone(),
                     }));
@@ -240,6 +291,10 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
             TaskResult::Compute { store_in, result } => {
                 self.storage.set(&store_in, result);
                 self.ruleset.update_with_value_ready(&store_in);
+            }
+            TaskResult::ComputeArray { store_in, id, result } => {
+                self.storage.set_elem(&store_in, &id, result);
+                self.ruleset.update_with_array_element_ready(&store_in, &id);
             }
         }
     }
