@@ -120,6 +120,10 @@ impl Args {
 pub struct Node<Id: PartyId, P: Protocol<Id>>(Arc<TypedNode<Id, P>>);
 
 impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
+    pub(crate) fn new(typed_node: TypedNode<Id, P>) -> Self {
+        Self(Arc::new(typed_node))
+    }
+
     // Creates another hard link to the same underlying node.
     pub(crate) fn get_strong_ref(&self) -> Self {
         Self(self.0.clone())
@@ -226,7 +230,7 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
-    Node(Arc::new(inner))
+    Node::new(inner)
 }
 
 pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
@@ -244,7 +248,7 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
-    Node(Arc::new(inner))
+    Node::new(inner)
 }
 
 pub fn verify<Id: PartyId, P: Protocol<Id>>(
@@ -269,7 +273,7 @@ pub fn verify<Id: PartyId, P: Protocol<Id>>(
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
-    Node(Arc::new(inner))
+    Node::new(inner)
 }
 
 pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
@@ -290,28 +294,28 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
         name: name.into(),
         kind: TagKind::AllSent,
     };
-    let send_node = Node(Arc::new(TypedNode::Send {
+    let send_node = Node::new(TypedNode::Send {
         store_in: sent,
         send_as,
         data: scalar.get_strong_ref(),
         group: group.clone(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
-    }));
-    Node(Arc::new(TypedNode::Collect {
+    });
+    Node::new(TypedNode::Collect {
         store_in: sent_all,
         values: send_node.get_strong_ref(),
         dependencies: Vec::new(),
-    }))
+    })
 }
 
 pub fn receive<Id: PartyId, P: Protocol<Id>>(name: &str, group: &PartyGroup<Id>) -> Node<Id, P> {
-    Node(Arc::new(TypedNode::Receive {
+    Node::new(TypedNode::Receive {
         store_in: Tag {
             name: name.into(),
             kind: TagKind::External,
         },
         group: group.clone(),
-    }))
+    })
 }
 
 pub fn collect<Id: PartyId, P: Protocol<Id>>(
@@ -319,7 +323,7 @@ pub fn collect<Id: PartyId, P: Protocol<Id>>(
     values: &Node<Id, P>,
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
-    Node(Arc::new(TypedNode::Collect {
+    Node::new(TypedNode::Collect {
         store_in: Tag {
             name: name.into(),
             kind: TagKind::Internal,
@@ -329,7 +333,7 @@ pub fn collect<Id: PartyId, P: Protocol<Id>>(
             .iter()
             .map(|dependency| dependency.get_strong_ref())
             .collect(),
-    }))
+    })
 }
 
 pub trait Protocol<Id: PartyId>: Sized + Debug {
