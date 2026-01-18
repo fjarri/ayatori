@@ -93,7 +93,7 @@ pub struct Args {
 
 impl Args {
     pub(crate) fn new(values: BTreeMap<Tag, Value>) -> Self {
-        // TODO: make sure there are no name clashes
+        // TODO (#11): make sure there are no name clashes
         Self {
             values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
         }
@@ -152,7 +152,7 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
     ComputeArray {
         store_in: Tag,
         function: WrappedArrayFunction<Id, P>,
-        #[allow(unused)] // TODO: to be used when we implement short-circuiting
+        #[allow(unused)] // TODO (#9): to be used when we implement short-circuiting
         returns_nothing: bool,
         group: PartyGroup<Id>,
         args: Vec<Node<Id, P>>,
@@ -254,9 +254,9 @@ pub fn verify<Id: PartyId, P: Protocol<Id>>(
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let groups = args.iter().filter_map(|arg| arg.as_ref().group()).collect::<Vec<_>>();
-    // TODO: support compute-array with only scalar args (the group needs to be given explicitly)
+    // TODO (#29): support compute-array with only scalar args (the group needs to be given explicitly)
     let group = groups[0];
-    // TODO: check that all groups are the same
+    // TODO (#5): check that all groups are the same
 
     let inner = TypedNode::ComputeArray {
         store_in: Tag {

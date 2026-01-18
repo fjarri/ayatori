@@ -32,7 +32,7 @@ fn verify_commitment<Id>(_id: &Id, _shared_data: &DistributedRNGShared<Id>, args
     let r = args.get::<u64>("r");
     let c = args.get::<u64>("c");
     assert_eq!(b + r, c);
-    // TODO: errors
+    // TODO (#5): errors
 }
 
 fn gen_output<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: Args) -> u64 {
