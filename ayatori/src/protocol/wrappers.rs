@@ -143,3 +143,53 @@ impl<Id: PartyId, P: Protocol<Id>> WrappedFunctionPrivate<Id, P> {
         (self.function)(rng, shared_data, args)
     }
 }
+
+pub(crate) struct WrappedArrayFunctionPrivate<Id: PartyId, P: Protocol<Id>> {
+    #[allow(clippy::type_complexity)]
+    function: Arc<dyn Fn(&mut dyn CryptoRng, &Id, &P::SharedData, Args<Id>) -> Value>,
+    name: String,
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Debug for WrappedArrayFunctionPrivate<Id, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "WrappedFunctionPrivate {{ function: {} }}", self.name)
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Display for WrappedArrayFunctionPrivate<Id, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Clone for WrappedArrayFunctionPrivate<Id, P> {
+    fn clone(&self) -> Self {
+        Self {
+            function: self.function.clone(),
+            name: self.name.clone(),
+        }
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> WrappedArrayFunctionPrivate<Id, P> {
+    pub fn new<Ret, F>(function: F) -> Self
+    where
+        F: 'static + Fn(&mut dyn CryptoRng, &Id, &P::SharedData, Args<Id>) -> Ret,
+        Ret: Any + Send + Sync,
+    {
+        let name = core::any::type_name_of_val(&function).to_string();
+        let wrapped = Arc::new(
+            move |rng: &mut dyn CryptoRng, id: &Id, shared_data: &P::SharedData, args: Args<Id>| {
+                Value::new(function(rng, id, shared_data, args))
+            },
+        );
+        Self {
+            function: wrapped,
+            name,
+        }
+    }
+
+    pub fn call(&self, rng: &mut impl CryptoRng, id: &Id, shared_data: &P::SharedData, args: Args<Id>) -> Value {
+        (self.function)(rng, id, shared_data, args)
+    }
+}

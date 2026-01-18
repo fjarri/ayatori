@@ -9,7 +9,7 @@ use core::fmt::{self, Debug, Display};
 use itertools::Itertools;
 use rand_core::CryptoRng;
 
-use super::wrappers::{WrappedArrayFunction, WrappedFunction, WrappedFunctionPrivate};
+use super::wrappers::{WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate};
 
 pub trait PartyId: 'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Sync {}
 
@@ -33,6 +33,12 @@ impl<Id: PartyId> PartyGroup<Id> {
 
     pub fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool {
         &self.ids == ids
+    }
+
+    pub fn except(&self, id: &Id) -> Self {
+        let mut ids = self.ids.clone();
+        ids.remove(id);
+        Self { ids }
     }
 }
 
@@ -143,6 +149,10 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
     pub(crate) fn as_ref(&self) -> &TypedNode<Id, P> {
         &self.0
     }
+
+    pub fn group(&self) -> Option<&PartyGroup<Id>> {
+        self.as_ref().group()
+    }
 }
 
 #[derive(Debug)]
@@ -168,7 +178,23 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
         args: Vec<Node<Id, P>>,
         dependencies: Vec<Node<Id, P>>,
     },
+    ComputeArrayPrivate {
+        store_in: Tag,
+        function: WrappedArrayFunctionPrivate<Id, P>,
+        #[allow(unused)] // TODO (#9): to be used when we implement short-circuiting
+        returns_nothing: bool,
+        group: PartyGroup<Id>,
+        args: Vec<Node<Id, P>>,
+        dependencies: Vec<Node<Id, P>>,
+    },
     Send {
+        store_in: Tag,
+        send_as: Tag,
+        data: Node<Id, P>,
+        group: PartyGroup<Id>,
+        dependencies: Vec<Node<Id, P>>,
+    },
+    DirectMessage {
         store_in: Tag,
         send_as: Tag,
         data: Node<Id, P>,
@@ -192,7 +218,9 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
             Self::ComputeScalar { dependencies, .. } => dependencies,
             Self::ComputeScalarPrivate { dependencies, .. } => dependencies,
             Self::ComputeArray { dependencies, .. } => dependencies,
+            Self::ComputeArrayPrivate { dependencies, .. } => dependencies,
             Self::Send { dependencies, .. } => dependencies,
+            Self::DirectMessage { dependencies, .. } => dependencies,
             Self::Collect { dependencies, .. } => dependencies,
             Self::Receive { .. } => &[],
         }
@@ -203,7 +231,9 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
             Self::ComputeScalar { store_in, .. } => store_in,
             Self::ComputeScalarPrivate { store_in, .. } => store_in,
             Self::ComputeArray { store_in, .. } => store_in,
+            Self::ComputeArrayPrivate { store_in, .. } => store_in,
             Self::Send { store_in, .. } => store_in,
+            Self::DirectMessage { store_in, .. } => store_in,
             Self::Collect { store_in, .. } => store_in,
             Self::Receive { store_in, .. } => store_in,
         }
@@ -214,7 +244,9 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
             Self::ComputeScalar { .. } => None,
             Self::ComputeScalarPrivate { .. } => None,
             Self::ComputeArray { group, .. } => Some(group),
+            Self::ComputeArrayPrivate { group, .. } => Some(group),
             Self::Send { group, .. } => Some(group),
+            Self::DirectMessage { group, .. } => Some(group),
             Self::Collect { .. } => None,
             Self::Receive { group, .. } => Some(group),
         }
@@ -251,6 +283,48 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
             kind: TagKind::Internal,
         },
         function: WrappedFunctionPrivate::new(function),
+        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
+        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+    };
+    Node::new(inner)
+}
+
+pub fn compute_array<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
+    name: &str,
+    function: impl 'static + Fn(&Id, &P::SharedData, Args<Id>) -> Ret,
+    group: &PartyGroup<Id>,
+    args: &[&Node<Id, P>],
+    dependencies: &[&Node<Id, P>],
+) -> Node<Id, P> {
+    let inner = TypedNode::ComputeArray {
+        store_in: Tag {
+            name: name.into(),
+            kind: TagKind::Internal,
+        },
+        returns_nothing: false,
+        function: WrappedArrayFunction::new(function),
+        group: group.clone(),
+        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
+        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+    };
+    Node::new(inner)
+}
+
+pub fn compute_array_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
+    name: &str,
+    function: impl 'static + Fn(&mut dyn CryptoRng, &Id, &P::SharedData, Args<Id>) -> Ret,
+    group: &PartyGroup<Id>,
+    args: &[&Node<Id, P>],
+    dependencies: &[&Node<Id, P>],
+) -> Node<Id, P> {
+    let inner = TypedNode::ComputeArrayPrivate {
+        store_in: Tag {
+            name: name.into(),
+            kind: TagKind::Internal,
+        },
+        returns_nothing: false,
+        function: WrappedArrayFunctionPrivate::new(function),
+        group: group.clone(),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
@@ -305,6 +379,37 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
         send_as,
         data: scalar.get_strong_ref(),
         group: group.clone(),
+        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+    });
+    Node::new(TypedNode::Collect {
+        store_in: sent_all,
+        values: send_node.get_strong_ref(),
+        dependencies: Vec::new(),
+    })
+}
+
+pub fn send<Id: PartyId, P: Protocol<Id>>(
+    name: &str,
+    array: &Node<Id, P>,
+    dependencies: &[&Node<Id, P>],
+) -> Node<Id, P> {
+    let sent = Tag {
+        name: name.into(),
+        kind: TagKind::Sent,
+    };
+    let send_as = Tag {
+        name: name.into(),
+        kind: TagKind::External,
+    };
+    let sent_all = Tag {
+        name: name.into(),
+        kind: TagKind::AllSent,
+    };
+    let send_node = Node::new(TypedNode::DirectMessage {
+        store_in: sent,
+        send_as,
+        data: array.get_strong_ref(),
+        group: array.group().unwrap().clone(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     });
     Node::new(TypedNode::Collect {
