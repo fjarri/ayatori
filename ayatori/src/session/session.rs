@@ -64,7 +64,7 @@ enum ComputeFunction<Id: PartyId, P: Protocol<Id>> {
 pub struct ComputeTask<Id: PartyId, P: Protocol<Id>> {
     store_in: Tag,
     function: ComputeFunction<Id, P>,
-    args: Args,
+    args: Args<Id>,
     shared_data: Arc<P::SharedData>,
 }
 
@@ -93,7 +93,7 @@ impl<Id: PartyId, P: Protocol<Id>> ComputeTask<Id, P> {
 pub struct ComputeWithRngTask<Id: PartyId, P: Protocol<Id>> {
     store_in: Tag,
     function: WrappedFunctionPrivate<Id, P>,
-    args: Args,
+    args: Args<Id>,
     shared_data: Arc<P::SharedData>,
 }
 
@@ -221,7 +221,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                         .iter()
                         .map(|arg: &Tag| (arg.clone(), self.storage.get(arg)))
                         .collect::<BTreeMap<_, _>>();
-                    let args = Args::new(arg_values);
+                    let args = Args::new(self.id(), arg_values);
                     return Some(Task::Compute(ComputeTask {
                         store_in,
                         function: ComputeFunction::Scalar { function },
@@ -238,7 +238,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                         .iter()
                         .map(|arg: &Tag| (arg.clone(), self.storage.get(arg)))
                         .collect::<BTreeMap<_, _>>();
-                    let args = Args::new(arg_values);
+                    let args = Args::new(self.id(), arg_values);
                     return Some(Task::ComputeWithRng(ComputeWithRngTask {
                         store_in,
                         function,
@@ -259,7 +259,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                             Arg::ArrayElem(tag) => (tag.clone(), self.storage.get_elem(tag, &index)),
                         })
                         .collect::<BTreeMap<_, _>>();
-                    let args = Args::new(arg_values);
+                    let args = Args::new(self.id(), arg_values);
                     return Some(Task::Compute(ComputeTask {
                         store_in,
                         function: ComputeFunction::Array { function, id: index },

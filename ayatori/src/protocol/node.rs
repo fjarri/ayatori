@@ -87,16 +87,22 @@ impl Value {
     }
 }
 
-pub struct Args {
+pub struct Args<Id> {
+    my_id: Id,
     values: BTreeMap<String, Value>,
 }
 
-impl Args {
-    pub(crate) fn new(values: BTreeMap<Tag, Value>) -> Self {
+impl<Id: PartyId> Args<Id> {
+    pub(crate) fn new(my_id: &Id, values: BTreeMap<Tag, Value>) -> Self {
         // TODO (#11): make sure there are no name clashes
         Self {
+            my_id: my_id.clone(),
             values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
         }
+    }
+
+    pub fn my_id(&self) -> &Id {
+        &self.my_id
     }
 
     pub fn get<T: Clone + Any + Send + Sync>(&self, name: &str) -> T {
@@ -107,7 +113,7 @@ impl Args {
         self.values.get(&tag.name).unwrap().downcast::<T>()
     }
 
-    pub fn get_map<Id: PartyId, T: Clone + Any + Send + Sync>(&self, name: &str) -> BTreeMap<Id, T> {
+    pub fn get_map<T: Clone + Any + Send + Sync>(&self, name: &str) -> BTreeMap<Id, T> {
         let value_map = self.get::<BTreeMap<Id, Value>>(name);
         value_map
             .into_iter()
@@ -217,7 +223,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
 
 pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     name: &str,
-    function: impl 'static + Fn(&P::SharedData, Args) -> Ret,
+    function: impl 'static + Fn(&P::SharedData, Args<Id>) -> Ret,
     args: &[&Node<Id, P>],
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
@@ -235,7 +241,7 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
 
 pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRng, &P::SharedData, Args) -> Ret,
+    function: impl 'static + Fn(&mut dyn CryptoRng, &P::SharedData, Args<Id>) -> Ret,
     args: &[&Node<Id, P>],
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
@@ -253,7 +259,7 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
 
 pub fn verify<Id: PartyId, P: Protocol<Id>>(
     name: &str,
-    function: impl 'static + Fn(&Id, &P::SharedData, Args),
+    function: impl 'static + Fn(&Id, &P::SharedData, Args<Id>),
     args: &[&Node<Id, P>],
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
