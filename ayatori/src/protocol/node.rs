@@ -187,7 +187,7 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
         args: Vec<Node<Id, P>>,
         dependencies: Vec<Node<Id, P>>,
     },
-    Send {
+    Broadcast {
         store_in: Tag,
         send_as: Tag,
         data: Node<Id, P>,
@@ -219,7 +219,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
             Self::ComputeScalarPrivate { dependencies, .. } => dependencies,
             Self::ComputeArray { dependencies, .. } => dependencies,
             Self::ComputeArrayPrivate { dependencies, .. } => dependencies,
-            Self::Send { dependencies, .. } => dependencies,
+            Self::Broadcast { dependencies, .. } => dependencies,
             Self::DirectMessage { dependencies, .. } => dependencies,
             Self::Collect { dependencies, .. } => dependencies,
             Self::Receive { .. } => &[],
@@ -232,7 +232,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
             Self::ComputeScalarPrivate { store_in, .. } => store_in,
             Self::ComputeArray { store_in, .. } => store_in,
             Self::ComputeArrayPrivate { store_in, .. } => store_in,
-            Self::Send { store_in, .. } => store_in,
+            Self::Broadcast { store_in, .. } => store_in,
             Self::DirectMessage { store_in, .. } => store_in,
             Self::Collect { store_in, .. } => store_in,
             Self::Receive { store_in, .. } => store_in,
@@ -245,7 +245,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
             Self::ComputeScalarPrivate { .. } => None,
             Self::ComputeArray { group, .. } => Some(group),
             Self::ComputeArrayPrivate { group, .. } => Some(group),
-            Self::Send { group, .. } => Some(group),
+            Self::Broadcast { group, .. } => Some(group),
             Self::DirectMessage { group, .. } => Some(group),
             Self::Collect { .. } => None,
             Self::Receive { group, .. } => Some(group),
@@ -374,7 +374,7 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
         name: name.into(),
         kind: TagKind::AllSent,
     };
-    let send_node = Node::new(TypedNode::Send {
+    let send_node = Node::new(TypedNode::Broadcast {
         store_in: sent,
         send_as,
         data: scalar.get_strong_ref(),

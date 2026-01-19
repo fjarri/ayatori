@@ -233,7 +233,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         ));
                     }
                 }
-                TypedNode::Send {
+                TypedNode::Broadcast {
                     store_in,
                     send_as,
                     data,
