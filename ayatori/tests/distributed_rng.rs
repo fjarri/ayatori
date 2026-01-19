@@ -13,21 +13,21 @@ struct DistributedRNGShared<Id> {
     parties: Vec<Id>,
 }
 
-fn sample_value<Id>(rng: &mut dyn CryptoRng, _shared_data: &DistributedRNGShared<Id>, _args: Args) -> u64 {
+fn sample_value<Id: PartyId>(rng: &mut dyn CryptoRng, _shared_data: &DistributedRNGShared<Id>, _args: Args<Id>) -> u64 {
     rng.next_u32() as u64
 }
 
-fn sample_nonce<Id>(rng: &mut dyn CryptoRng, _shared_data: &DistributedRNGShared<Id>, _args: Args) -> u64 {
+fn sample_nonce<Id: PartyId>(rng: &mut dyn CryptoRng, _shared_data: &DistributedRNGShared<Id>, _args: Args<Id>) -> u64 {
     rng.next_u32() as u64
 }
 
-fn commit_to_value<Id>(_shared_data: &DistributedRNGShared<Id>, args: Args) -> u64 {
+fn commit_to_value<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: Args<Id>) -> u64 {
     let b = args.get::<u64>("my_b");
     let r = args.get::<u64>("my_r");
     b + r
 }
 
-fn verify_commitment<Id>(_id: &Id, _shared_data: &DistributedRNGShared<Id>, args: Args) {
+fn verify_commitment<Id: PartyId>(_id: &Id, _shared_data: &DistributedRNGShared<Id>, args: Args<Id>) {
     let b = args.get::<u64>("b");
     let r = args.get::<u64>("r");
     let c = args.get::<u64>("c");
@@ -35,8 +35,8 @@ fn verify_commitment<Id>(_id: &Id, _shared_data: &DistributedRNGShared<Id>, args
     // TODO (#5): errors
 }
 
-fn gen_output<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: Args) -> u64 {
-    let bs = args.get_map::<Id, u64>("all_b");
+fn gen_output<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: Args<Id>) -> u64 {
+    let bs = args.get_map::<u64>("all_b");
     bs.values().sum()
 }
 

@@ -7,7 +7,8 @@ use itertools::Itertools;
 
 use super::conditions::{Condition, LeafCondition};
 use crate::protocol::{
-    Node, PartyId, Protocol, Tag, TypedNode, WrappedArrayFunction, WrappedFunction, WrappedFunctionPrivate,
+    Node, PartyId, Protocol, Tag, TypedNode, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
+    WrappedFunctionPrivate,
 };
 
 #[derive(Debug)]
@@ -34,11 +35,18 @@ pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
         function: WrappedArrayFunction<Id, P>,
         args: Vec<Arg>,
     },
+    ComputeArrayElementPrivate {
+        store_in: Tag,
+        index: Id,
+        function: WrappedArrayFunctionPrivate<Id, P>,
+        args: Vec<Arg>,
+    },
     Send {
         store_in: Tag,
         send_as: Tag,
         to_send: Tag,
         destination: Id,
+        index: Option<Id>,
     },
     Collect {
         store_in: Tag,
@@ -182,7 +190,50 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         ));
                     }
                 }
-                TypedNode::Send {
+                TypedNode::ComputeArrayPrivate {
+                    store_in,
+                    function,
+                    args,
+                    group,
+                    ..
+                } => {
+                    for id in group.ids() {
+                        let mut specific_condition = Condition::empty();
+                        for arg in args.iter() {
+                            if arg.as_ref().group().is_some() {
+                                specific_condition.and(LeafCondition::ArrayElement {
+                                    tag: arg.as_ref().store_in().clone(),
+                                    id: id.clone(),
+                                });
+                            } else {
+                                specific_condition.and(LeafCondition::Value {
+                                    tag: arg.as_ref().store_in().clone(),
+                                });
+                            }
+                        }
+
+                        actions.push((
+                            Action::ComputeArrayElementPrivate {
+                                store_in: store_in.clone(),
+                                function: function.clone(),
+                                index: id.clone(),
+                                args: args
+                                    .iter()
+                                    .map(|arg: &Node<Id, P>| {
+                                        let tag = arg.as_ref().store_in().clone();
+                                        if arg.as_ref().group().is_some() {
+                                            Arg::ArrayElem(tag)
+                                        } else {
+                                            Arg::Scalar(tag)
+                                        }
+                                    })
+                                    .collect(),
+                            },
+                            specific_condition,
+                        ));
+                    }
+                }
+                TypedNode::Broadcast {
                     store_in,
                     send_as,
                     data,
@@ -201,8 +252,35 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                                 send_as: send_as.clone(),
                                 to_send: data.as_ref().store_in().clone(),
                                 destination: id.clone(),
+                                index: None,
                             },
                             specific_condition.clone(),
+                        ));
+                    }
+                }
+                TypedNode::DirectMessage {
+                    store_in,
+                    send_as,
+                    data,
+                    group,
+                    ..
+                } => {
+                    nodes_to_process.push(data.get_strong_ref());
+                    for id in group.ids() {
+                        let mut specific_condition = Condition::empty();
+                        specific_condition.and(LeafCondition::ArrayElement {
+                            tag: data.as_ref().store_in().clone(),
+                            id: id.clone(),
+                        });
+                        actions.push((
+                            Action::Send {
+                                store_in: store_in.clone(),
+                                send_as: send_as.clone(),
+                                to_send: data.as_ref().store_in().clone(),
+                                destination: id.clone(),
+                                index: Some(id.clone()),
+                            },
+                            specific_condition,
                         ));
                     }
                 }
@@ -314,16 +392,39 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
                     .join(", ");
                 write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")
             }
+            Self::ComputeArrayElementPrivate {
+                store_in,
+                index,
+                function,
+                args,
+            } => {
+                let joined_args = args
+                    .iter()
+                    .map(|arg| match arg {
+                        Arg::Scalar(tag) => tag.to_string(),
+                        Arg::ArrayElem(tag) => format!("{tag}[{index:?}]"),
+                    })
+                    .join(", ");
+                write!(f, "{store_in}[{index:?}] = {function}(RNG, {index:?}, {joined_args})")
+            }
             Self::Send {
                 store_in,
                 send_as,
                 to_send,
                 destination,
+                index,
             } => {
-                write!(
-                    f,
-                    "{store_in}[{destination:?}] = send({to_send}) as {send_as} to {destination:?}"
-                )
+                if let Some(index) = index {
+                    write!(
+                        f,
+                        "{store_in}[{destination:?}] = send({to_send}[{index:?}]) as {send_as} to {destination:?}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "{store_in}[{destination:?}] = send({to_send}) as {send_as} to {destination:?}"
+                    )
+                }
             }
             Self::Collect { store_in, values } => {
                 write!(f, "{store_in} = collect({values})")
