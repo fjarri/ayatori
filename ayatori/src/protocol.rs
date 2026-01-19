@@ -2,7 +2,10 @@ mod function;
 mod node;
 mod party;
 
-pub(crate) use function::{WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate};
+pub(crate) use function::{
+    ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
+    WrappedFunctionPrivate,
+};
 pub(crate) use node::{Tag, TypedNode, Value};
 
 pub use node::{

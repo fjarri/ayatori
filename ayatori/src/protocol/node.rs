@@ -7,7 +7,10 @@ use core::fmt::{self, Debug, Display};
 
 use rand_core::CryptoRng;
 
-use super::function::{WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate};
+use super::function::{
+    ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
+    WrappedFunctionPrivate,
+};
 use super::party::{PartyGroup, PartyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -120,28 +123,13 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
 pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
     ComputeScalar {
         store_in: Tag,
-        function: WrappedFunction<Id, P>,
-        args: Vec<Node<Id, P>>,
-        dependencies: Vec<Node<Id, P>>,
-    },
-    ComputeScalarPrivate {
-        store_in: Tag,
-        function: WrappedFunctionPrivate<Id, P>,
+        function: ScalarFunction<Id, P>,
         args: Vec<Node<Id, P>>,
         dependencies: Vec<Node<Id, P>>,
     },
     ComputeArray {
         store_in: Tag,
-        function: WrappedArrayFunction<Id, P>,
-        #[allow(unused)] // TODO (#9): to be used when we implement short-circuiting
-        returns_nothing: bool,
-        group: PartyGroup<Id>,
-        args: Vec<Node<Id, P>>,
-        dependencies: Vec<Node<Id, P>>,
-    },
-    ComputeArrayPrivate {
-        store_in: Tag,
-        function: WrappedArrayFunctionPrivate<Id, P>,
+        function: ArrayFunction<Id, P>,
         #[allow(unused)] // TODO (#9): to be used when we implement short-circuiting
         returns_nothing: bool,
         group: PartyGroup<Id>,
@@ -177,9 +165,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     pub fn dependencies(&self) -> &[Node<Id, P>] {
         match self {
             Self::ComputeScalar { dependencies, .. } => dependencies,
-            Self::ComputeScalarPrivate { dependencies, .. } => dependencies,
             Self::ComputeArray { dependencies, .. } => dependencies,
-            Self::ComputeArrayPrivate { dependencies, .. } => dependencies,
             Self::Broadcast { dependencies, .. } => dependencies,
             Self::DirectMessage { dependencies, .. } => dependencies,
             Self::Collect { dependencies, .. } => dependencies,
@@ -190,9 +176,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     pub fn store_in(&self) -> &Tag {
         match self {
             Self::ComputeScalar { store_in, .. } => store_in,
-            Self::ComputeScalarPrivate { store_in, .. } => store_in,
             Self::ComputeArray { store_in, .. } => store_in,
-            Self::ComputeArrayPrivate { store_in, .. } => store_in,
             Self::Broadcast { store_in, .. } => store_in,
             Self::DirectMessage { store_in, .. } => store_in,
             Self::Collect { store_in, .. } => store_in,
@@ -203,9 +187,7 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     pub fn group(&self) -> Option<&PartyGroup<Id>> {
         match self {
             Self::ComputeScalar { .. } => None,
-            Self::ComputeScalarPrivate { .. } => None,
             Self::ComputeArray { group, .. } => Some(group),
-            Self::ComputeArrayPrivate { group, .. } => Some(group),
             Self::Broadcast { group, .. } => Some(group),
             Self::DirectMessage { group, .. } => Some(group),
             Self::Collect { .. } => None,
@@ -225,7 +207,7 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
             name: name.into(),
             kind: TagKind::Internal,
         },
-        function: WrappedFunction::new(function),
+        function: ScalarFunction::Public(WrappedFunction::new(function)),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
@@ -238,12 +220,12 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
     args: &[&Node<Id, P>],
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
-    let inner = TypedNode::ComputeScalarPrivate {
+    let inner = TypedNode::ComputeScalar {
         store_in: Tag {
             name: name.into(),
             kind: TagKind::Internal,
         },
-        function: WrappedFunctionPrivate::new(function),
+        function: ScalarFunction::Private(WrappedFunctionPrivate::new(function)),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
     };
@@ -263,7 +245,7 @@ pub fn compute_array<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
             kind: TagKind::Internal,
         },
         returns_nothing: false,
-        function: WrappedArrayFunction::new(function),
+        function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
         group: group.clone(),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
@@ -278,13 +260,13 @@ pub fn compute_array_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Syn
     args: &[&Node<Id, P>],
     dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
-    let inner = TypedNode::ComputeArrayPrivate {
+    let inner = TypedNode::ComputeArray {
         store_in: Tag {
             name: name.into(),
             kind: TagKind::Internal,
         },
         returns_nothing: false,
-        function: WrappedArrayFunctionPrivate::new(function),
+        function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new(function)),
         group: group.clone(),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
         dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
@@ -308,7 +290,7 @@ pub fn verify<Id: PartyId, P: Protocol<Id>>(
             name: name.into(),
             kind: TagKind::Internal,
         },
-        function: WrappedArrayFunction::new(function),
+        function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
         returns_nothing: true,
         group: group.clone(),
         args: args.iter().map(|arg| arg.get_strong_ref()).collect(),

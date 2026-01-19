@@ -194,3 +194,35 @@ impl<Id: PartyId, P: Protocol<Id>> WrappedArrayFunctionPrivate<Id, P> {
         (self.function)(rng, id, shared_data, args)
     }
 }
+
+#[derive(Debug)]
+#[derive_where::derive_where(Clone)]
+pub(crate) enum ScalarFunction<Id: PartyId, P: Protocol<Id>> {
+    Public(WrappedFunction<Id, P>),
+    Private(WrappedFunctionPrivate<Id, P>),
+}
+
+#[derive(Debug)]
+#[derive_where::derive_where(Clone)]
+pub(crate) enum ArrayFunction<Id: PartyId, P: Protocol<Id>> {
+    Public(WrappedArrayFunction<Id, P>),
+    Private(WrappedArrayFunctionPrivate<Id, P>),
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Display for ScalarFunction<Id, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Private(function) => write!(f, "{function}[PRIVATE]"),
+            Self::Public(function) => write!(f, "{function}"),
+        }
+    }
+}
+
+impl<Id: PartyId, P: Protocol<Id>> Display for ArrayFunction<Id, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Private(function) => write!(f, "{function}[PRIVATE]"),
+            Self::Public(function) => write!(f, "{function}"),
+        }
+    }
+}

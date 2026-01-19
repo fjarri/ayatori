@@ -5,8 +5,8 @@ use rand_core::CryptoRng;
 
 use super::ruleset::{Action, Arg, Ruleset};
 use crate::protocol::{
-    Args, PartyId, Protocol, Tag, Value, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
-    WrappedFunctionPrivate,
+    Args, ArrayFunction, PartyId, Protocol, ScalarFunction, Tag, Value, WrappedArrayFunction,
+    WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate,
 };
 
 struct Storage<Id> {
@@ -254,29 +254,24 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                         .map(|arg: &Tag| (arg.clone(), self.storage.get(arg)))
                         .collect::<BTreeMap<_, _>>();
                     let args = Args::new(self.id(), arg_values);
-                    return Some(Task::Compute(ComputeTask {
-                        store_in,
-                        function: ComputeFunction::Scalar { function },
-                        args,
-                        shared_data: self.shared_data.clone(),
-                    }));
-                }
-                Action::ComputeScalarPrivate {
-                    store_in,
-                    function,
-                    args,
-                } => {
-                    let arg_values = args
-                        .iter()
-                        .map(|arg: &Tag| (arg.clone(), self.storage.get(arg)))
-                        .collect::<BTreeMap<_, _>>();
-                    let args = Args::new(self.id(), arg_values);
-                    return Some(Task::ComputeWithRng(ComputeWithRngTask {
-                        store_in,
-                        function: ComputeWithRngFunction::Scalar { function },
-                        args,
-                        shared_data: self.shared_data.clone(),
-                    }));
+                    match function {
+                        ScalarFunction::Public(function) => {
+                            return Some(Task::Compute(ComputeTask {
+                                store_in,
+                                function: ComputeFunction::Scalar { function },
+                                args,
+                                shared_data: self.shared_data.clone(),
+                            }));
+                        }
+                        ScalarFunction::Private(function) => {
+                            return Some(Task::ComputeWithRng(ComputeWithRngTask {
+                                store_in,
+                                function: ComputeWithRngFunction::Scalar { function },
+                                args,
+                                shared_data: self.shared_data.clone(),
+                            }));
+                        }
+                    }
                 }
                 Action::ComputeArrayElement {
                     store_in,
@@ -292,33 +287,24 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                         })
                         .collect::<BTreeMap<_, _>>();
                     let args = Args::new(self.id(), arg_values);
-                    return Some(Task::Compute(ComputeTask {
-                        store_in,
-                        function: ComputeFunction::Array { function, id: index },
-                        args,
-                        shared_data: self.shared_data.clone(),
-                    }));
-                }
-                Action::ComputeArrayElementPrivate {
-                    store_in,
-                    function,
-                    index,
-                    args,
-                } => {
-                    let arg_values = args
-                        .iter()
-                        .map(|arg: &Arg| match arg {
-                            Arg::Scalar(tag) => (tag.clone(), self.storage.get(tag)),
-                            Arg::ArrayElem(tag) => (tag.clone(), self.storage.get_elem(tag, &index)),
-                        })
-                        .collect::<BTreeMap<_, _>>();
-                    let args = Args::new(self.id(), arg_values);
-                    return Some(Task::ComputeWithRng(ComputeWithRngTask {
-                        store_in,
-                        function: ComputeWithRngFunction::Array { function, id: index },
-                        args,
-                        shared_data: self.shared_data.clone(),
-                    }));
+                    match function {
+                        ArrayFunction::Public(function) => {
+                            return Some(Task::Compute(ComputeTask {
+                                store_in,
+                                function: ComputeFunction::Array { function, id: index },
+                                args,
+                                shared_data: self.shared_data.clone(),
+                            }));
+                        }
+                        ArrayFunction::Private(function) => {
+                            return Some(Task::ComputeWithRng(ComputeWithRngTask {
+                                store_in,
+                                function: ComputeWithRngFunction::Array { function, id: index },
+                                args,
+                                shared_data: self.shared_data.clone(),
+                            }));
+                        }
+                    }
                 }
                 Action::Collect { store_in, values } => {
                     self.storage.set(&store_in, self.storage.get_dict(&values));

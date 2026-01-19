@@ -6,10 +6,7 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use super::conditions::{Condition, LeafCondition};
-use crate::protocol::{
-    Node, PartyId, Protocol, Tag, TypedNode, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
-    WrappedFunctionPrivate,
-};
+use crate::protocol::{ArrayFunction, Node, PartyId, Protocol, ScalarFunction, Tag, TypedNode};
 
 #[derive(Debug)]
 pub(crate) enum Arg {
@@ -21,24 +18,13 @@ pub(crate) enum Arg {
 pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
     ComputeScalar {
         store_in: Tag,
-        function: WrappedFunction<Id, P>,
-        args: Vec<Tag>,
-    },
-    ComputeScalarPrivate {
-        store_in: Tag,
-        function: WrappedFunctionPrivate<Id, P>,
+        function: ScalarFunction<Id, P>,
         args: Vec<Tag>,
     },
     ComputeArrayElement {
         store_in: Tag,
         index: Id,
-        function: WrappedArrayFunction<Id, P>,
-        args: Vec<Arg>,
-    },
-    ComputeArrayElementPrivate {
-        store_in: Tag,
-        index: Id,
-        function: WrappedArrayFunctionPrivate<Id, P>,
+        function: ArrayFunction<Id, P>,
         args: Vec<Arg>,
     },
     Send {
@@ -122,31 +108,6 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         specific_condition,
                     ));
                 }
-                TypedNode::ComputeScalarPrivate {
-                    store_in,
-                    function,
-                    args,
-                    ..
-                } => {
-                    let mut specific_condition = Condition::empty();
-                    for arg in args.iter() {
-                        specific_condition.and(LeafCondition::Value {
-                            tag: arg.as_ref().store_in().clone(),
-                        });
-                        nodes_to_process.push(arg.get_strong_ref());
-                    }
-                    actions.push((
-                        Action::ComputeScalarPrivate {
-                            store_in: store_in.clone(),
-                            function: function.clone(),
-                            args: args
-                                .iter()
-                                .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
-                                .collect(),
-                        },
-                        specific_condition,
-                    ));
-                }
                 TypedNode::ComputeArray {
                     store_in,
                     function,
@@ -171,49 +132,6 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
 
                         actions.push((
                             Action::ComputeArrayElement {
-                                store_in: store_in.clone(),
-                                function: function.clone(),
-                                index: id.clone(),
-                                args: args
-                                    .iter()
-                                    .map(|arg: &Node<Id, P>| {
-                                        let tag = arg.as_ref().store_in().clone();
-                                        if arg.as_ref().group().is_some() {
-                                            Arg::ArrayElem(tag)
-                                        } else {
-                                            Arg::Scalar(tag)
-                                        }
-                                    })
-                                    .collect(),
-                            },
-                            specific_condition,
-                        ));
-                    }
-                }
-                TypedNode::ComputeArrayPrivate {
-                    store_in,
-                    function,
-                    args,
-                    group,
-                    ..
-                } => {
-                    for id in group.ids() {
-                        let mut specific_condition = Condition::empty();
-                        for arg in args.iter() {
-                            if arg.as_ref().group().is_some() {
-                                specific_condition.and(LeafCondition::ArrayElement {
-                                    tag: arg.as_ref().store_in().clone(),
-                                    id: id.clone(),
-                                });
-                            } else {
-                                specific_condition.and(LeafCondition::Value {
-                                    tag: arg.as_ref().store_in().clone(),
-                                });
-                            }
-                        }
-
-                        actions.push((
-                            Action::ComputeArrayElementPrivate {
                                 store_in: store_in.clone(),
                                 function: function.clone(),
                                 index: id.clone(),
@@ -369,14 +287,6 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
                 let joined_args = args.iter().map(|arg| arg.to_string()).join(", ");
                 write!(f, "{store_in} = {function}({joined_args})")
             }
-            Self::ComputeScalarPrivate {
-                store_in,
-                function,
-                args,
-            } => {
-                let joined_args = args.iter().map(|arg| arg.to_string()).join(", ");
-                write!(f, "{store_in} = {function}(RNG, {joined_args})")
-            }
             Self::ComputeArrayElement {
                 store_in,
                 index,
@@ -391,21 +301,6 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
                     })
                     .join(", ");
                 write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")
-            }
-            Self::ComputeArrayElementPrivate {
-                store_in,
-                index,
-                function,
-                args,
-            } => {
-                let joined_args = args
-                    .iter()
-                    .map(|arg| match arg {
-                        Arg::Scalar(tag) => tag.to_string(),
-                        Arg::ArrayElem(tag) => format!("{tag}[{index:?}]"),
-                    })
-                    .join(", ");
-                write!(f, "{store_in}[{index:?}] = {function}(RNG, {index:?}, {joined_args})")
             }
             Self::Send {
                 store_in,
