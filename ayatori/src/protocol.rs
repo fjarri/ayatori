@@ -1,10 +1,12 @@
+mod function;
 mod node;
-mod wrappers;
+mod party;
 
+pub(crate) use function::{WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate};
 pub(crate) use node::{Tag, TypedNode, Value};
-pub(crate) use wrappers::{WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate};
 
 pub use node::{
-    Args, Node, PartyGroup, PartyId, Protocol, broadcast, collect, compute_array, compute_array_private,
-    compute_scalar, compute_scalar_private, receive, send, verify,
+    Args, Node, Protocol, broadcast, collect, compute_array, compute_array_private, compute_scalar,
+    compute_scalar_private, receive, send, verify,
 };
+pub use party::{PartyGroup, PartyId};

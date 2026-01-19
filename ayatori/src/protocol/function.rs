@@ -5,7 +5,8 @@ use core::fmt::{self, Debug, Display};
 
 use rand_core::CryptoRng;
 
-use super::node::{Args, PartyId, Protocol, Value};
+use super::node::{Args, Protocol, Value};
+use super::party::PartyId;
 
 pub(crate) struct WrappedFunction<Id: PartyId, P: Protocol<Id>> {
     #[allow(clippy::type_complexity)]
