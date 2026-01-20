@@ -36,7 +36,7 @@ fn verify_commitment<Id: PartyId>(_id: &Id, _shared_data: &DistributedRNGShared<
 }
 
 fn gen_output<Id: PartyId>(_shared_data: &DistributedRNGShared<Id>, args: Args<Id>) -> u64 {
-    let bs = args.get_map::<u64>("all_b");
+    let bs = args.get_map::<u64>("b");
     bs.values().sum()
 }
 
@@ -50,14 +50,14 @@ impl<Id: PartyId> Protocol<Id> for DistributedRNG {
         let my_c = compute_scalar("my_c", commit_to_value, &[&my_b, &my_r]);
         let c_broadcasted = broadcast("c", &my_c, &all_parties);
         let c = receive("c", &all_parties);
-        let all_c = collect("all_c", &c, &[&c_broadcasted]);
+        let all_c = collect(&c).with_dependencies(&[&c_broadcasted]);
         let b_broadcasted = broadcast("b", &my_b, &all_parties).with_dependencies(&[&all_c]);
         let r_broadcasted = broadcast("r", &my_r, &all_parties).with_dependencies(&[&all_c]);
         let b = receive("b", &all_parties);
         let r = receive("r", &all_parties);
         let hash_correct = verify("hash_correct", verify_commitment, &[&c, &b, &r]);
-        let all_hash_correct = collect("all_hash_correct", &hash_correct, &[&b_broadcasted, &r_broadcasted]);
-        let all_b = collect("all_b", &b, &[&b_broadcasted]);
+        let all_hash_correct = collect(&hash_correct).with_dependencies(&[&b_broadcasted, &r_broadcasted]);
+        let all_b = collect(&b).with_dependencies(&[&b_broadcasted]);
         compute_scalar("output", gen_output, &[&all_b]).with_dependencies(&[&all_hash_correct])
     }
 }

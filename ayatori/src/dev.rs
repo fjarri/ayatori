@@ -1,9 +1,10 @@
 use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use rand_core::CryptoRng;
 
-use crate::protocol::{PartyId, Protocol, Tag, Value};
+use crate::protocol::{PartyId, Protocol, Value};
 use crate::session::{Session, Task};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -17,7 +18,7 @@ impl TestPartyId {
 
 struct Message<Id> {
     source: Id,
-    tag: Tag,
+    name: String,
     data: Value,
 }
 
@@ -40,7 +41,7 @@ pub fn run_sessions_sync<Id: PartyId, P: Protocol<Id>>(
 
         for (id, session) in sessions.iter_mut() {
             for message in messages.get_mut(id).unwrap().drain(..) {
-                session.add_message(&message.source, &message.tag, message.data);
+                session.add_message(&message.source, &message.name, message.data);
             }
 
             match session.make_task() {
@@ -54,11 +55,11 @@ pub fn run_sessions_sync<Id: PartyId, P: Protocol<Id>>(
                 }
                 Some(Task::Send(task)) => {
                     let result = task.result();
-                    let tag = task.tag().clone();
+                    let name = task.send_as().to_string();
                     let destination = task.destination().clone();
                     messages.get_mut(&destination).unwrap().push(Message {
                         data: task.data(),
-                        tag,
+                        name,
                         source: id.clone(),
                     });
                     session.add_result(result);

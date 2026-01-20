@@ -1,5 +1,5 @@
 use alloc::collections::BTreeSet;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::{format, vec, vec::Vec};
 use core::fmt::{self, Display};
 
@@ -29,7 +29,7 @@ pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
     },
     Send {
         store_in: Tag,
-        send_as: Tag,
+        send_as: String,
         to_send: Tag,
         destination: Id,
         index: Option<Id>,

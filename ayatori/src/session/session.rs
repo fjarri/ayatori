@@ -1,4 +1,5 @@
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::sync::Arc;
 use core::any::Any;
 use rand_core::CryptoRng;
@@ -74,18 +75,18 @@ impl<Id: PartyId, P: Protocol<Id>> ComputeTask<Id, P> {
         match self.function {
             ComputeFunction::Scalar { function } => {
                 let result = function.call(&self.shared_data, self.args);
-                TaskResult::Compute {
+                TaskResult(TaskResultEnum::Compute {
                     store_in: self.store_in.clone(),
                     result,
-                }
+                })
             }
             ComputeFunction::Array { function, id } => {
                 let result = function.call(&id, &self.shared_data, self.args);
-                TaskResult::ComputeArray {
+                TaskResult(TaskResultEnum::ComputeArray {
                     store_in: self.store_in.clone(),
                     id,
                     result,
-                }
+                })
             }
         }
     }
@@ -113,18 +114,18 @@ impl<Id: PartyId, P: Protocol<Id>> ComputeWithRngTask<Id, P> {
         match self.function {
             ComputeWithRngFunction::Scalar { function } => {
                 let result = function.call(rng, &self.shared_data, self.args);
-                TaskResult::Compute {
+                TaskResult(TaskResultEnum::Compute {
                     store_in: self.store_in.clone(),
                     result,
-                }
+                })
             }
             ComputeWithRngFunction::Array { function, id } => {
                 let result = function.call(rng, &id, &self.shared_data, self.args);
-                TaskResult::ComputeArray {
+                TaskResult(TaskResultEnum::ComputeArray {
                     store_in: self.store_in.clone(),
                     id,
                     result,
-                }
+                })
             }
         }
     }
@@ -132,7 +133,7 @@ impl<Id: PartyId, P: Protocol<Id>> ComputeWithRngTask<Id, P> {
 
 pub struct SendTask<Id> {
     store_in: Tag,
-    send_as: Tag,
+    send_as: String,
     destination: Id,
     data: Value,
 }
@@ -144,14 +145,14 @@ impl<Id: PartyId> SendTask<Id> {
     pub fn data(self) -> Value {
         self.data
     }
-    pub fn tag(&self) -> &Tag {
+    pub fn send_as(&self) -> &str {
         &self.send_as
     }
     pub fn result(&self) -> TaskResult<Id> {
-        TaskResult::Send {
+        TaskResult(TaskResultEnum::Send {
             store_in: self.store_in.clone(),
             destination: self.destination.clone(),
-        }
+        })
     }
 }
 
@@ -173,7 +174,10 @@ pub enum Task<Id: PartyId, P: Protocol<Id>> {
 }
 
 #[derive(Debug)]
-pub enum TaskResult<Id> {
+pub struct TaskResult<Id>(TaskResultEnum<Id>);
+
+#[derive(Debug)]
+enum TaskResultEnum<Id> {
     Send { store_in: Tag, destination: Id },
     Compute { store_in: Tag, result: Value },
     ComputeArray { store_in: Tag, id: Id, result: Value },
@@ -316,22 +320,23 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
         None
     }
 
-    pub fn add_message(&mut self, source: &Id, tag: &Tag, message: Value) {
-        self.storage.set_elem(tag, source, message);
-        self.ruleset.update_with_array_element_ready(tag, source);
+    pub fn add_message(&mut self, source: &Id, name: &str, message: Value) {
+        let tag = Tag::received(name);
+        self.storage.set_elem(&tag, source, message);
+        self.ruleset.update_with_array_element_ready(&tag, source);
     }
 
     pub fn add_result(&mut self, result: TaskResult<Id>) {
-        match result {
-            TaskResult::Send { store_in, destination } => {
+        match result.0 {
+            TaskResultEnum::Send { store_in, destination } => {
                 self.storage.set_elem(&store_in, &destination, Value::new(true));
                 self.ruleset.update_with_array_element_ready(&store_in, &destination);
             }
-            TaskResult::Compute { store_in, result } => {
+            TaskResultEnum::Compute { store_in, result } => {
                 self.storage.set(&store_in, result);
                 self.ruleset.update_with_value_ready(&store_in);
             }
-            TaskResult::ComputeArray { store_in, id, result } => {
+            TaskResultEnum::ComputeArray { store_in, id, result } => {
                 self.storage.set_elem(&store_in, &id, result);
                 self.ruleset.update_with_array_element_ready(&store_in, &id);
             }

@@ -39,18 +39,18 @@ fn make_array_elem_sans_me<Id: PartyId>(
 }
 
 fn gen_output<Id: PartyId>(_shared_data: &TestProtocolShared<Id>, args: Args<Id>) {
-    let xs = args.get_map::<Message1<Id>>("all_x");
+    let xs = args.get_map::<Message1<Id>>("x");
     for (id, x) in xs {
         assert_eq!(id, x.0);
     }
 
-    let ys = args.get_map::<Message2<Id>>("all_y");
+    let ys = args.get_map::<Message2<Id>>("y");
     for (id, y) in ys {
         assert_eq!(id, y.0);
         assert_eq!(args.my_id(), &y.1);
     }
 
-    let zs = args.get_map::<Message3<Id>>("all_z");
+    let zs = args.get_map::<Message3<Id>>("z");
     assert!(!zs.contains_key(args.my_id()));
     for (id, z) in zs {
         assert_eq!(id, z.0);
@@ -67,17 +67,17 @@ impl<Id: PartyId> Protocol<Id> for TestProtocol {
         let my_x = compute_scalar("my_x", make_scalar_value, &[]);
         let x_broadcasted = broadcast("x", &my_x, &all_parties);
         let x = receive("x", &all_parties);
-        let all_x = collect("all_x", &x, &[&x_broadcasted]);
+        let all_x = collect(&x).with_dependencies(&[&x_broadcasted]);
 
         let my_y = compute_array("my_y", make_array_elem, &all_parties, &[]);
         let y_sent = send("y", &my_y);
         let y = receive("y", my_y.group().unwrap());
-        let all_y = collect("all_y", &y, &[&y_sent]);
+        let all_y = collect(&y).with_dependencies(&[&y_sent]);
 
         let my_z = compute_array("my_z", make_array_elem_sans_me, &all_parties.except(my_id), &[]);
         let z_sent = send("z", &my_z);
         let z = receive("z", my_z.group().unwrap());
-        let all_z = collect("all_z", &z, &[&z_sent]);
+        let all_z = collect(&z).with_dependencies(&[&z_sent]);
 
         compute_scalar("output", gen_output, &[&all_x, &all_y, &all_z])
     }

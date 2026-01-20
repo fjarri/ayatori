@@ -16,26 +16,75 @@ use super::party::{PartyGroup, PartyId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TagKind {
-    Internal,
-    External,
+    Computed,
     Sent,
-    AllSent,
+    Received,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Tag {
+pub(crate) struct Tag {
     name: String,
     kind: TagKind,
+    collected: bool,
+}
+
+impl Tag {
+    pub fn with_name(&self, name: &str) -> Self {
+        Self {
+            name: name.into(),
+            kind: self.kind,
+            collected: self.collected,
+        }
+    }
+
+    pub fn computed(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            kind: TagKind::Computed,
+            collected: false,
+        }
+    }
+
+    pub fn sent(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            kind: TagKind::Sent,
+            collected: false,
+        }
+    }
+
+    pub fn received(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            kind: TagKind::Received,
+            collected: false,
+        }
+    }
+
+    pub fn collected(&self) -> Self {
+        assert!(!self.collected);
+        Self {
+            name: self.name.clone(),
+            kind: self.kind,
+            collected: true,
+        }
+    }
 }
 
 impl Display for Tag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self.kind {
-            TagKind::Internal => write!(f, "{}", self.name),
-            TagKind::External => write!(f, "external({})", self.name),
-            TagKind::Sent => write!(f, "sent({})", self.name),
-            TagKind::AllSent => write!(f, "all-sent({})", self.name),
+        if self.collected {
+            write!(f, "collected(")?;
         }
+        match self.kind {
+            TagKind::Computed => write!(f, "{}", self.name),
+            TagKind::Sent => write!(f, "sent({})", self.name),
+            TagKind::Received => write!(f, "received({})", self.name),
+        }?;
+        if self.collected {
+            write!(f, ")")?;
+        }
+        Ok(())
     }
 }
 
@@ -127,6 +176,19 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
         typed_node.add_dependencies(dependencies);
         Self::new(typed_node)
     }
+
+    pub fn store_in(self, name: &str) -> Self {
+        let mut typed_node = Arc::unwrap_or_clone(self.0);
+        match &mut typed_node {
+            TypedNode::ComputeScalar { store_in, .. } => *store_in = store_in.with_name(name),
+            TypedNode::ComputeArray { store_in, .. } => *store_in = store_in.with_name(name),
+            TypedNode::Broadcast { store_in, .. } => *store_in = store_in.with_name(name),
+            TypedNode::DirectMessage { store_in, .. } => *store_in = store_in.with_name(name),
+            TypedNode::Collect { store_in, .. } => *store_in = store_in.with_name(name),
+            TypedNode::Receive { store_in, .. } => *store_in = store_in.with_name(name),
+        }
+        Self::new(typed_node)
+    }
 }
 
 #[derive(Debug)]
@@ -148,14 +210,14 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
     },
     Broadcast {
         store_in: Tag,
-        send_as: Tag,
+        send_as: String,
         data: Node<Id, P>,
         group: PartyGroup<Id>,
         dependencies: Vec<Node<Id, P>>,
     },
     DirectMessage {
         store_in: Tag,
-        send_as: Tag,
+        send_as: String,
         data: Node<Id, P>,
         group: PartyGroup<Id>,
         dependencies: Vec<Node<Id, P>>,
@@ -233,10 +295,7 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     args: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeScalar {
-        store_in: Tag {
-            name: name.into(),
-            kind: TagKind::Internal,
-        },
+        store_in: Tag::computed(name),
         function: ScalarFunction::Public(WrappedFunction::new(function)),
         args: nodes_to_owned(args).collect(),
         dependencies: Vec::new(),
@@ -250,10 +309,7 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
     args: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeScalar {
-        store_in: Tag {
-            name: name.into(),
-            kind: TagKind::Internal,
-        },
+        store_in: Tag::computed(name),
         function: ScalarFunction::Private(WrappedFunctionPrivate::new(function)),
         args: nodes_to_owned(args).collect(),
         dependencies: Vec::new(),
@@ -268,10 +324,7 @@ pub fn compute_array<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     args: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeArray {
-        store_in: Tag {
-            name: name.into(),
-            kind: TagKind::Internal,
-        },
+        store_in: Tag::computed(name),
         returns_nothing: false,
         function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
         group: group.clone(),
@@ -288,10 +341,7 @@ pub fn compute_array_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Syn
     args: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeArray {
-        store_in: Tag {
-            name: name.into(),
-            kind: TagKind::Internal,
-        },
+        store_in: Tag::computed(name),
         returns_nothing: false,
         function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new(function)),
         group: group.clone(),
@@ -312,10 +362,7 @@ pub fn verify<Id: PartyId, P: Protocol<Id>>(
     // TODO (#5): check that all groups are the same
 
     let inner = TypedNode::ComputeArray {
-        store_in: Tag {
-            name: name.into(),
-            kind: TagKind::Internal,
-        },
+        store_in: Tag::computed(name),
         function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
         returns_nothing: true,
         group: group.clone(),
@@ -330,81 +377,39 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
     scalar: &Node<Id, P>,
     group: &PartyGroup<Id>,
 ) -> Node<Id, P> {
-    let sent = Tag {
-        name: name.into(),
-        kind: TagKind::Sent,
-    };
-    let send_as = Tag {
-        name: name.into(),
-        kind: TagKind::External,
-    };
-    let sent_all = Tag {
-        name: name.into(),
-        kind: TagKind::AllSent,
-    };
     let send_node = Node::new(TypedNode::Broadcast {
-        store_in: sent,
-        send_as,
+        store_in: Tag::sent(name),
+        send_as: name.into(),
         data: scalar.get_strong_ref(),
         group: group.clone(),
         dependencies: Vec::new(),
     });
-    Node::new(TypedNode::Collect {
-        store_in: sent_all,
-        values: send_node.get_strong_ref(),
-        dependencies: Vec::new(),
-    })
+    collect(&send_node)
 }
 
 pub fn send<Id: PartyId, P: Protocol<Id>>(name: &str, array: &Node<Id, P>) -> Node<Id, P> {
-    let sent = Tag {
-        name: name.into(),
-        kind: TagKind::Sent,
-    };
-    let send_as = Tag {
-        name: name.into(),
-        kind: TagKind::External,
-    };
-    let sent_all = Tag {
-        name: name.into(),
-        kind: TagKind::AllSent,
-    };
     let send_node = Node::new(TypedNode::DirectMessage {
-        store_in: sent,
-        send_as,
+        store_in: Tag::sent(name),
+        send_as: name.into(),
         data: array.get_strong_ref(),
         group: array.group().unwrap().clone(),
         dependencies: Vec::new(),
     });
-    Node::new(TypedNode::Collect {
-        store_in: sent_all,
-        values: send_node.get_strong_ref(),
-        dependencies: Vec::new(),
-    })
+    collect(&send_node)
 }
 
 pub fn receive<Id: PartyId, P: Protocol<Id>>(name: &str, group: &PartyGroup<Id>) -> Node<Id, P> {
     Node::new(TypedNode::Receive {
-        store_in: Tag {
-            name: name.into(),
-            kind: TagKind::External,
-        },
+        store_in: Tag::received(name),
         group: group.clone(),
     })
 }
 
-pub fn collect<Id: PartyId, P: Protocol<Id>>(
-    name: &str,
-    values: &Node<Id, P>,
-    dependencies: &[&Node<Id, P>],
-) -> Node<Id, P> {
+pub fn collect<Id: PartyId, P: Protocol<Id>>(values: &Node<Id, P>) -> Node<Id, P> {
     Node::new(TypedNode::Collect {
-        store_in: Tag {
-            name: name.into(),
-            kind: TagKind::Internal,
-        },
+        store_in: Tag::collected(values.as_ref().store_in()),
         values: values.get_strong_ref(),
-        dependencies: nodes_to_owned(dependencies).collect(),
+        dependencies: Vec::new(),
     })
 }
 
