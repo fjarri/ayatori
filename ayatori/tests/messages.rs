@@ -64,22 +64,22 @@ impl<Id: PartyId> Protocol<Id> for TestProtocol {
     fn build(my_id: &Id, shared_data: &Self::SharedData) -> Node<Id, Self> {
         let all_parties = PartyGroup::new(&shared_data.parties);
 
-        let my_x = compute_scalar("my_x", make_scalar_value, &[], &[]);
-        let x_broadcasted = broadcast("x", &my_x, &all_parties, &[]);
+        let my_x = compute_scalar("my_x", make_scalar_value, &[]);
+        let x_broadcasted = broadcast("x", &my_x, &all_parties);
         let x = receive("x", &all_parties);
         let all_x = collect("all_x", &x, &[&x_broadcasted]);
 
-        let my_y = compute_array("my_y", make_array_elem, &all_parties, &[], &[]);
-        let y_sent = send("y", &my_y, &[]);
+        let my_y = compute_array("my_y", make_array_elem, &all_parties, &[]);
+        let y_sent = send("y", &my_y);
         let y = receive("y", my_y.group().unwrap());
         let all_y = collect("all_y", &y, &[&y_sent]);
 
-        let my_z = compute_array("my_z", make_array_elem_sans_me, &all_parties.except(my_id), &[], &[]);
-        let z_sent = send("z", &my_z, &[]);
+        let my_z = compute_array("my_z", make_array_elem_sans_me, &all_parties.except(my_id), &[]);
+        let z_sent = send("z", &my_z);
         let z = receive("z", my_z.group().unwrap());
         let all_z = collect("all_z", &z, &[&z_sent]);
 
-        compute_scalar("output", gen_output, &[&all_x, &all_y, &all_z], &[])
+        compute_scalar("output", gen_output, &[&all_x, &all_y, &all_z])
     }
 }
 

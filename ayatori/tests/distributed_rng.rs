@@ -45,20 +45,20 @@ impl<Id: PartyId> Protocol<Id> for DistributedRNG {
     type Output = u64;
     fn build(_my_id: &Id, shared_data: &Self::SharedData) -> Node<Id, Self> {
         let all_parties = PartyGroup::new(&shared_data.parties);
-        let my_b = compute_scalar_private("my_b", sample_value, &[], &[]);
-        let my_r = compute_scalar_private("my_r", sample_nonce, &[], &[]);
-        let my_c = compute_scalar("my_c", commit_to_value, &[&my_b, &my_r], &[]);
-        let c_broadcasted = broadcast("c", &my_c, &all_parties, &[]);
+        let my_b = compute_scalar_private("my_b", sample_value, &[]);
+        let my_r = compute_scalar_private("my_r", sample_nonce, &[]);
+        let my_c = compute_scalar("my_c", commit_to_value, &[&my_b, &my_r]);
+        let c_broadcasted = broadcast("c", &my_c, &all_parties);
         let c = receive("c", &all_parties);
         let all_c = collect("all_c", &c, &[&c_broadcasted]);
-        let b_broadcasted = broadcast("b", &my_b, &all_parties, &[&all_c]);
-        let r_broadcasted = broadcast("r", &my_r, &all_parties, &[&all_c]);
+        let b_broadcasted = broadcast("b", &my_b, &all_parties).with_dependencies(&[&all_c]);
+        let r_broadcasted = broadcast("r", &my_r, &all_parties).with_dependencies(&[&all_c]);
         let b = receive("b", &all_parties);
         let r = receive("r", &all_parties);
-        let hash_correct = verify("hash_correct", verify_commitment, &[&c, &b, &r], &[]);
+        let hash_correct = verify("hash_correct", verify_commitment, &[&c, &b, &r]);
         let all_hash_correct = collect("all_hash_correct", &hash_correct, &[&b_broadcasted, &r_broadcasted]);
         let all_b = collect("all_b", &b, &[&b_broadcasted]);
-        compute_scalar("output", gen_output, &[&all_b], &[&all_hash_correct])
+        compute_scalar("output", gen_output, &[&all_b]).with_dependencies(&[&all_hash_correct])
     }
 }
 

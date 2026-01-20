@@ -74,9 +74,16 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
             let mut shared_condition = Condition::empty();
 
             for dependency in node.as_ref().dependencies() {
-                shared_condition.and(LeafCondition::Value {
-                    tag: dependency.as_ref().store_in().clone(),
-                });
+                match dependency.group() {
+                    Some(_group) => {
+                        panic!("Not supported");
+                    }
+                    None => {
+                        shared_condition.and(LeafCondition::Value {
+                            tag: dependency.as_ref().store_in().clone(),
+                        });
+                    }
+                }
                 nodes_to_process.push(dependency.get_strong_ref());
             }
 

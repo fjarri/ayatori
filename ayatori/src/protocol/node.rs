@@ -121,6 +121,12 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
     pub fn group(&self) -> Option<&PartyGroup<Id>> {
         self.as_ref().group()
     }
+
+    pub fn with_dependencies(self, dependencies: &[&Self]) -> Self {
+        let mut typed_node = Arc::unwrap_or_clone(self.0);
+        typed_node.add_dependencies(dependencies);
+        Self::new(typed_node)
+    }
 }
 
 #[derive(Debug)]
@@ -165,6 +171,16 @@ pub(crate) enum TypedNode<Id: PartyId, P: Protocol<Id>> {
     },
 }
 
+impl<Id: PartyId, P: Protocol<Id>> Clone for TypedNode<Id, P> {
+    fn clone(&self) -> Self {
+        todo!()
+    }
+}
+
+fn nodes_to_owned<Id: PartyId, P: Protocol<Id>>(nodes: &[&Node<Id, P>]) -> impl Iterator<Item = Node<Id, P>> {
+    nodes.iter().map(|node| node.get_strong_ref())
+}
+
 impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
     pub fn dependencies(&self) -> &[Node<Id, P>] {
         match self {
@@ -174,6 +190,17 @@ impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
             Self::DirectMessage { dependencies, .. } => dependencies,
             Self::Collect { dependencies, .. } => dependencies,
             Self::Receive { .. } => &[],
+        }
+    }
+
+    pub fn add_dependencies(&mut self, new_dependencies: &[&Node<Id, P>]) {
+        match self {
+            Self::ComputeScalar { dependencies, .. } => dependencies.extend(nodes_to_owned(new_dependencies)),
+            Self::ComputeArray { dependencies, .. } => dependencies.extend(nodes_to_owned(new_dependencies)),
+            Self::Broadcast { dependencies, .. } => dependencies.extend(nodes_to_owned(new_dependencies)),
+            Self::DirectMessage { dependencies, .. } => dependencies.extend(nodes_to_owned(new_dependencies)),
+            Self::Collect { dependencies, .. } => dependencies.extend(nodes_to_owned(new_dependencies)),
+            Self::Receive { .. } => panic!(),
         }
     }
 
@@ -204,7 +231,6 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     name: &str,
     function: impl 'static + Fn(&P::SharedData, Args<Id>) -> Ret,
     args: &[&Node<Id, P>],
-    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeScalar {
         store_in: Tag {
@@ -212,8 +238,8 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
             kind: TagKind::Internal,
         },
         function: ScalarFunction::Public(WrappedFunction::new(function)),
-        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
-        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+        args: nodes_to_owned(args).collect(),
+        dependencies: Vec::new(),
     };
     Node::new(inner)
 }
@@ -222,7 +248,6 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRng, &P::SharedData, Args<Id>) -> Ret,
     args: &[&Node<Id, P>],
-    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeScalar {
         store_in: Tag {
@@ -230,8 +255,8 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
             kind: TagKind::Internal,
         },
         function: ScalarFunction::Private(WrappedFunctionPrivate::new(function)),
-        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
-        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+        args: nodes_to_owned(args).collect(),
+        dependencies: Vec::new(),
     };
     Node::new(inner)
 }
@@ -241,7 +266,6 @@ pub fn compute_array<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     function: impl 'static + Fn(&Id, &P::SharedData, Args<Id>) -> Ret,
     group: &PartyGroup<Id>,
     args: &[&Node<Id, P>],
-    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeArray {
         store_in: Tag {
@@ -251,8 +275,8 @@ pub fn compute_array<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
         returns_nothing: false,
         function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
         group: group.clone(),
-        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
-        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+        args: nodes_to_owned(args).collect(),
+        dependencies: Vec::new(),
     };
     Node::new(inner)
 }
@@ -262,7 +286,6 @@ pub fn compute_array_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Syn
     function: impl 'static + Fn(&mut dyn CryptoRng, &Id, &P::SharedData, Args<Id>) -> Ret,
     group: &PartyGroup<Id>,
     args: &[&Node<Id, P>],
-    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let inner = TypedNode::ComputeArray {
         store_in: Tag {
@@ -272,8 +295,8 @@ pub fn compute_array_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Syn
         returns_nothing: false,
         function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new(function)),
         group: group.clone(),
-        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
-        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+        args: nodes_to_owned(args).collect(),
+        dependencies: Vec::new(),
     };
     Node::new(inner)
 }
@@ -282,7 +305,6 @@ pub fn verify<Id: PartyId, P: Protocol<Id>>(
     name: &str,
     function: impl 'static + Fn(&Id, &P::SharedData, Args<Id>),
     args: &[&Node<Id, P>],
-    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let groups = args.iter().filter_map(|arg| arg.as_ref().group()).collect::<Vec<_>>();
     // TODO (#29): support compute-array with only scalar args (the group needs to be given explicitly)
@@ -297,8 +319,8 @@ pub fn verify<Id: PartyId, P: Protocol<Id>>(
         function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
         returns_nothing: true,
         group: group.clone(),
-        args: args.iter().map(|arg| arg.get_strong_ref()).collect(),
-        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+        args: nodes_to_owned(args).collect(),
+        dependencies: Vec::new(),
     };
     Node::new(inner)
 }
@@ -307,7 +329,6 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
     name: &str,
     scalar: &Node<Id, P>,
     group: &PartyGroup<Id>,
-    dependencies: &[&Node<Id, P>],
 ) -> Node<Id, P> {
     let sent = Tag {
         name: name.into(),
@@ -326,7 +347,7 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
         send_as,
         data: scalar.get_strong_ref(),
         group: group.clone(),
-        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+        dependencies: Vec::new(),
     });
     Node::new(TypedNode::Collect {
         store_in: sent_all,
@@ -335,11 +356,7 @@ pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
     })
 }
 
-pub fn send<Id: PartyId, P: Protocol<Id>>(
-    name: &str,
-    array: &Node<Id, P>,
-    dependencies: &[&Node<Id, P>],
-) -> Node<Id, P> {
+pub fn send<Id: PartyId, P: Protocol<Id>>(name: &str, array: &Node<Id, P>) -> Node<Id, P> {
     let sent = Tag {
         name: name.into(),
         kind: TagKind::Sent,
@@ -357,7 +374,7 @@ pub fn send<Id: PartyId, P: Protocol<Id>>(
         send_as,
         data: array.get_strong_ref(),
         group: array.group().unwrap().clone(),
-        dependencies: dependencies.iter().map(|dep| dep.get_strong_ref()).collect(),
+        dependencies: Vec::new(),
     });
     Node::new(TypedNode::Collect {
         store_in: sent_all,
@@ -387,10 +404,7 @@ pub fn collect<Id: PartyId, P: Protocol<Id>>(
             kind: TagKind::Internal,
         },
         values: values.get_strong_ref(),
-        dependencies: dependencies
-            .iter()
-            .map(|dependency| dependency.get_strong_ref())
-            .collect(),
+        dependencies: nodes_to_owned(dependencies).collect(),
     })
 }
 
