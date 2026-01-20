@@ -1,0 +1,8 @@
+[book]
+title = "Ayatori"
+authors = ["Bogdan Opanchuk"]
+language = "en"
+
+[preprocessor.rustdoc-links]
+after = ["links"]
+manifest-dir = "../ayatori"

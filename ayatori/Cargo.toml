@@ -17,3 +17,7 @@ rand_core = { version = "0.9", default-features = false }
 
 [dev-dependencies]
 rand_chacha = { version = "0.9", default-features = false }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
