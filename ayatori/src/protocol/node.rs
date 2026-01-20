@@ -1,10 +1,11 @@
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt::{self, Debug, Display};
 
+use itertools::Itertools;
 use rand_core::CryptoRng;
 
 use super::function::{
@@ -64,7 +65,14 @@ pub struct Args<Id> {
 
 impl<Id: PartyId> Args<Id> {
     pub(crate) fn new(my_id: &Id, values: BTreeMap<Tag, Value>) -> Self {
-        // TODO (#11): make sure there are no name clashes
+        // TODO (#11): for now checking if there are name clashes.
+        // If we encounter a situation where we do need arguments with the same name but different TagKind,
+        // we need to rethink this.
+        let duplicates = values.keys().duplicates_by(|tag| tag.name.clone()).collect::<Vec<_>>();
+        if !duplicates.is_empty() {
+            panic!("Duplicate names of arguments: {duplicates:?}");
+        }
+
         Self {
             my_id: my_id.clone(),
             values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
@@ -76,11 +84,7 @@ impl<Id: PartyId> Args<Id> {
     }
 
     pub fn get<T: Clone + Any + Send + Sync>(&self, name: &str) -> T {
-        let tag = Tag {
-            name: name.to_string(),
-            kind: TagKind::Internal,
-        };
-        self.values.get(&tag.name).unwrap().downcast::<T>()
+        self.values.get(name).unwrap().downcast::<T>()
     }
 
     pub fn get_map<T: Clone + Any + Send + Sync>(&self, name: &str) -> BTreeMap<Id, T> {
