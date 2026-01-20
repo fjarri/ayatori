@@ -6,7 +6,7 @@ pub(crate) use function::{
     ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
     WrappedFunctionPrivate,
 };
-pub(crate) use node::{Tag, TypedNode, Value};
+pub(crate) use node::{NodeKind, Tag, Value};
 
 pub use node::{
     Args, Node, Protocol, broadcast, collect, compute_array, compute_array_private, compute_scalar,

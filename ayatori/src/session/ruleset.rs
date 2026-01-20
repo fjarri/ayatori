@@ -6,7 +6,7 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use super::conditions::{Condition, LeafCondition};
-use crate::protocol::{ArrayFunction, Node, PartyId, Protocol, ScalarFunction, Tag, TypedNode};
+use crate::protocol::{ArrayFunction, Node, NodeKind, PartyId, Protocol, ScalarFunction, Tag};
 
 #[derive(Debug)]
 pub(crate) enum Arg {
@@ -67,14 +67,14 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
             }
             nodes_seen.insert(node.id());
 
-            if let TypedNode::Receive { .. } = node.as_ref() {
+            if let NodeKind::Receive { .. } = node.as_ref().kind() {
                 continue;
             }
 
             let mut shared_condition = Condition::empty();
 
             for dependency in node.as_ref().dependencies() {
-                match dependency.group() {
+                match dependency.as_ref().group() {
                     Some(_group) => {
                         panic!("Not supported");
                     }
@@ -89,13 +89,8 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
 
             let mut actions = Vec::new();
 
-            match node.as_ref() {
-                TypedNode::ComputeScalar {
-                    store_in,
-                    function,
-                    args,
-                    ..
-                } => {
+            match node.as_ref().kind() {
+                NodeKind::ComputeScalar { function, args } => {
                     let mut specific_condition = Condition::empty();
                     for arg in args.iter() {
                         specific_condition.and(LeafCondition::Value {
@@ -105,7 +100,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     }
                     actions.push((
                         Action::ComputeScalar {
-                            store_in: store_in.clone(),
+                            store_in: node.as_ref().store_in().clone(),
                             function: function.clone(),
                             args: args
                                 .iter()
@@ -115,12 +110,12 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         specific_condition,
                     ));
                 }
-                TypedNode::ComputeArray {
-                    store_in,
+                NodeKind::ComputeArray {
                     function,
                     args,
                     group,
-                    ..
+                    #[allow(unused)]
+                    returns_nothing,
                 } => {
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
@@ -139,7 +134,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
 
                         actions.push((
                             Action::ComputeArrayElement {
-                                store_in: store_in.clone(),
+                                store_in: node.as_ref().store_in().clone(),
                                 function: function.clone(),
                                 index: id.clone(),
                                 args: args
@@ -158,13 +153,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         ));
                     }
                 }
-                TypedNode::Broadcast {
-                    store_in,
-                    send_as,
-                    data,
-                    group,
-                    ..
-                } => {
+                NodeKind::Broadcast { send_as, data, group } => {
                     let mut specific_condition = Condition::empty();
                     specific_condition.and(LeafCondition::Value {
                         tag: data.as_ref().store_in().clone(),
@@ -173,7 +162,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                     for id in group.ids() {
                         actions.push((
                             Action::Send {
-                                store_in: store_in.clone(),
+                                store_in: node.as_ref().store_in().clone(),
                                 send_as: send_as.clone(),
                                 to_send: data.as_ref().store_in().clone(),
                                 destination: id.clone(),
@@ -183,13 +172,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         ));
                     }
                 }
-                TypedNode::DirectMessage {
-                    store_in,
-                    send_as,
-                    data,
-                    group,
-                    ..
-                } => {
+                NodeKind::DirectMessage { send_as, data, group } => {
                     nodes_to_process.push(data.get_strong_ref());
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
@@ -199,7 +182,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         });
                         actions.push((
                             Action::Send {
-                                store_in: store_in.clone(),
+                                store_in: node.as_ref().store_in().clone(),
                                 send_as: send_as.clone(),
                                 to_send: data.as_ref().store_in().clone(),
                                 destination: id.clone(),
@@ -209,7 +192,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         ));
                     }
                 }
-                TypedNode::Collect { store_in, values, .. } => {
+                NodeKind::Collect { values } => {
                     let mut specific_condition = Condition::empty();
                     let group = values.as_ref().group().unwrap();
                     specific_condition.and(LeafCondition::Array {
@@ -221,13 +204,13 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
 
                     actions.push((
                         Action::Collect {
-                            store_in: store_in.clone(),
+                            store_in: node.as_ref().store_in().clone(),
                             values: values.as_ref().store_in().clone(),
                         },
                         specific_condition,
                     ))
                 }
-                TypedNode::Receive { .. } => {}
+                NodeKind::Receive { .. } => {}
             }
 
             for (action, specific_condition) in actions {
