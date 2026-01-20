@@ -329,7 +329,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
     pub fn add_result(&mut self, result: TaskResult<Id>) {
         match result.0 {
             TaskResultEnum::Send { store_in, destination } => {
-                self.storage.set_elem(&store_in, &destination, Value::new(true));
+                self.storage.set_elem(&store_in, &destination, Value::new(()));
                 self.ruleset.update_with_array_element_ready(&store_in, &destination);
             }
             TaskResultEnum::Compute { store_in, result } => {
