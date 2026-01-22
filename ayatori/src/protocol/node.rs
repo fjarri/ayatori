@@ -1,24 +1,33 @@
-use alloc::collections::BTreeMap;
-use alloc::string::String;
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use core::any::Any;
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt::{self, Debug, Display};
 
 use itertools::Itertools;
-use rand_core::CryptoRng;
+use serde::{Deserialize, Serialize};
+use signature::rand_core::CryptoRngCore;
 
-use super::function::{
-    ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
-    WrappedFunctionPrivate,
+use super::{
+    function::{
+        ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
+        WrappedFunctionPrivate,
+    },
+    party::PartyGroup,
+    traits::{Protocol, SessionParameters},
+    value::{Erasable, SerdeAdapter, SerializedValue, Value},
 };
-use super::party::{PartyGroup, PartyId};
+use crate::session::SignedValue;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TagKind {
     Computed,
     Sent,
     Received,
+    Deserialized,
+    Signed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -61,6 +70,22 @@ impl Tag {
         }
     }
 
+    pub fn deserialized(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            kind: TagKind::Deserialized,
+            collected: false,
+        }
+    }
+
+    pub fn signed(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            kind: TagKind::Signed,
+            collected: false,
+        }
+    }
+
     pub fn collected(&self) -> Self {
         assert!(!self.collected);
         Self {
@@ -80,6 +105,8 @@ impl Display for Tag {
             TagKind::Computed => write!(f, "{}", self.name),
             TagKind::Sent => write!(f, "sent({})", self.name),
             TagKind::Received => write!(f, "received({})", self.name),
+            TagKind::Deserialized => write!(f, "deserialized({})", self.name),
+            TagKind::Signed => write!(f, "signed({})", self.name),
         }?;
         if self.collected {
             write!(f, ")")?;
@@ -88,32 +115,14 @@ impl Display for Tag {
     }
 }
 
-#[derive(Clone)]
-pub struct Value(Arc<dyn Any + Send + Sync>);
-
-impl Debug for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "<value>")
-    }
-}
-
-impl Value {
-    pub(crate) fn new<T: Any + Send + Sync>(value: T) -> Self {
-        Self(Arc::new(value))
-    }
-
-    pub(crate) fn downcast<T: Clone + Any + Send + Sync>(&self) -> T {
-        Arc::unwrap_or_clone(self.0.clone().downcast::<T>().unwrap())
-    }
-}
-
-pub struct Args<Id> {
-    my_id: Id,
+pub struct Args<SP: SessionParameters> {
+    signer: Arc<SP::Signer>,
+    my_id: SP::Verifier,
     values: BTreeMap<String, Value>,
 }
 
-impl<Id: PartyId> Args<Id> {
-    pub(crate) fn new(my_id: &Id, values: BTreeMap<Tag, Value>) -> Self {
+impl<SP: SessionParameters> Args<SP> {
+    pub(crate) fn new(signer: &Arc<SP::Signer>, my_id: &SP::Verifier, values: BTreeMap<Tag, Value>) -> Self {
         // TODO (#11): for now checking if there are name clashes.
         // If we encounter a situation where we do need arguments with the same name but different TagKind,
         // we need to rethink this.
@@ -124,32 +133,41 @@ impl<Id: PartyId> Args<Id> {
 
         Self {
             my_id: my_id.clone(),
+            signer: signer.clone(),
             values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
         }
     }
 
-    pub fn my_id(&self) -> &Id {
+    pub(crate) fn signer(&self) -> &SP::Signer {
+        self.signer.as_ref()
+    }
+
+    pub fn my_id(&self) -> &SP::Verifier {
         &self.my_id
     }
 
-    pub fn get<T: Clone + Any + Send + Sync>(&self, name: &str) -> T {
-        self.values.get(name).unwrap().downcast::<T>()
+    pub(crate) fn get_value(&self, name: &str) -> &Value {
+        self.values.get(name).unwrap()
     }
 
-    pub fn get_map<T: Clone + Any + Send + Sync>(&self, name: &str) -> BTreeMap<Id, T> {
-        let value_map = self.get::<BTreeMap<Id, Value>>(name);
+    pub fn get<T: Erasable>(&self, name: &str) -> &T {
+        self.values.get(name).unwrap().downcast_ref::<T>()
+    }
+
+    pub fn get_map<T: Clone + Erasable>(&self, name: &str) -> BTreeMap<&SP::Verifier, &T> {
+        let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name);
         value_map
-            .into_iter()
-            .map(|(id, value)| (id, value.downcast::<T>()))
+            .iter()
+            .map(|(id, value)| (id, value.downcast_ref::<T>()))
             .collect()
     }
 }
 
 #[derive(Debug)]
-pub struct Node<Id: PartyId, P: Protocol<Id>>(Arc<TypedNode<Id, P>>);
+pub struct Node<SP: SessionParameters, P: Protocol<SP>>(Arc<TypedNode<SP, P>>);
 
-impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
-    pub(crate) fn new(typed_node: TypedNode<Id, P>) -> Self {
+impl<SP: SessionParameters, P: Protocol<SP>> Node<SP, P> {
+    pub(crate) fn new(typed_node: TypedNode<SP, P>) -> Self {
         Self(Arc::new(typed_node))
     }
 
@@ -163,11 +181,11 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
         Arc::as_ptr(&self.0) as usize
     }
 
-    pub(crate) fn as_ref(&self) -> &TypedNode<Id, P> {
+    pub(crate) fn as_ref(&self) -> &TypedNode<SP, P> {
         &self.0
     }
 
-    pub fn group(&self) -> Option<&PartyGroup<Id>> {
+    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         self.as_ref().group()
     }
 
@@ -185,77 +203,70 @@ impl<Id: PartyId, P: Protocol<Id>> Node<Id, P> {
 }
 
 #[derive(Debug)]
-pub(crate) struct TypedNode<Id: PartyId, P: Protocol<Id>> {
+pub(crate) struct TypedNode<SP: SessionParameters, P: Protocol<SP>> {
     store_in: Tag,
-    kind: NodeKind<Id, P>,
-    dependencies: Vec<Node<Id, P>>,
+    kind: NodeKind<SP, P>,
+    dependencies: Vec<Node<SP, P>>,
 }
 
 #[derive(Debug)]
-pub(crate) enum NodeKind<Id: PartyId, P: Protocol<Id>> {
+pub(crate) enum NodeKind<SP: SessionParameters, P: Protocol<SP>> {
     ComputeScalar {
-        function: ScalarFunction<Id, P>,
-        args: Vec<Node<Id, P>>,
+        function: ScalarFunction<SP, P>,
+        args: Vec<Node<SP, P>>,
     },
     ComputeArray {
-        function: ArrayFunction<Id, P>,
+        function: ArrayFunction<SP, P>,
         #[allow(unused)] // TODO (#9): to be used when we implement short-circuiting
         returns_nothing: bool,
-        group: PartyGroup<Id>,
-        args: Vec<Node<Id, P>>,
-    },
-    Broadcast {
-        send_as: String,
-        data: Node<Id, P>,
-        group: PartyGroup<Id>,
+        group: PartyGroup<SP::Verifier>,
+        args: Vec<Node<SP, P>>,
     },
     DirectMessage {
-        send_as: String,
-        data: Node<Id, P>,
-        group: PartyGroup<Id>,
+        data: Node<SP, P>,
+        group: PartyGroup<SP::Verifier>,
     },
     Collect {
-        values: Node<Id, P>,
+        values: Node<SP, P>,
     },
     Receive {
-        group: PartyGroup<Id>,
+        group: PartyGroup<SP::Verifier>,
     },
 }
 
-impl<Id: PartyId, P: Protocol<Id>> Clone for TypedNode<Id, P> {
+impl<SP: SessionParameters, P: Protocol<SP>> Clone for TypedNode<SP, P> {
     fn clone(&self) -> Self {
         todo!()
     }
 }
 
-impl<Id: PartyId, P: Protocol<Id>> TypedNode<Id, P> {
+impl<SP: SessionParameters, P: Protocol<SP>> TypedNode<SP, P> {
     pub fn store_in(&self) -> &Tag {
         &self.store_in
     }
 
-    pub fn dependencies(&self) -> &[Node<Id, P>] {
+    pub fn dependencies(&self) -> &[Node<SP, P>] {
         &self.dependencies
     }
 
-    pub fn group(&self) -> Option<&PartyGroup<Id>> {
+    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         self.kind.group()
     }
 
-    pub fn kind(&self) -> &NodeKind<Id, P> {
+    pub fn kind(&self) -> &NodeKind<SP, P> {
         &self.kind
     }
 }
 
-fn nodes_to_owned<Id: PartyId, P: Protocol<Id>>(nodes: &[&Node<Id, P>]) -> impl Iterator<Item = Node<Id, P>> {
+fn nodes_to_owned<SP: SessionParameters, P: Protocol<SP>>(nodes: &[&Node<SP, P>]) -> impl Iterator<Item = Node<SP, P>> {
     nodes.iter().map(|node| node.get_strong_ref())
 }
 
-impl<Id: PartyId, P: Protocol<Id>> NodeKind<Id, P> {
-    pub fn group(&self) -> Option<&PartyGroup<Id>> {
+impl<SP: SessionParameters, P: Protocol<SP>> NodeKind<SP, P> {
+    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         match self {
             Self::ComputeScalar { .. } => None,
             Self::ComputeArray { group, .. } => Some(group),
-            Self::Broadcast { group, .. } => Some(group),
             Self::DirectMessage { group, .. } => Some(group),
             Self::Collect { .. } => None,
             Self::Receive { group, .. } => Some(group),
@@ -263,11 +274,11 @@ impl<Id: PartyId, P: Protocol<Id>> NodeKind<Id, P> {
     }
 }
 
-pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
+pub fn compute_scalar<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&P::SharedData, Args<Id>) -> Ret,
-    args: &[&Node<Id, P>],
-) -> Node<Id, P> {
+    function: impl 'static + Fn(&P::SharedData, Args<SP>) -> Ret,
+    args: &[&Node<SP, P>],
+) -> Node<SP, P> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -279,11 +290,11 @@ pub fn compute_scalar<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     Node::new(inner)
 }
 
-pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
+pub fn compute_scalar_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRng, &P::SharedData, Args<Id>) -> Ret,
-    args: &[&Node<Id, P>],
-) -> Node<Id, P> {
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &P::SharedData, Args<SP>) -> Ret,
+    args: &[&Node<SP, P>],
+) -> Node<SP, P> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -295,12 +306,12 @@ pub fn compute_scalar_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sy
     Node::new(inner)
 }
 
-pub fn compute_array<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
+pub fn compute_array<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&Id, &P::SharedData, Args<Id>) -> Ret,
-    group: &PartyGroup<Id>,
-    args: &[&Node<Id, P>],
-) -> Node<Id, P> {
+    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Ret,
+    group: &PartyGroup<SP::Verifier>,
+    args: &[&Node<SP, P>],
+) -> Node<SP, P> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -314,12 +325,12 @@ pub fn compute_array<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
     Node::new(inner)
 }
 
-pub fn compute_array_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Sync>(
+pub fn compute_array_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRng, &Id, &P::SharedData, Args<Id>) -> Ret,
-    group: &PartyGroup<Id>,
-    args: &[&Node<Id, P>],
-) -> Node<Id, P> {
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &P::SharedData, Args<SP>) -> Ret,
+    group: &PartyGroup<SP::Verifier>,
+    args: &[&Node<SP, P>],
+) -> Node<SP, P> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -333,11 +344,11 @@ pub fn compute_array_private<Id: PartyId, P: Protocol<Id>, Ret: Any + Send + Syn
     Node::new(inner)
 }
 
-pub fn verify<Id: PartyId, P: Protocol<Id>>(
+pub fn verify<SP: SessionParameters, P: Protocol<SP>>(
     name: &str,
-    function: impl 'static + Fn(&Id, &P::SharedData, Args<Id>),
-    args: &[&Node<Id, P>],
-) -> Node<Id, P> {
+    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>),
+    args: &[&Node<SP, P>],
+) -> Node<SP, P> {
     let groups = args
         .iter()
         .filter_map(|arg| arg.as_ref().kind.group())
@@ -359,45 +370,142 @@ pub fn verify<Id: PartyId, P: Protocol<Id>>(
     Node::new(inner)
 }
 
-pub fn broadcast<Id: PartyId, P: Protocol<Id>>(
-    name: &str,
-    scalar: &Node<Id, P>,
-    group: &PartyGroup<Id>,
-) -> Node<Id, P> {
-    let send_node = Node::new(TypedNode {
-        store_in: Tag::sent(name),
+/// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
+/// since some RustCrypto libraries don't accept a `?Sized` RNG.
+struct Rng<'a>(&'a mut dyn CryptoRngCore);
+
+impl<'a> signature::rand_core::RngCore for Rng<'a> {
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+    fn fill_bytes(&mut self, bytes: &mut [u8]) {
+        self.0.fill_bytes(bytes)
+    }
+    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), signature::rand_core::Error> {
+        self.0.try_fill_bytes(bytes)
+    }
+}
+
+impl<'a> signature::rand_core::CryptoRng for Rng<'a> {}
+
+fn serialize<SP: SessionParameters>(
+    rng: &mut dyn CryptoRngCore,
+    id: &SP::Verifier,
+    value_name: String,
+    args: Args<SP>,
+    message: &ProtocolMessage,
+) -> Value {
+    let value = args.get_value(&value_name);
+    let serialized_value = message.serde_adapter.serialize::<SP::WireFormat>(value);
+    let mut typed_rng = Rng(rng);
+    let signed_value = SignedValue::<SP>::new(&mut typed_rng, args.signer(), &message.name, id, serialized_value);
+    Value::new(signed_value)
+}
+
+pub fn broadcast<SP: SessionParameters, P: Protocol<SP>>(
+    message: &ProtocolMessage,
+    scalar: &Node<SP, P>,
+    group: &PartyGroup<SP::Verifier>,
+) -> Node<SP, P> {
+    let cloned_message = message.clone();
+    let value_name = scalar.as_ref().store_in().name.to_string();
+
+    let serialize_and_sign = Node::new(TypedNode {
+        store_in: Tag::signed(&message.name),
         dependencies: Vec::new(),
-        kind: NodeKind::Broadcast {
-            send_as: name.into(),
-            data: scalar.get_strong_ref(),
+        kind: NodeKind::ComputeArray {
+            args: [scalar.get_strong_ref()].into(),
+            function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
+                "serialize",
+                move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, _shared_data: &P::SharedData, args: Args<SP>| {
+                    serialize::<SP>(rng, id, value_name.clone(), args, &cloned_message)
+                },
+            )),
+            returns_nothing: false,
+            group: group.clone(),
+        },
+    });
+
+    let send_node = Node::new(TypedNode {
+        store_in: Tag::sent(&message.name),
+        dependencies: Vec::new(),
+        kind: NodeKind::DirectMessage {
+            data: serialize_and_sign,
             group: group.clone(),
         },
     });
     collect(&send_node)
 }
 
-pub fn send<Id: PartyId, P: Protocol<Id>>(name: &str, array: &Node<Id, P>) -> Node<Id, P> {
+pub fn send<SP: SessionParameters, P: Protocol<SP>>(message: &ProtocolMessage, array: &Node<SP, P>) -> Node<SP, P> {
+    let cloned_message = message.clone();
+    let value_name = array.as_ref().store_in().name.to_string();
+
+    let serialize_and_sign = Node::new(TypedNode {
+        store_in: Tag::signed(&message.name),
+        dependencies: Vec::new(),
+        kind: NodeKind::ComputeArray {
+            args: [array.get_strong_ref()].into(),
+            function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
+                "serialize",
+                move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, _shared_data: &P::SharedData, args: Args<SP>| {
+                    serialize::<SP>(rng, id, value_name.clone(), args, &cloned_message)
+                },
+            )),
+            returns_nothing: false,
+            group: array.as_ref().group().unwrap().clone(),
+        },
+    });
+
     let send_node = Node::new(TypedNode {
-        store_in: Tag::sent(name),
+        store_in: Tag::sent(&message.name),
         dependencies: Vec::new(),
         kind: NodeKind::DirectMessage {
-            send_as: name.into(),
-            data: array.get_strong_ref(),
+            data: serialize_and_sign,
             group: array.as_ref().group().unwrap().clone(),
         },
     });
     collect(&send_node)
 }
 
-pub fn receive<Id: PartyId, P: Protocol<Id>>(name: &str, group: &PartyGroup<Id>) -> Node<Id, P> {
-    Node::new(TypedNode {
-        store_in: Tag::received(name),
+fn deserialize<SP: SessionParameters>(args: Args<SP>, message: &ProtocolMessage) -> Value {
+    let received = args.get::<SerializedValue>(&message.name);
+    message.serde_adapter.deserialize::<SP::WireFormat>(received)
+}
+
+pub fn receive<SP: SessionParameters, P: Protocol<SP>>(
+    message: &ProtocolMessage,
+    group: &PartyGroup<SP::Verifier>,
+) -> Node<SP, P> {
+    let received = Node::new(TypedNode {
+        store_in: Tag::received(&message.name),
         dependencies: Vec::new(),
         kind: NodeKind::Receive { group: group.clone() },
+    });
+
+    let cloned_message = message.clone();
+
+    Node::new(TypedNode {
+        store_in: Tag::deserialized(&message.name),
+        dependencies: Vec::new(),
+        kind: NodeKind::ComputeArray {
+            args: [received].into(),
+            function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
+                "deserialize",
+                move |_id: &SP::Verifier, _shared_data: &P::SharedData, args: Args<SP>| {
+                    deserialize::<SP>(args, &cloned_message)
+                },
+            )),
+            returns_nothing: false,
+            group: group.clone(),
+        },
     })
 }
 
-pub fn collect<Id: PartyId, P: Protocol<Id>>(values: &Node<Id, P>) -> Node<Id, P> {
+pub fn collect<SP: SessionParameters, P: Protocol<SP>>(values: &Node<SP, P>) -> Node<SP, P> {
     Node::new(TypedNode {
         store_in: Tag::collected(&values.as_ref().store_in),
         dependencies: Vec::new(),
@@ -407,9 +515,17 @@ pub fn collect<Id: PartyId, P: Protocol<Id>>(values: &Node<Id, P>) -> Node<Id, P
     })
 }
 
-pub trait Protocol<Id: PartyId>: Sized + Debug {
-    type SharedData;
-    type Output: 'static + Clone + Any + Send + Sync;
+#[derive(Clone)]
+pub struct ProtocolMessage {
+    name: String,
+    serde_adapter: SerdeAdapter,
+}
 
-    fn build(my_id: &Id, shared_data: &Self::SharedData) -> Node<Id, Self>;
+impl ProtocolMessage {
+    pub fn new<T: Clone + Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            serde_adapter: SerdeAdapter::new::<T>(),
+        }
+    }
 }

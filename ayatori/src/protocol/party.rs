@@ -1,12 +1,9 @@
-use alloc::collections::BTreeSet;
-use alloc::format;
+use alloc::{collections::BTreeSet, format};
 use core::fmt::{self, Debug, Display};
 
 use itertools::Itertools;
 
-pub trait PartyId: 'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Sync {}
-
-impl<T: 'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Sync> PartyId for T {}
+use super::traits::PartyId;
 
 #[derive(Debug, Clone)]
 pub struct PartyGroup<Id: PartyId> {

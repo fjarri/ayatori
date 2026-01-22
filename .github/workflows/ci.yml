@@ -28,7 +28,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           override: true
-      - run: cargo build --target ${{ matrix.target }} --release --no-default-features
+      - run: cargo build --target ${{ matrix.target }} --release
 
   # Mimics the setup of docs.rs, but fails on warnings
   build-docs:
@@ -40,7 +40,9 @@ jobs:
           toolchain: nightly
           override: true
           profile: minimal
-      - run: env RUSTDOCFLAGS='--cfg docsrs -D warnings' cargo doc --all-features
+      # We need `no-deps` here because `generic-array` we depend on has some obsolete attributes.
+      # Can be removed when we update to `signature=3`
+      - run: env RUSTDOCFLAGS='--cfg docsrs -D warnings' cargo doc --all-features --no-deps
 
   build-book:
     runs-on: ubuntu-latest
@@ -81,9 +83,9 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Test with benchmarks (in release)
-        run: cargo test --benches --workspace --release
+        run: cargo test --all-features --benches --workspace --release
       - name: Generate code coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

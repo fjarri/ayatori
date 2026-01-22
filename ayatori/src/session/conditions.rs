@@ -1,6 +1,4 @@
-use alloc::collections::BTreeSet;
-use alloc::string::ToString;
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;

@@ -1,13 +1,15 @@
-use alloc::collections::BTreeMap;
-use alloc::string::String;
-use alloc::sync::Arc;
-use core::any::Any;
-use rand_core::CryptoRng;
+use alloc::{collections::BTreeMap, sync::Arc, vec};
+use core::fmt::Debug;
 
-use super::ruleset::{Action, Arg, Ruleset};
+use signature::{Keypair, rand_core::CryptoRngCore};
+
+use super::{
+    message::{Message, SignedValue},
+    ruleset::{Action, Arg, Ruleset},
+};
 use crate::protocol::{
-    Args, ArrayFunction, PartyId, Protocol, ScalarFunction, Tag, Value, WrappedArrayFunction,
-    WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate,
+    Args, ArrayFunction, Erasable, PartyId, Protocol, ScalarFunction, SessionParameters, Tag, Value,
+    WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction, WrappedFunctionPrivate,
 };
 
 struct Storage<Id> {
@@ -53,25 +55,25 @@ impl<Id: PartyId> Storage<Id> {
     }
 }
 
-enum ComputeFunction<Id: PartyId, P: Protocol<Id>> {
+enum ComputeFunction<SP: SessionParameters, P: Protocol<SP>> {
     Scalar {
-        function: WrappedFunction<Id, P>,
+        function: WrappedFunction<SP, P>,
     },
     Array {
-        function: WrappedArrayFunction<Id, P>,
-        id: Id,
+        function: WrappedArrayFunction<SP, P>,
+        id: SP::Verifier,
     },
 }
 
-pub struct ComputeTask<Id: PartyId, P: Protocol<Id>> {
+pub struct ComputeTask<SP: SessionParameters, P: Protocol<SP>> {
     store_in: Tag,
-    function: ComputeFunction<Id, P>,
-    args: Args<Id>,
+    function: ComputeFunction<SP, P>,
+    args: Args<SP>,
     shared_data: Arc<P::SharedData>,
 }
 
-impl<Id: PartyId, P: Protocol<Id>> ComputeTask<Id, P> {
-    pub fn compute(self) -> TaskResult<Id> {
+impl<SP: SessionParameters, P: Protocol<SP>> ComputeTask<SP, P> {
+    pub fn compute(self) -> TaskResult<SP::Verifier> {
         match self.function {
             ComputeFunction::Scalar { function } => {
                 let result = function.call(&self.shared_data, self.args);
@@ -92,25 +94,25 @@ impl<Id: PartyId, P: Protocol<Id>> ComputeTask<Id, P> {
     }
 }
 
-enum ComputeWithRngFunction<Id: PartyId, P: Protocol<Id>> {
+enum ComputeWithRngFunction<SP: SessionParameters, P: Protocol<SP>> {
     Scalar {
-        function: WrappedFunctionPrivate<Id, P>,
+        function: WrappedFunctionPrivate<SP, P>,
     },
     Array {
-        function: WrappedArrayFunctionPrivate<Id, P>,
-        id: Id,
+        function: WrappedArrayFunctionPrivate<SP, P>,
+        id: SP::Verifier,
     },
 }
 
-pub struct ComputeWithRngTask<Id: PartyId, P: Protocol<Id>> {
+pub struct ComputeWithRngTask<SP: SessionParameters, P: Protocol<SP>> {
     store_in: Tag,
-    function: ComputeWithRngFunction<Id, P>,
-    args: Args<Id>,
+    function: ComputeWithRngFunction<SP, P>,
+    args: Args<SP>,
     shared_data: Arc<P::SharedData>,
 }
 
-impl<Id: PartyId, P: Protocol<Id>> ComputeWithRngTask<Id, P> {
-    pub fn compute(self, rng: &mut impl CryptoRng) -> TaskResult<Id> {
+impl<SP: SessionParameters, P: Protocol<SP>> ComputeWithRngTask<SP, P> {
+    pub fn compute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP::Verifier> {
         match self.function {
             ComputeWithRngFunction::Scalar { function } => {
                 let result = function.call(rng, &self.shared_data, self.args);
@@ -131,28 +133,22 @@ impl<Id: PartyId, P: Protocol<Id>> ComputeWithRngTask<Id, P> {
     }
 }
 
-pub struct SendTask<Id> {
+pub struct SendTask<SP: SessionParameters> {
     store_in: Tag,
-    send_as: String,
-    destination: Id,
-    data: Value,
+    destination: SP::Verifier,
+    signed_value: Value,
 }
 
-impl<Id: PartyId> SendTask<Id> {
-    pub fn destination(&self) -> &Id {
-        &self.destination
-    }
-    pub fn data(self) -> Value {
-        self.data
-    }
-    pub fn send_as(&self) -> &str {
-        &self.send_as
-    }
-    pub fn result(&self) -> TaskResult<Id> {
-        TaskResult(TaskResultEnum::Send {
+impl<SP: SessionParameters> SendTask<SP> {
+    pub fn compute(self) -> (Message<SP>, TaskResult<SP::Verifier>) {
+        let signed_value = self.signed_value.downcast::<SignedValue<SP>>();
+        let signed_values = vec![signed_value];
+        let message = Message::new(self.destination.clone(), signed_values);
+        let result = TaskResult(TaskResultEnum::Send {
             store_in: self.store_in.clone(),
             destination: self.destination.clone(),
-        })
+        });
+        (message, result)
     }
 }
 
@@ -161,15 +157,15 @@ pub struct FinalizeTask {
 }
 
 impl FinalizeTask {
-    pub fn value<T: Clone + Any + Send + Sync>(self) -> T {
+    pub fn value<T: Clone + Erasable>(self) -> T {
         self.outcome.downcast::<T>()
     }
 }
 
-pub enum Task<Id: PartyId, P: Protocol<Id>> {
-    Send(SendTask<Id>),
-    Compute(ComputeTask<Id, P>),
-    ComputeWithRng(ComputeWithRngTask<Id, P>),
+pub enum Task<SP: SessionParameters, P: Protocol<SP>> {
+    Send(SendTask<SP>),
+    Compute(ComputeTask<SP, P>),
+    ComputeWithRng(ComputeWithRngTask<SP, P>),
     Finalize(FinalizeTask),
 }
 
@@ -183,31 +179,36 @@ enum TaskResultEnum<Id> {
     ComputeArray { store_in: Tag, id: Id, result: Value },
 }
 
-pub struct Session<Id: PartyId, P: Protocol<Id>> {
-    my_id: Id,
+pub struct Session<SP: SessionParameters, P: Protocol<SP>> {
+    signer: Arc<SP::Signer>,
     shared_data: Arc<P::SharedData>,
-    ruleset: Ruleset<Id, P>,
-    storage: Storage<Id>,
+    ruleset: Ruleset<SP, P>,
+    storage: Storage<SP::Verifier>,
 }
 
-impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
-    pub fn new(my_id: &Id, shared_data: P::SharedData) -> Self {
-        let output_node = P::build(my_id, &shared_data);
+impl<SP, P> Session<SP, P>
+where
+    SP: SessionParameters,
+    P: Protocol<SP>,
+{
+    pub fn new(signer: SP::Signer, shared_data: P::SharedData) -> Self {
+        let output_node = P::build(&signer.verifying_key(), &shared_data);
         let ruleset = Ruleset::new(output_node);
         let storage = Storage::new();
+        let signer = Arc::new(signer);
         Self {
-            my_id: my_id.clone(),
+            signer,
             ruleset,
             storage,
             shared_data: Arc::new(shared_data),
         }
     }
 
-    pub fn id(&self) -> &Id {
-        &self.my_id
+    pub fn id(&self) -> SP::Verifier {
+        self.signer.verifying_key()
     }
 
-    pub fn make_task(&mut self) -> Option<Task<Id, P>> {
+    pub fn make_task(&mut self) -> Option<Task<SP, P>> {
         if self.storage.contains(self.ruleset.output_tag()) {
             return Some(Task::Finalize(FinalizeTask {
                 outcome: self.storage.get(self.ruleset.output_tag()),
@@ -227,26 +228,21 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
             match action {
                 Action::Send {
                     store_in,
-                    send_as,
                     to_send,
                     destination,
                     index,
                 } => {
-                    if let Some(index) = index {
-                        return Some(Task::Send(SendTask {
-                            store_in,
-                            send_as,
-                            destination,
-                            data: self.storage.get_elem(&to_send, &index),
-                        }));
+                    let signed_value = if let Some(index) = index {
+                        self.storage.get_elem(&to_send, &index)
                     } else {
-                        return Some(Task::Send(SendTask {
-                            store_in,
-                            send_as,
-                            destination,
-                            data: self.storage.get(&to_send),
-                        }));
-                    }
+                        self.storage.get(&to_send)
+                    };
+
+                    return Some(Task::Send(SendTask {
+                        store_in,
+                        destination: destination.clone(),
+                        signed_value,
+                    }));
                 }
                 Action::ComputeScalar {
                     store_in,
@@ -257,7 +253,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                         .iter()
                         .map(|arg: &Tag| (arg.clone(), self.storage.get(arg)))
                         .collect::<BTreeMap<_, _>>();
-                    let args = Args::new(self.id(), arg_values);
+                    let args = Args::new(&self.signer, &self.id(), arg_values);
                     match function {
                         ScalarFunction::Public(function) => {
                             return Some(Task::Compute(ComputeTask {
@@ -290,7 +286,7 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
                             Arg::ArrayElem(tag) => (tag.clone(), self.storage.get_elem(tag, &index)),
                         })
                         .collect::<BTreeMap<_, _>>();
-                    let args = Args::new(self.id(), arg_values);
+                    let args = Args::new(&self.signer, &self.id(), arg_values);
                     match function {
                         ArrayFunction::Public(function) => {
                             return Some(Task::Compute(ComputeTask {
@@ -320,13 +316,18 @@ impl<Id: PartyId, P: Protocol<Id>> Session<Id, P> {
         None
     }
 
-    pub fn add_message(&mut self, source: &Id, name: &str, message: Value) {
-        let tag = Tag::received(name);
-        self.storage.set_elem(&tag, source, message);
-        self.ruleset.update_with_array_element_ready(&tag, source);
+    pub fn add_message(&mut self, message: Message<SP>) {
+        for value in message.values() {
+            value.verify().unwrap();
+            let source = value.source().clone();
+            let tag = Tag::received(value.metadata().name());
+            self.storage
+                .set_elem(&tag, &source, Value::new(value.serialized_value()));
+            self.ruleset.update_with_array_element_ready(&tag, &source);
+        }
     }
 
-    pub fn add_result(&mut self, result: TaskResult<Id>) {
+    pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) {
         match result.0 {
             TaskResultEnum::Send { store_in, destination } => {
                 self.storage.set_elem(&store_in, &destination, Value::new(()));
