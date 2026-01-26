@@ -1,12 +1,10 @@
-use alloc::collections::BTreeSet;
-use alloc::string::{String, ToString};
-use alloc::{format, vec, vec::Vec};
+use alloc::{collections::BTreeSet, format, string::ToString, vec, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
 use super::conditions::{Condition, LeafCondition};
-use crate::protocol::{ArrayFunction, Node, NodeKind, PartyId, Protocol, ScalarFunction, Tag};
+use crate::protocol::{ArrayFunction, Node, NodeKind, Protocol, ScalarFunction, SessionParameters, Tag};
 
 #[derive(Debug)]
 pub(crate) enum Arg {
@@ -15,24 +13,23 @@ pub(crate) enum Arg {
 }
 
 #[derive(Debug)]
-pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
+pub(crate) enum Action<SP: SessionParameters, P: Protocol<SP>> {
     ComputeScalar {
         store_in: Tag,
-        function: ScalarFunction<Id, P>,
+        function: ScalarFunction<SP, P>,
         args: Vec<Tag>,
     },
     ComputeArrayElement {
         store_in: Tag,
-        index: Id,
-        function: ArrayFunction<Id, P>,
+        index: SP::Verifier,
+        function: ArrayFunction<SP, P>,
         args: Vec<Arg>,
     },
     Send {
         store_in: Tag,
-        send_as: String,
         to_send: Tag,
-        destination: Id,
-        index: Option<Id>,
+        destination: SP::Verifier,
+        index: Option<SP::Verifier>,
     },
     Collect {
         store_in: Tag,
@@ -41,19 +38,19 @@ pub(crate) enum Action<Id: PartyId, P: Protocol<Id>> {
 }
 
 #[derive(Debug)]
-struct Rule<Id: PartyId, P: Protocol<Id>> {
-    condition: Condition<Id>,
-    action: Action<Id, P>,
+struct Rule<SP: SessionParameters, P: Protocol<SP>> {
+    condition: Condition<SP::Verifier>,
+    action: Action<SP, P>,
 }
 
 #[derive(Debug)]
-pub(crate) struct Ruleset<Id: PartyId, P: Protocol<Id>> {
+pub(crate) struct Ruleset<SP: SessionParameters, P: Protocol<SP>> {
     output_tag: Tag,
-    rules: Vec<Rule<Id, P>>,
+    rules: Vec<Rule<SP, P>>,
 }
 
-impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
-    pub fn new(output_node: Node<Id, P>) -> Self {
+impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
+    pub fn new(output_node: Node<SP, P>) -> Self {
         let output_tag = output_node.as_ref().store_in().clone();
 
         let mut nodes_to_process = vec![output_node];
@@ -104,7 +101,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                             function: function.clone(),
                             args: args
                                 .iter()
-                                .map(|arg: &Node<Id, P>| arg.as_ref().store_in().clone())
+                                .map(|arg: &Node<SP, P>| arg.as_ref().store_in().clone())
                                 .collect(),
                         },
                         specific_condition,
@@ -130,6 +127,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                                     tag: arg.as_ref().store_in().clone(),
                                 });
                             }
+                            nodes_to_process.push(arg.get_strong_ref());
                         }
 
                         actions.push((
@@ -139,7 +137,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                                 index: id.clone(),
                                 args: args
                                     .iter()
-                                    .map(|arg: &Node<Id, P>| {
+                                    .map(|arg: &Node<SP, P>| {
                                         let tag = arg.as_ref().store_in().clone();
                                         if arg.as_ref().group().is_some() {
                                             Arg::ArrayElem(tag)
@@ -153,26 +151,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         ));
                     }
                 }
-                NodeKind::Broadcast { send_as, data, group } => {
-                    let mut specific_condition = Condition::empty();
-                    specific_condition.and(LeafCondition::Value {
-                        tag: data.as_ref().store_in().clone(),
-                    });
-                    nodes_to_process.push(data.get_strong_ref());
-                    for id in group.ids() {
-                        actions.push((
-                            Action::Send {
-                                store_in: node.as_ref().store_in().clone(),
-                                send_as: send_as.clone(),
-                                to_send: data.as_ref().store_in().clone(),
-                                destination: id.clone(),
-                                index: None,
-                            },
-                            specific_condition.clone(),
-                        ));
-                    }
-                }
-                NodeKind::DirectMessage { send_as, data, group } => {
+                NodeKind::DirectMessage { data, group } => {
                     nodes_to_process.push(data.get_strong_ref());
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
@@ -183,7 +162,6 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
                         actions.push((
                             Action::Send {
                                 store_in: node.as_ref().store_in().clone(),
-                                send_as: send_as.clone(),
                                 to_send: data.as_ref().store_in().clone(),
                                 destination: id.clone(),
                                 index: Some(id.clone()),
@@ -229,13 +207,13 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
         }
     }
 
-    pub fn update_with_array_element_ready(&mut self, tag: &Tag, id: &Id) {
+    pub fn update_with_array_element_ready(&mut self, tag: &Tag, id: &SP::Verifier) {
         for rule in self.rules.iter_mut() {
             rule.condition.update_with_array_element_ready(tag, id);
         }
     }
 
-    fn pop_send_action(&mut self) -> Option<Action<Id, P>> {
+    fn pop_send_action(&mut self) -> Option<Action<SP, P>> {
         self.rules
             .extract_if(.., |rule| {
                 matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
@@ -244,7 +222,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
             .map(|rule| rule.action)
     }
 
-    fn pop_local_action(&mut self) -> Option<Action<Id, P>> {
+    fn pop_local_action(&mut self) -> Option<Action<SP, P>> {
         self.rules
             .extract_if(.., |rule| {
                 !matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
@@ -253,7 +231,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
             .map(|rule| rule.action)
     }
 
-    pub fn pop_action(&mut self) -> Option<Action<Id, P>> {
+    pub fn pop_action(&mut self) -> Option<Action<SP, P>> {
         self.pop_local_action().or_else(|| self.pop_send_action())
     }
 
@@ -266,7 +244,7 @@ impl<Id: PartyId, P: Protocol<Id>> Ruleset<Id, P> {
     }
 }
 
-impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
+impl<SP: SessionParameters, P: Protocol<SP>> Display for Action<SP, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::ComputeScalar {
@@ -294,7 +272,6 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
             }
             Self::Send {
                 store_in,
-                send_as,
                 to_send,
                 destination,
                 index,
@@ -302,13 +279,10 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
                 if let Some(index) = index {
                     write!(
                         f,
-                        "{store_in}[{destination:?}] = send({to_send}[{index:?}]) as {send_as} to {destination:?}"
+                        "{store_in}[{destination:?}] = send({to_send}[{index:?}]) to {destination:?})"
                     )
                 } else {
-                    write!(
-                        f,
-                        "{store_in}[{destination:?}] = send({to_send}) as {send_as} to {destination:?}"
-                    )
+                    write!(f, "{store_in}[{destination:?}] = send({to_send}) to {destination:?}")
                 }
             }
             Self::Collect { store_in, values } => {
@@ -318,14 +292,14 @@ impl<Id: PartyId, P: Protocol<Id>> Display for Action<Id, P> {
     }
 }
 
-impl<Id: PartyId, P: Protocol<Id>> Display for Rule<Id, P> {
+impl<SP: SessionParameters, P: Protocol<SP>> Display for Rule<SP, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         writeln!(f, "if {}:", self.condition)?;
         write!(f, "  {}", self.action)
     }
 }
 
-impl<Id: PartyId, P: Protocol<Id>> Display for Ruleset<Id, P> {
+impl<SP: SessionParameters, P: Protocol<SP>> Display for Ruleset<SP, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         writeln!(f, "Ruleset:")?;
         for rule in self.rules.iter() {
