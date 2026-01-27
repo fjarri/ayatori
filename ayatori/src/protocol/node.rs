@@ -1,5 +1,6 @@
 use alloc::{
     collections::BTreeMap,
+    format,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -12,14 +13,14 @@ use signature::rand_core::CryptoRngCore;
 
 use super::{
     function::{
-        ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedFunction,
-        WrappedFunctionPrivate,
+        ArrayFunction, ComputeError, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
+        WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
     party::PartyGroup,
     traits::{Protocol, SessionParameters},
     value::{Erasable, SerdeAdapter, SerializedValue, Value},
 };
-use crate::session::SignedValue;
+use crate::{error::LocalError, session::SignedValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TagKind {
@@ -115,6 +116,7 @@ impl Display for Tag {
     }
 }
 
+#[derive(Debug)]
 pub struct Args<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
     my_id: SP::Verifier,
@@ -146,19 +148,21 @@ impl<SP: SessionParameters> Args<SP> {
         &self.my_id
     }
 
-    pub(crate) fn get_value(&self, name: &str) -> &Value {
-        self.values.get(name).unwrap()
+    pub(crate) fn get_value(&self, name: &str) -> Result<&Value, LocalError> {
+        self.values
+            .get(name)
+            .ok_or_else(|| LocalError::new(format!("Value {name} is present in the Args")))
     }
 
-    pub fn get<T: Erasable>(&self, name: &str) -> &T {
-        self.values.get(name).unwrap().downcast_ref::<T>()
+    pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, LocalError> {
+        self.get_value(name)?.downcast_ref::<T>()
     }
 
-    pub fn get_map<T: Clone + Erasable>(&self, name: &str) -> BTreeMap<&SP::Verifier, &T> {
-        let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name);
+    pub fn get_map<T: Clone + Erasable>(&self, name: &str) -> Result<BTreeMap<&SP::Verifier, &T>, LocalError> {
+        let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name)?;
         value_map
             .iter()
-            .map(|(id, value)| (id, value.downcast_ref::<T>()))
+            .map(|(id, value)| value.downcast_ref::<T>().map(|value_ref| (id, value_ref)))
             .collect()
     }
 }
@@ -228,6 +232,7 @@ pub(crate) enum NodeKind<SP: SessionParameters, P: Protocol<SP>> {
     },
     Collect {
         values: Node<SP, P>,
+        group: PartyGroup<SP::Verifier>,
     },
     Receive {
         group: PartyGroup<SP::Verifier>,
@@ -276,42 +281,42 @@ impl<SP: SessionParameters, P: Protocol<SP>> NodeKind<SP, P> {
 
 pub fn compute_scalar<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&P::SharedData, Args<SP>) -> Ret,
+    function: impl 'static + Fn(&P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
     args: &[&Node<SP, P>],
-) -> Node<SP, P> {
+) -> Result<Node<SP, P>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
         kind: NodeKind::ComputeScalar {
-            function: ScalarFunction::Public(WrappedFunction::new(function)),
+            function: ScalarFunction::Public(WrappedScalarFunction::new(function)),
             args: nodes_to_owned(args).collect(),
         },
     };
-    Node::new(inner)
+    Ok(Node::new(inner))
 }
 
 pub fn compute_scalar_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &P::SharedData, Args<SP>) -> Ret,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
     args: &[&Node<SP, P>],
-) -> Node<SP, P> {
+) -> Result<Node<SP, P>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
         kind: NodeKind::ComputeScalar {
-            function: ScalarFunction::Private(WrappedFunctionPrivate::new(function)),
+            function: ScalarFunction::Private(WrappedScalarFunctionPrivate::new(function)),
             args: nodes_to_owned(args).collect(),
         },
     };
-    Node::new(inner)
+    Ok(Node::new(inner))
 }
 
 pub fn compute_array<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Ret,
+    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
     group: &PartyGroup<SP::Verifier>,
     args: &[&Node<SP, P>],
-) -> Node<SP, P> {
+) -> Result<Node<SP, P>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -322,15 +327,16 @@ pub fn compute_array<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
             args: nodes_to_owned(args).collect(),
         },
     };
-    Node::new(inner)
+    Ok(Node::new(inner))
 }
 
 pub fn compute_array_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &P::SharedData, Args<SP>) -> Ret,
+    function: impl 'static
+    + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
     group: &PartyGroup<SP::Verifier>,
     args: &[&Node<SP, P>],
-) -> Node<SP, P> {
+) -> Result<Node<SP, P>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -341,20 +347,22 @@ pub fn compute_array_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasab
             args: nodes_to_owned(args).collect(),
         },
     };
-    Node::new(inner)
+    Ok(Node::new(inner))
 }
 
 pub fn verify<SP: SessionParameters, P: Protocol<SP>>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>),
+    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Result<(), ComputeError>,
     args: &[&Node<SP, P>],
-) -> Node<SP, P> {
+) -> Result<Node<SP, P>, LocalError> {
     let groups = args
         .iter()
         .filter_map(|arg| arg.as_ref().kind.group())
         .collect::<Vec<_>>();
     // TODO (#29): support compute-array with only scalar args (the group needs to be given explicitly)
-    let group = groups[0];
+    let group = *groups
+        .first()
+        .ok_or_else(|| LocalError::new("There must be at least one array argument"))?;
     // TODO (#5): check that all groups are the same
 
     let inner = TypedNode {
@@ -367,7 +375,7 @@ pub fn verify<SP: SessionParameters, P: Protocol<SP>>(
             args: nodes_to_owned(args).collect(),
         },
     };
-    Node::new(inner)
+    Ok(Node::new(inner))
 }
 
 /// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
@@ -397,21 +405,27 @@ fn serialize<SP: SessionParameters>(
     value_name: String,
     args: Args<SP>,
     message: &ProtocolMessage,
-) -> Value {
-    let value = args.get_value(&value_name);
-    let serialized_value = message.serde_adapter.serialize::<SP::WireFormat>(value);
+) -> Result<Value, ComputeError> {
+    let value = args.get_value(&value_name)?;
+    let serialized_value = message.serde_adapter.serialize::<SP::WireFormat>(value)?;
     let mut typed_rng = Rng(rng);
-    let signed_value = SignedValue::<SP>::new(&mut typed_rng, args.signer(), &message.name, id, serialized_value);
-    Value::new(signed_value)
+    let signed_value = SignedValue::<SP>::new(&mut typed_rng, args.signer(), &message.name, id, serialized_value)?;
+    Ok(Value::new(signed_value))
 }
 
 pub fn broadcast<SP: SessionParameters, P: Protocol<SP>>(
     message: &ProtocolMessage,
     scalar: &Node<SP, P>,
     group: &PartyGroup<SP::Verifier>,
-) -> Node<SP, P> {
+) -> Result<Node<SP, P>, LocalError> {
     let cloned_message = message.clone();
     let value_name = scalar.as_ref().store_in().name.to_string();
+
+    if scalar.group().is_some() {
+        return Err(LocalError::new(
+            "`scalar` argument of `broadcast()` must be a scalar node",
+        ));
+    }
 
     let serialize_and_sign = Node::new(TypedNode {
         store_in: Tag::signed(&message.name),
@@ -437,12 +451,21 @@ pub fn broadcast<SP: SessionParameters, P: Protocol<SP>>(
             group: group.clone(),
         },
     });
+
     collect(&send_node)
 }
 
-pub fn send<SP: SessionParameters, P: Protocol<SP>>(message: &ProtocolMessage, array: &Node<SP, P>) -> Node<SP, P> {
+pub fn send<SP: SessionParameters, P: Protocol<SP>>(
+    message: &ProtocolMessage,
+    array: &Node<SP, P>,
+) -> Result<Node<SP, P>, LocalError> {
     let cloned_message = message.clone();
     let value_name = array.as_ref().store_in().name.to_string();
+
+    let group = array
+        .as_ref()
+        .group()
+        .ok_or_else(|| LocalError::new("`array` argument of `send()` must be an array node"))?;
 
     let serialize_and_sign = Node::new(TypedNode {
         store_in: Tag::signed(&message.name),
@@ -456,7 +479,7 @@ pub fn send<SP: SessionParameters, P: Protocol<SP>>(message: &ProtocolMessage, a
                 },
             )),
             returns_nothing: false,
-            group: array.as_ref().group().unwrap().clone(),
+            group: group.clone(),
         },
     });
 
@@ -465,15 +488,19 @@ pub fn send<SP: SessionParameters, P: Protocol<SP>>(message: &ProtocolMessage, a
         dependencies: Vec::new(),
         kind: NodeKind::DirectMessage {
             data: serialize_and_sign,
-            group: array.as_ref().group().unwrap().clone(),
+            group: group.clone(),
         },
     });
+
     collect(&send_node)
 }
 
-fn deserialize<SP: SessionParameters>(args: Args<SP>, message: &ProtocolMessage) -> Value {
-    let received = args.get::<SerializedValue>(&message.name);
-    message.serde_adapter.deserialize::<SP::WireFormat>(received)
+fn deserialize<SP: SessionParameters>(args: Args<SP>, message: &ProtocolMessage) -> Result<Value, ComputeError> {
+    let received = args.get::<SerializedValue>(&message.name)?;
+    message
+        .serde_adapter
+        .deserialize::<SP::WireFormat>(received)
+        .map_err(|_err| ComputeError::Data)
 }
 
 pub fn receive<SP: SessionParameters, P: Protocol<SP>>(
@@ -505,17 +532,23 @@ pub fn receive<SP: SessionParameters, P: Protocol<SP>>(
     })
 }
 
-pub fn collect<SP: SessionParameters, P: Protocol<SP>>(values: &Node<SP, P>) -> Node<SP, P> {
-    Node::new(TypedNode {
+pub fn collect<SP: SessionParameters, P: Protocol<SP>>(values: &Node<SP, P>) -> Result<Node<SP, P>, LocalError> {
+    let group = values
+        .as_ref()
+        .group()
+        .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be an array node"))?;
+
+    Ok(Node::new(TypedNode {
         store_in: Tag::collected(&values.as_ref().store_in),
         dependencies: Vec::new(),
         kind: NodeKind::Collect {
             values: values.get_strong_ref(),
+            group: group.clone(),
         },
-    })
+    }))
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ProtocolMessage {
     name: String,
     serde_adapter: SerdeAdapter,

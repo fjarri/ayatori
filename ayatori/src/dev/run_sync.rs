@@ -1,8 +1,9 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{collections::BTreeMap, format, vec::Vec};
 
 use signature::rand_core::CryptoRngCore;
 
 use crate::{
+    error::LocalError,
     protocol::{Protocol, SessionParameters},
     session::{Message, Session, Task},
 };
@@ -10,7 +11,7 @@ use crate::{
 pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
-) -> BTreeMap<SP::Verifier, P::Output> {
+) -> Result<BTreeMap<SP::Verifier, P::Output>, LocalError> {
     let mut sessions = sessions
         .into_iter()
         .map(|session| (session.id().clone(), session))
@@ -25,27 +26,34 @@ pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
         let mut finished = Vec::new();
 
         for (id, session) in sessions.iter_mut() {
-            for message in messages.get_mut(id).unwrap().drain(..) {
-                session.add_message(message);
+            for message in messages
+                .get_mut(id)
+                .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
+                .drain(..)
+            {
+                session.add_message(message)?;
             }
 
-            match session.make_task() {
+            match session.make_task()? {
                 Some(Task::Compute(task)) => {
-                    let result = task.compute();
-                    session.add_result(result);
+                    let result = task.compute()?;
+                    session.add_result(result)?;
                 }
                 Some(Task::ComputeWithRng(task)) => {
-                    let result = task.compute(rng);
-                    session.add_result(result);
+                    let result = task.compute(rng)?;
+                    session.add_result(result)?;
                 }
                 Some(Task::Send(task)) => {
-                    let (message, result) = task.compute();
+                    let (message, result) = task.compute()?;
                     let destination = message.destination().clone();
-                    messages.get_mut(&destination).unwrap().push(message);
-                    session.add_result(result);
+                    messages
+                        .get_mut(&destination)
+                        .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
+                        .push(message);
+                    session.add_result(result)?;
                 }
                 Some(Task::Finalize(task)) => {
-                    results.insert(id.clone(), task.value());
+                    results.insert(id.clone(), task.value()?);
                     finished.push(id.clone());
                 }
                 None => {}
@@ -57,5 +65,5 @@ pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
         }
     }
 
-    results
+    Ok(results)
 }

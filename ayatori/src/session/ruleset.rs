@@ -170,9 +170,8 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                         ));
                     }
                 }
-                NodeKind::Collect { values } => {
+                NodeKind::Collect { values, group } => {
                     let mut specific_condition = Condition::empty();
-                    let group = values.as_ref().group().unwrap();
                     specific_condition.and(LeafCondition::Array {
                         tag: values.as_ref().store_in().clone(),
                         group: group.clone(),
