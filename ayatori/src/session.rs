@@ -5,6 +5,6 @@ mod ruleset;
 mod session;
 
 pub use message::Message;
-pub use session::{Session, Task};
+pub use session::{AddMessageResult, Session, Task};
 
 pub(crate) use message::SignedValue;

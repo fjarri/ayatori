@@ -5,7 +5,7 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     error::LocalError,
     protocol::{Protocol, SessionParameters},
-    session::{Message, Session, Task},
+    session::{AddMessageResult, Message, Session, Task},
 };
 
 pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
@@ -31,7 +31,14 @@ pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
                 .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
                 .drain(..)
             {
-                session.add_message(message)?;
+                match session.add_message(message)? {
+                    AddMessageResult::Success => {}
+                    AddMessageResult::InvalidSignature => {
+                        return Err(LocalError::new(format!(
+                            "A message from {id:?} had an invalid signature"
+                        )));
+                    }
+                };
             }
 
             match session.make_task()? {
