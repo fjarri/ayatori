@@ -95,7 +95,7 @@ impl digest::Update for TestHasher {
 
 impl digest::FixedOutput for TestHasher {
     fn finalize_into(self, out: &mut digest::Output<Self>) {
-        AsMut::<[u8]>::as_mut(out).copy_from_slice(&self.buffer)
+        AsMut::<[u8]>::as_mut(out).copy_from_slice(&self.buffer);
     }
 }
 

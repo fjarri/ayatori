@@ -1,9 +1,12 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 
 use serde::{Deserialize, Serialize};
 use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest, rand_core::CryptoRngCore};
 
-use crate::protocol::{SerializedValue, SessionParameters, WireFormat};
+use crate::{
+    error::LocalError,
+    protocol::{SerializedValue, SessionParameters, WireFormat},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ValueMetadata<Id> {
@@ -14,6 +17,18 @@ pub(crate) struct ValueMetadata<Id> {
 impl<Id> ValueMetadata<Id> {
     pub fn name(&self) -> &str {
         &self.name
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum VerificationError {
+    Local(LocalError),
+    SignatureMismatch,
+}
+
+impl From<LocalError> for VerificationError {
+    fn from(source: LocalError) -> Self {
+        Self::Local(source)
     }
 }
 
@@ -35,24 +50,27 @@ impl<SP: SessionParameters> SignedValue<SP> {
         name: &str,
         destination: &SP::Verifier,
         value: SerializedValue,
-    ) -> Self {
+    ) -> Result<Self, LocalError> {
         let metadata = ValueMetadata::<SP::Verifier> {
             name: name.into(),
             destination: destination.clone(),
         };
-        let value_len = u64::try_from(value.as_ref().len()).unwrap();
+        let value_len =
+            u64::try_from(value.as_ref().len()).map_err(|_| LocalError::new("Message size exceeds 2^64 bytes"))?;
         let digest = SP::Digest::new_with_prefix(b"SignedValueDigest")
-            .chain_update(<SP::WireFormat as WireFormat>::serialize(&metadata).unwrap())
+            .chain_update(<SP::WireFormat as WireFormat>::serialize(&metadata)?)
             .chain_update(value_len.to_be_bytes())
             .chain_update(value.as_ref());
 
-        let signature = signer.try_sign_digest_with_rng(rng, digest).unwrap();
-        Self {
+        let signature = signer
+            .try_sign_digest_with_rng(rng, digest)
+            .map_err(|err| LocalError::new(format!("Signing failed: {err}")))?;
+        Ok(Self {
             signature,
             source: signer.verifying_key(),
             metadata,
             value,
-        }
+        })
     }
 
     pub fn source(&self) -> &SP::Verifier {
@@ -60,14 +78,17 @@ impl<SP: SessionParameters> SignedValue<SP> {
     }
 
     // TODO: produce a `Verified*` struct
-    pub fn verify(&self) -> Option<()> {
-        let value_len = u64::try_from(self.value.as_ref().len()).unwrap();
+    pub fn verify(&self) -> Result<(), VerificationError> {
+        let value_len =
+            u64::try_from(self.value.as_ref().len()).map_err(|_| LocalError::new("Message size exceeds 2^64 bytes"))?;
         let digest = SP::Digest::new_with_prefix(b"SignedValueDigest")
-            .chain_update(<SP::WireFormat as WireFormat>::serialize(&self.metadata).unwrap())
+            .chain_update(<SP::WireFormat as WireFormat>::serialize(&self.metadata)?)
             .chain_update(value_len.to_be_bytes())
             .chain_update(self.value.as_ref());
-        self.source.verify_digest(digest, &self.signature).unwrap();
-        Some(())
+        self.source
+            .verify_digest(digest, &self.signature)
+            .map_err(|_err| VerificationError::SignatureMismatch)?;
+        Ok(())
     }
 
     pub fn metadata(&self) -> &ValueMetadata<SP::Verifier> {

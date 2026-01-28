@@ -24,7 +24,7 @@ impl<'de> AsTransientDeserializer<'de> for PostcardDeserializer<'de> {
 impl WireFormat for BinaryFormat {
     fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, LocalError> {
         postcard::to_allocvec(&value)
-            .map(|vec| vec.into())
+            .map(Into::into)
             .map_err(|err| LocalError::new(err.to_string()))
     }
 
@@ -56,7 +56,7 @@ impl<'de> AsTransientDeserializer<'de> for JSONDeserializer<'de> {
 impl WireFormat for HumanReadableFormat {
     fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, LocalError> {
         serde_json::to_vec(&value)
-            .map(|vec| vec.into())
+            .map(Into::into)
             .map_err(|err| LocalError::new(err.to_string()))
     }
 

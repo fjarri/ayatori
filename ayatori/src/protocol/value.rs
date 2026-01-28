@@ -1,4 +1,9 @@
-use alloc::{boxed::Box, format, string::String, sync::Arc};
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+};
 use core::{
     any::{Any, TypeId, type_name},
     fmt::{self, Debug},
@@ -9,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{Hex, SliceLike};
 
 use super::traits::WireFormat;
+use crate::error::LocalError;
 
 /*
 We need a dyn trait that both supports downcast for `Arc`s (like `Any` does),
@@ -41,7 +47,7 @@ where
     }
 
     fn debug(&self) -> String {
-        format!("{:?}", self)
+        format!("{self:?}")
     }
 }
 
@@ -59,7 +65,7 @@ impl Value {
         Self(Arc::new(value))
     }
 
-    fn downcast_arc<T>(&self) -> Option<Arc<T>>
+    fn downcast_arc<T>(&self) -> Result<Arc<T>, LocalError>
     where
         T: Erasable,
     {
@@ -67,14 +73,17 @@ impl Value {
         // we rely on `into_raw()`/`from_raw()` instead.
 
         if self.0.as_ref().my_type_id() != TypeId::of::<T>() {
-            return None;
+            return Err(LocalError::new(format!(
+                "Attempted to downcast {self:?} as {}",
+                type_name::<T>()
+            )));
         }
 
         // Increase the refcount first so that the `Arc`-wrapped value doesn't get dropped
         // as we go through the logic.
         let arc = self.0.clone();
 
-        let raw = Arc::into_raw(arc) as *const T;
+        let raw = Arc::into_raw(arc).cast::<T>();
 
         // SAFETY:
         // - `TypeId` was checked
@@ -83,37 +92,63 @@ impl Value {
         // - The object will not get dropped since we created an additional reference beforehand.
         let typed_arc = unsafe { Arc::from_raw(raw) };
 
-        Some(typed_arc)
+        Ok(typed_arc)
     }
 
-    pub fn downcast<T: Erasable + Clone>(&self) -> T {
-        let dc = self.downcast_arc::<T>().unwrap();
-        Arc::unwrap_or_clone(dc)
+    pub fn downcast<T: Erasable + Clone>(&self) -> Result<T, LocalError> {
+        self.downcast_arc::<T>().map(Arc::unwrap_or_clone)
     }
 
-    pub fn downcast_ref<T: Erasable>(&self) -> &T {
+    pub fn downcast_ref<T: Erasable>(&self) -> Result<&T, LocalError> {
         // Note that `as_ref()` here is crucial, otherwise `as_any()`
         // is called on the `Arc` instead of the concrete type inside,
         // leading to `downcast_ref()` failing because of the type mismatch.
-        self.0.as_ref().as_any().downcast_ref::<T>().unwrap()
+        self.0
+            .as_ref()
+            .as_any()
+            .downcast_ref::<T>()
+            .ok_or_else(|| LocalError::new(format!("Attempted to downcast {self:?} as {}", type_name::<T>())))
+    }
+}
+
+/// An error that can be returned during deserialization.
+#[derive(displaydoc::Display, Debug, Clone)]
+#[displaydoc("Error deserializing into {target_type}: {message}")]
+pub(crate) struct DeserializationError {
+    target_type: String,
+    message: String,
+}
+
+impl DeserializationError {
+    /// Creates a new deserialization error.
+    pub fn new<T>(message: impl Into<String>) -> Self {
+        Self {
+            target_type: type_name::<T>().into(),
+            message: message.into(),
+        }
     }
 }
 
 trait DynAdapter {
-    fn as_serialize<'a>(&'a self, value: &'a Value) -> &'a dyn erased_serde::Serialize;
-    fn deserialize(&self, deserializer: &mut dyn erased_serde::Deserializer<'_>) -> Value;
+    fn as_serialize<'a>(&'a self, value: &'a Value) -> Result<&'a dyn erased_serde::Serialize, LocalError>;
+    fn deserialize(&self, deserializer: &mut dyn erased_serde::Deserializer<'_>)
+    -> Result<Value, DeserializationError>;
     fn clone_boxed(&self) -> Box<dyn DynAdapter>;
     fn debug(&self) -> String;
 }
 
 impl<T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdapter for DynAdapterHolder<T> {
-    fn as_serialize<'a>(&'a self, value: &'a Value) -> &'a dyn erased_serde::Serialize {
-        value.downcast_ref::<T>()
+    fn as_serialize<'a>(&'a self, value: &'a Value) -> Result<&'a dyn erased_serde::Serialize, LocalError> {
+        Ok(value.downcast_ref::<T>()?)
     }
 
-    fn deserialize(&self, deserializer: &mut dyn erased_serde::Deserializer<'_>) -> Value {
-        let typed_value = erased_serde::deserialize::<T>(deserializer).unwrap();
-        Value::new(typed_value)
+    fn deserialize(
+        &self,
+        deserializer: &mut dyn erased_serde::Deserializer<'_>,
+    ) -> Result<Value, DeserializationError> {
+        erased_serde::deserialize::<T>(deserializer)
+            .map(Value::new)
+            .map_err(|err| DeserializationError::new::<T>(err.to_string()))
     }
 
     fn clone_boxed(&self) -> Box<dyn DynAdapter> {
@@ -134,11 +169,17 @@ impl SerdeAdapter {
         Self(Box::new(DynAdapterHolder::<T>(PhantomData)))
     }
 
-    pub fn serialize<F: WireFormat>(&self, value: &Value) -> SerializedValue {
-        SerializedValue::new(F::serialize(self.0.as_serialize(value)).unwrap())
+    pub fn serialize<F: WireFormat>(&self, value: &Value) -> Result<SerializedValue, LocalError> {
+        self.0
+            .as_serialize(value)
+            .and_then(F::serialize)
+            .map(SerializedValue::new)
     }
 
-    pub fn deserialize<F: WireFormat>(&self, serialized_value: &SerializedValue) -> Value {
+    pub fn deserialize<F: WireFormat>(
+        &self,
+        serialized_value: &SerializedValue,
+    ) -> Result<Value, DeserializationError> {
         let deserializer = F::deserializer(serialized_value.as_ref());
         let mut erased_deserializer = Box::new(<dyn erased_serde::Deserializer<'_>>::erase(deserializer));
         self.0.deserialize(&mut erased_deserializer)
@@ -193,11 +234,11 @@ mod tests {
         let typed_value = 10u64;
         let value = Value::new(typed_value);
         assert_eq!(Arc::strong_count(&value.0), 1);
-        let integer = value.downcast::<u64>();
+        let integer = value.downcast::<u64>().unwrap();
         assert_eq!(Arc::strong_count(&value.0), 1);
         assert_eq!(integer, typed_value);
 
-        let integer = value.downcast_ref::<u64>();
+        let integer = value.downcast_ref::<u64>().unwrap();
         assert_eq!(integer, &typed_value);
     }
 
@@ -206,9 +247,9 @@ mod tests {
         let typed_value = Serializable { x: 10, y: true };
         let value = Value::new(typed_value);
         let adapter = SerdeAdapter::new::<Serializable>();
-        let serialized = adapter.serialize::<BinaryFormat>(&value);
-        let value_back = adapter.deserialize::<BinaryFormat>(&serialized);
-        let typed_value_back = value_back.downcast::<Serializable>();
+        let serialized = adapter.serialize::<BinaryFormat>(&value).unwrap();
+        let value_back = adapter.deserialize::<BinaryFormat>(&serialized).unwrap();
+        let typed_value_back = value_back.downcast::<Serializable>().unwrap();
         assert_eq!(typed_value, typed_value_back);
     }
 }

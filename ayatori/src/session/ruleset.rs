@@ -4,7 +4,10 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use super::conditions::{Condition, LeafCondition};
-use crate::protocol::{ArrayFunction, Node, NodeKind, Protocol, ScalarFunction, SessionParameters, Tag};
+use crate::{
+    error::LocalError,
+    protocol::{ArrayFunction, InnerNode, Node, NodeKind, Protocol, ScalarFunction, SessionParameters, Tag},
+};
 
 #[derive(Debug)]
 pub(crate) enum Arg {
@@ -50,7 +53,8 @@ pub(crate) struct Ruleset<SP: SessionParameters, P: Protocol<SP>> {
 }
 
 impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
-    pub fn new(output_node: Node<SP, P>) -> Self {
+    pub fn new(output_node: Node<SP, P>) -> Result<Self, LocalError> {
+        let output_node = output_node.into_inner();
         let output_tag = output_node.as_ref().store_in().clone();
 
         let mut nodes_to_process = vec![output_node];
@@ -73,7 +77,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
             for dependency in node.as_ref().dependencies() {
                 match dependency.as_ref().group() {
                     Some(_group) => {
-                        panic!("Not supported");
+                        return Err(LocalError::new("Only scalar nodes are allowed as dependencies"));
                     }
                     None => {
                         shared_condition.and(LeafCondition::Value {
@@ -81,7 +85,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                         });
                     }
                 }
-                nodes_to_process.push(dependency.get_strong_ref());
+                nodes_to_process.push(dependency.clone());
             }
 
             let mut actions = Vec::new();
@@ -89,11 +93,11 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
             match node.as_ref().kind() {
                 NodeKind::ComputeScalar { function, args } => {
                     let mut specific_condition = Condition::empty();
-                    for arg in args.iter() {
+                    for arg in args {
                         specific_condition.and(LeafCondition::Value {
                             tag: arg.as_ref().store_in().clone(),
                         });
-                        nodes_to_process.push(arg.get_strong_ref());
+                        nodes_to_process.push(arg.clone());
                     }
                     actions.push((
                         Action::ComputeScalar {
@@ -101,7 +105,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                             function: function.clone(),
                             args: args
                                 .iter()
-                                .map(|arg: &Node<SP, P>| arg.as_ref().store_in().clone())
+                                .map(|arg: &InnerNode<SP, P>| arg.as_ref().store_in().clone())
                                 .collect(),
                         },
                         specific_condition,
@@ -116,7 +120,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                 } => {
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
-                        for arg in args.iter() {
+                        for arg in args {
                             if arg.as_ref().group().is_some() {
                                 specific_condition.and(LeafCondition::ArrayElement {
                                     tag: arg.as_ref().store_in().clone(),
@@ -127,7 +131,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                                     tag: arg.as_ref().store_in().clone(),
                                 });
                             }
-                            nodes_to_process.push(arg.get_strong_ref());
+                            nodes_to_process.push(arg.clone());
                         }
 
                         actions.push((
@@ -137,7 +141,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                                 index: id.clone(),
                                 args: args
                                     .iter()
-                                    .map(|arg: &Node<SP, P>| {
+                                    .map(|arg: &InnerNode<SP, P>| {
                                         let tag = arg.as_ref().store_in().clone();
                                         if arg.as_ref().group().is_some() {
                                             Arg::ArrayElem(tag)
@@ -152,7 +156,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                     }
                 }
                 NodeKind::DirectMessage { data, group } => {
-                    nodes_to_process.push(data.get_strong_ref());
+                    nodes_to_process.push(data.clone());
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         specific_condition.and(LeafCondition::ArrayElement {
@@ -170,15 +174,14 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                         ));
                     }
                 }
-                NodeKind::Collect { values } => {
+                NodeKind::Collect { values, group } => {
                     let mut specific_condition = Condition::empty();
-                    let group = values.as_ref().group().unwrap();
                     specific_condition.and(LeafCondition::Array {
                         tag: values.as_ref().store_in().clone(),
                         group: group.clone(),
                         got_ids: BTreeSet::new(),
                     });
-                    nodes_to_process.push(values.get_strong_ref());
+                    nodes_to_process.push(values.clone());
 
                     actions.push((
                         Action::Collect {
@@ -186,7 +189,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                             values: values.as_ref().store_in().clone(),
                         },
                         specific_condition,
-                    ))
+                    ));
                 }
                 NodeKind::Receive { .. } => {}
             }
@@ -198,17 +201,17 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
             }
         }
 
-        Self { rules, output_tag }
+        Ok(Self { output_tag, rules })
     }
 
     pub fn update_with_value_ready(&mut self, tag: &Tag) {
-        for rule in self.rules.iter_mut() {
+        for rule in &mut self.rules {
             rule.condition.update_with_value_ready(tag);
         }
     }
 
     pub fn update_with_array_element_ready(&mut self, tag: &Tag, id: &SP::Verifier) {
-        for rule in self.rules.iter_mut() {
+        for rule in &mut self.rules {
             rule.condition.update_with_array_element_ready(tag, id);
         }
     }
@@ -252,7 +255,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Display for Action<SP, P> {
                 function,
                 args,
             } => {
-                let joined_args = args.iter().map(|arg| arg.to_string()).join(", ");
+                let joined_args = args.iter().map(ToString::to_string).join(", ");
                 write!(f, "{store_in} = {function}({joined_args})")
             }
             Self::ComputeArrayElement {
@@ -302,8 +305,8 @@ impl<SP: SessionParameters, P: Protocol<SP>> Display for Rule<SP, P> {
 impl<SP: SessionParameters, P: Protocol<SP>> Display for Ruleset<SP, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         writeln!(f, "Ruleset:")?;
-        for rule in self.rules.iter() {
-            writeln!(f, "{}", rule)?;
+        for rule in &self.rules {
+            writeln!(f, "{rule}")?;
         }
         Ok(())
     }
