@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use super::traits::PartyId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartyGroup<Id: PartyId> {
     ids: BTreeSet<Id>,
 }

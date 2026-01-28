@@ -99,29 +99,25 @@ pub struct ComputeTask<SP: SessionParameters, P: Protocol<SP>> {
 
 impl<SP: SessionParameters, P: Protocol<SP>> ComputeTask<SP, P> {
     pub fn compute(self) -> Result<TaskResult<SP::Verifier>, LocalError> {
+        let store_in = self.store_in.clone();
         match self.function {
             ComputeFunction::Scalar { function } => {
                 let result = match function.call(&self.shared_data, self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => todo!(),
+                    Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
                 };
-                Ok(TaskResult(TaskResultEnum::Compute {
-                    store_in: self.store_in.clone(),
-                    result,
-                }))
+                Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeFunction::Array { function, id } => {
                 let result = match function.call(&id, &self.shared_data, self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => todo!(),
+                    Err(ComputeError::Data) => {
+                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
+                    }
                 };
-                Ok(TaskResult(TaskResultEnum::ComputeArray {
-                    store_in: self.store_in.clone(),
-                    id,
-                    result,
-                }))
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
             }
         }
     }
@@ -148,29 +144,25 @@ pub struct ComputeWithRngTask<SP: SessionParameters, P: Protocol<SP>> {
 
 impl<SP: SessionParameters, P: Protocol<SP>> ComputeWithRngTask<SP, P> {
     pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP::Verifier>, LocalError> {
+        let store_in = self.store_in.clone();
         match self.function {
             ComputeWithRngFunction::Scalar { function } => {
                 let result = match function.call(rng, &self.shared_data, self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => todo!(),
+                    Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
                 };
-                Ok(TaskResult(TaskResultEnum::Compute {
-                    store_in: self.store_in.clone(),
-                    result,
-                }))
+                Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeWithRngFunction::Array { function, id } => {
                 let result = match function.call(rng, &id, &self.shared_data, self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => todo!(),
+                    Err(ComputeError::Data) => {
+                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
+                    }
                 };
-                Ok(TaskResult(TaskResultEnum::ComputeArray {
-                    store_in: self.store_in.clone(),
-                    id,
-                    result,
-                }))
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
             }
         }
     }
@@ -223,6 +215,14 @@ enum TaskResultEnum<Id> {
     Send { store_in: Tag, destination: Id },
     Compute { store_in: Tag, result: Value },
     ComputeArray { store_in: Tag, id: Id, result: Value },
+    UnattributableError { store_in: Tag },
+    AttributableError { store_in: Tag, id: Id },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AddMessageResult {
+    Success,
+    InvalidSignature,
 }
 
 #[derive(Debug)]
@@ -362,12 +362,12 @@ where
         Ok(None)
     }
 
-    pub fn add_message(&mut self, message: Message<SP>) -> Result<(), LocalError> {
+    pub fn add_message(&mut self, message: Message<SP>) -> Result<AddMessageResult, LocalError> {
         for value in message.values() {
             match value.verify() {
                 Ok(()) => {}
                 Err(VerificationError::Local(error)) => return Err(error),
-                Err(VerificationError::SignatureMismatch) => todo!(),
+                Err(VerificationError::SignatureMismatch) => return Ok(AddMessageResult::InvalidSignature),
             }
             let source = value.source().clone();
             let tag = Tag::received(value.metadata().name());
@@ -375,7 +375,7 @@ where
                 .set_elem(&tag, &source, Value::new(value.serialized_value()))?;
             self.ruleset.update_with_array_element_ready(&tag, &source);
         }
-        Ok(())
+        Ok(AddMessageResult::Success)
     }
 
     pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {
@@ -391,6 +391,18 @@ where
             TaskResultEnum::ComputeArray { store_in, id, result } => {
                 self.storage.set_elem(&store_in, &id, result)?;
                 self.ruleset.update_with_array_element_ready(&store_in, &id);
+            }
+            TaskResultEnum::AttributableError { store_in, id } => {
+                // TODO (#39): ban the node internally and carry on.
+                // For now we are returning a `LocalError` right away.
+                return Err(LocalError::new(format!(
+                    "Attributable error when calculating {store_in}[{id:?}]"
+                )));
+            }
+            TaskResultEnum::UnattributableError { store_in } => {
+                return Err(LocalError::new(format!(
+                    "Unattributable error when calculating {store_in}"
+                )));
             }
         }
         Ok(())

@@ -381,7 +381,9 @@ pub fn verify<SP: SessionParameters, P: Protocol<SP>>(
     let group = *groups
         .first()
         .ok_or_else(|| LocalError::new("There must be at least one array argument"))?;
-    // TODO (#5): check that all groups are the same
+    if groups.iter().any(|g| g != &group) {
+        return Err(LocalError::new("The group of all arguments must be the same"));
+    }
 
     let inner = TypedNode {
         store_in: Tag::computed(name),
