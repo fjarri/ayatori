@@ -115,12 +115,14 @@ pub struct Args<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
     my_id: SP::Verifier,
     values: BTreeMap<String, Value>,
+    shared_data: Value,
 }
 
 impl<SP: SessionParameters> Args<SP> {
     pub(crate) fn new(
         signer: &Arc<SP::Signer>,
         my_id: &SP::Verifier,
+        shared_data: Value,
         values: BTreeMap<Tag, Value>,
     ) -> Result<Self, LocalError> {
         // TODO (#11): for now checking if there are name clashes.
@@ -135,7 +137,12 @@ impl<SP: SessionParameters> Args<SP> {
             my_id: my_id.clone(),
             signer: signer.clone(),
             values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
+            shared_data: shared_data.clone(),
         })
+    }
+
+    pub fn shared_data<P: Protocol<SP>>(&self) -> Result<&P::SharedData, LocalError> {
+        self.shared_data.downcast_ref::<P::SharedData>()
     }
 
     pub(crate) fn signer(&self) -> &SP::Signer {
@@ -167,14 +174,14 @@ impl<SP: SessionParameters> Args<SP> {
 
 // `Node` intentionally does not implement `Clone` - our clones are shallow, which may be confusing for the user.
 #[derive(Debug)]
-pub struct Node<SP: SessionParameters, P: Protocol<SP>>(InnerNode<SP, P>);
+pub struct Node<SP: SessionParameters>(InnerNode<SP>);
 
-impl<SP: SessionParameters, P: Protocol<SP>> Node<SP, P> {
-    pub(crate) fn into_inner(self) -> InnerNode<SP, P> {
+impl<SP: SessionParameters> Node<SP> {
+    pub(crate) fn into_inner(self) -> InnerNode<SP> {
         self.0
     }
 
-    pub(crate) fn as_inner_ref(&self) -> &InnerNode<SP, P> {
+    pub(crate) fn as_inner_ref(&self) -> &InnerNode<SP> {
         &self.0
     }
 
@@ -195,15 +202,15 @@ impl<SP: SessionParameters, P: Protocol<SP>> Node<SP, P> {
 
 #[derive(Debug)]
 #[derive_where::derive_where(Clone)]
-pub(crate) struct InnerNode<SP: SessionParameters, P: Protocol<SP>>(Arc<TypedNode<SP, P>>);
+pub(crate) struct InnerNode<SP: SessionParameters>(Arc<TypedNode<SP>>);
 
-impl<SP: SessionParameters, P: Protocol<SP>> InnerNode<SP, P> {
-    pub fn new(typed_node: TypedNode<SP, P>) -> Self {
+impl<SP: SessionParameters> InnerNode<SP> {
+    pub fn new(typed_node: TypedNode<SP>) -> Self {
         Self(Arc::new(typed_node))
     }
 
     #[must_use]
-    pub fn with_dependencies(self, dependencies: &[&Node<SP, P>]) -> Self {
+    pub fn with_dependencies(self, dependencies: &[&Node<SP>]) -> Self {
         let mut typed_node = Arc::unwrap_or_clone(self.0);
         typed_node.dependencies.extend(nodes_to_owned(dependencies));
         Self::new(typed_node)
@@ -216,7 +223,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> InnerNode<SP, P> {
         Self::new(typed_node)
     }
 
-    pub fn as_ref(&self) -> &TypedNode<SP, P> {
+    pub fn as_ref(&self) -> &TypedNode<SP> {
         &self.0
     }
 
@@ -232,32 +239,32 @@ impl<SP: SessionParameters, P: Protocol<SP>> InnerNode<SP, P> {
 
 #[derive(Debug)]
 #[derive_where::derive_where(Clone)]
-pub(crate) struct TypedNode<SP: SessionParameters, P: Protocol<SP>> {
+pub(crate) struct TypedNode<SP: SessionParameters> {
     store_in: Tag,
-    kind: NodeKind<SP, P>,
-    dependencies: Vec<InnerNode<SP, P>>,
+    kind: NodeKind<SP>,
+    dependencies: Vec<InnerNode<SP>>,
 }
 
 #[derive(Debug)]
 #[derive_where::derive_where(Clone)]
-pub(crate) enum NodeKind<SP: SessionParameters, P: Protocol<SP>> {
+pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
-        function: ScalarFunction<SP, P>,
-        args: Vec<InnerNode<SP, P>>,
+        function: ScalarFunction<SP>,
+        args: Vec<InnerNode<SP>>,
     },
     ComputeArray {
-        function: ArrayFunction<SP, P>,
+        function: ArrayFunction<SP>,
         #[allow(unused)] // TODO (#9): to be used when we implement short-circuiting
         returns_nothing: bool,
         group: PartyGroup<SP::Verifier>,
-        args: Vec<InnerNode<SP, P>>,
+        args: Vec<InnerNode<SP>>,
     },
     DirectMessage {
-        data: InnerNode<SP, P>,
+        data: InnerNode<SP>,
         group: PartyGroup<SP::Verifier>,
     },
     Collect {
-        values: InnerNode<SP, P>,
+        values: InnerNode<SP>,
         group: PartyGroup<SP::Verifier>,
     },
     Receive {
@@ -265,12 +272,12 @@ pub(crate) enum NodeKind<SP: SessionParameters, P: Protocol<SP>> {
     },
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> TypedNode<SP, P> {
+impl<SP: SessionParameters> TypedNode<SP> {
     pub fn store_in(&self) -> &Tag {
         &self.store_in
     }
 
-    pub fn dependencies(&self) -> &[InnerNode<SP, P>] {
+    pub fn dependencies(&self) -> &[InnerNode<SP>] {
         &self.dependencies
     }
 
@@ -278,18 +285,16 @@ impl<SP: SessionParameters, P: Protocol<SP>> TypedNode<SP, P> {
         self.kind.group()
     }
 
-    pub fn kind(&self) -> &NodeKind<SP, P> {
+    pub fn kind(&self) -> &NodeKind<SP> {
         &self.kind
     }
 }
 
-fn nodes_to_owned<SP: SessionParameters, P: Protocol<SP>>(
-    nodes: &[&Node<SP, P>],
-) -> impl Iterator<Item = InnerNode<SP, P>> {
+fn nodes_to_owned<SP: SessionParameters>(nodes: &[&Node<SP>]) -> impl Iterator<Item = InnerNode<SP>> {
     nodes.iter().map(|node| node.as_inner_ref().clone())
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> NodeKind<SP, P> {
+impl<SP: SessionParameters> NodeKind<SP> {
     pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         match self {
             Self::ComputeArray { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
@@ -300,11 +305,11 @@ impl<SP: SessionParameters, P: Protocol<SP>> NodeKind<SP, P> {
     }
 }
 
-pub fn compute_scalar<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
+pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
-    args: &[&Node<SP, P>],
-) -> Result<Node<SP, P>, LocalError> {
+    function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError>,
+    args: &[&Node<SP>],
+) -> Result<Node<SP>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -316,11 +321,11 @@ pub fn compute_scalar<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     Ok(Node(InnerNode::new(inner)))
 }
 
-pub fn compute_scalar_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
+pub fn compute_scalar_private<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
-    args: &[&Node<SP, P>],
-) -> Result<Node<SP, P>, LocalError> {
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Ret, ComputeError>,
+    args: &[&Node<SP>],
+) -> Result<Node<SP>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -332,12 +337,12 @@ pub fn compute_scalar_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasa
     Ok(Node(InnerNode::new(inner)))
 }
 
-pub fn compute_array<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
+pub fn compute_array<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
     group: &PartyGroup<SP::Verifier>,
-    args: &[&Node<SP, P>],
-) -> Result<Node<SP, P>, LocalError> {
+    args: &[&Node<SP>],
+) -> Result<Node<SP>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -351,13 +356,12 @@ pub fn compute_array<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
     Ok(Node(InnerNode::new(inner)))
 }
 
-pub fn compute_array_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasable>(
+pub fn compute_array_private<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static
-    + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
     group: &PartyGroup<SP::Verifier>,
-    args: &[&Node<SP, P>],
-) -> Result<Node<SP, P>, LocalError> {
+    args: &[&Node<SP>],
+) -> Result<Node<SP>, LocalError> {
     let inner = TypedNode {
         store_in: Tag::computed(name),
         dependencies: Vec::new(),
@@ -371,11 +375,11 @@ pub fn compute_array_private<SP: SessionParameters, P: Protocol<SP>, Ret: Erasab
     Ok(Node(InnerNode::new(inner)))
 }
 
-pub fn verify<SP: SessionParameters, P: Protocol<SP>>(
+pub fn verify<SP: SessionParameters>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Result<(), ComputeError>,
-    args: &[&Node<SP, P>],
-) -> Result<Node<SP, P>, LocalError> {
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<(), ComputeError>,
+    args: &[&Node<SP>],
+) -> Result<Node<SP>, LocalError> {
     let groups = args.iter().filter_map(|arg| arg.group()).collect::<Vec<_>>();
     // TODO (#29): support compute-array with only scalar args (the group needs to be given explicitly)
     let group = *groups
@@ -433,11 +437,11 @@ fn serialize<SP: SessionParameters>(
     Ok(Value::new(signed_value))
 }
 
-pub fn broadcast<SP: SessionParameters, P: Protocol<SP>>(
+pub fn broadcast<SP: SessionParameters>(
     message: &ProtocolMessage,
-    scalar: &Node<SP, P>,
+    scalar: &Node<SP>,
     group: &PartyGroup<SP::Verifier>,
-) -> Result<Node<SP, P>, LocalError> {
+) -> Result<Node<SP>, LocalError> {
     let scalar = scalar.as_inner_ref().clone();
     let cloned_message = message.clone();
     let value_name = scalar.as_ref().store_in().name.clone();
@@ -455,7 +459,7 @@ pub fn broadcast<SP: SessionParameters, P: Protocol<SP>>(
             args: [scalar].into(),
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
-                move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, _shared_data: &P::SharedData, args: Args<SP>| {
+                move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>| {
                     serialize::<SP>(rng, id, value_name.clone(), args, &cloned_message)
                 },
             )),
@@ -476,10 +480,7 @@ pub fn broadcast<SP: SessionParameters, P: Protocol<SP>>(
     collect(&send_node)
 }
 
-pub fn send<SP: SessionParameters, P: Protocol<SP>>(
-    message: &ProtocolMessage,
-    array: &Node<SP, P>,
-) -> Result<Node<SP, P>, LocalError> {
+pub fn send<SP: SessionParameters>(message: &ProtocolMessage, array: &Node<SP>) -> Result<Node<SP>, LocalError> {
     let array = array.as_inner_ref().clone();
     let cloned_message = message.clone();
     let value_name = array.as_ref().store_in().name.clone();
@@ -497,7 +498,7 @@ pub fn send<SP: SessionParameters, P: Protocol<SP>>(
             args: [array].into(),
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
-                move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, _shared_data: &P::SharedData, args: Args<SP>| {
+                move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>| {
                     serialize::<SP>(rng, id, value_name.clone(), args, &cloned_message)
                 },
             )),
@@ -526,10 +527,7 @@ fn deserialize<SP: SessionParameters>(args: Args<SP>, message: &ProtocolMessage)
         .map_err(|_err| ComputeError::Data)
 }
 
-pub fn receive<SP: SessionParameters, P: Protocol<SP>>(
-    message: &ProtocolMessage,
-    group: &PartyGroup<SP::Verifier>,
-) -> Node<SP, P> {
+pub fn receive<SP: SessionParameters>(message: &ProtocolMessage, group: &PartyGroup<SP::Verifier>) -> Node<SP> {
     let received = InnerNode::new(TypedNode {
         store_in: Tag::received(&message.name),
         dependencies: Vec::new(),
@@ -545,9 +543,7 @@ pub fn receive<SP: SessionParameters, P: Protocol<SP>>(
             args: [received].into(),
             function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
                 "deserialize",
-                move |_id: &SP::Verifier, _shared_data: &P::SharedData, args: Args<SP>| {
-                    deserialize::<SP>(args, &cloned_message)
-                },
+                move |_id: &SP::Verifier, args: Args<SP>| deserialize::<SP>(args, &cloned_message),
             )),
             returns_nothing: false,
             group: group.clone(),
@@ -555,7 +551,7 @@ pub fn receive<SP: SessionParameters, P: Protocol<SP>>(
     }))
 }
 
-pub fn collect<SP: SessionParameters, P: Protocol<SP>>(values: &Node<SP, P>) -> Result<Node<SP, P>, LocalError> {
+pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, LocalError> {
     let values = values.as_inner_ref().clone();
     let group = values
         .as_ref()

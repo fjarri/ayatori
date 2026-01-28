@@ -27,16 +27,12 @@ struct Message2<Id>(Id, Id);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message3<Id>(Id, Id);
 
-fn make_scalar_value<SP: SessionParameters>(
-    _shared_data: &TestProtocolShared<SP>,
-    args: Args<SP>,
-) -> Result<Message1<SP::Verifier>, ComputeError> {
+fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError> {
     Ok(Message1(args.my_id().clone()))
 }
 
 fn make_array_elem<SP: SessionParameters>(
     id: &SP::Verifier,
-    _shared_data: &TestProtocolShared<SP>,
     args: Args<SP>,
 ) -> Result<Message2<SP::Verifier>, ComputeError> {
     Ok(Message2(args.my_id().clone(), id.clone()))
@@ -44,16 +40,12 @@ fn make_array_elem<SP: SessionParameters>(
 
 fn make_array_elem_sans_me<SP: SessionParameters>(
     id: &SP::Verifier,
-    _shared_data: &TestProtocolShared<SP>,
     args: Args<SP>,
 ) -> Result<Message3<SP::Verifier>, ComputeError> {
     Ok(Message3(args.my_id().clone(), id.clone()))
 }
 
-fn gen_output<SP: SessionParameters>(
-    _shared_data: &TestProtocolShared<SP>,
-    args: Args<SP>,
-) -> Result<(), ComputeError> {
+fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -78,7 +70,7 @@ fn gen_output<SP: SessionParameters>(
 impl<SP: SessionParameters> Protocol<SP> for TestProtocol {
     type SharedData = TestProtocolShared<SP>;
     type Output = ();
-    fn build(my_id: &SP::Verifier, shared_data: &Self::SharedData) -> Result<Node<SP, Self>, LocalError> {
+    fn build(my_id: &SP::Verifier, shared_data: &Self::SharedData) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
         let message_z = ProtocolMessage::new::<Message3<SP::Verifier>>("z");

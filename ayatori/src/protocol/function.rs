@@ -8,7 +8,7 @@ use signature::rand_core::CryptoRngCore;
 
 use super::{
     node::Args,
-    traits::{Protocol, SessionParameters},
+    traits::SessionParameters,
     value::{Erasable, Value},
 };
 use crate::error::LocalError;
@@ -25,94 +25,72 @@ impl From<LocalError> for ComputeError {
     }
 }
 
-pub(crate) struct WrappedScalarFunction<SP: SessionParameters, P: Protocol<SP>> {
+#[derive_where::derive_where(Clone)]
+pub(crate) struct WrappedScalarFunction<SP: SessionParameters> {
     #[allow(clippy::type_complexity)]
-    function: Arc<dyn Fn(&P::SharedData, Args<SP>) -> Result<Value, ComputeError>>,
+    function: Arc<dyn Fn(Args<SP>) -> Result<Value, ComputeError>>,
     name: String,
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Debug for WrappedScalarFunction<SP, P> {
+impl<SP: SessionParameters> Debug for WrappedScalarFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "WrappedScalarFunction {{ function: {} }}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for WrappedScalarFunction<SP, P> {
+impl<SP: SessionParameters> Display for WrappedScalarFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Clone for WrappedScalarFunction<SP, P> {
-    fn clone(&self) -> Self {
-        Self {
-            function: self.function.clone(),
-            name: self.name.clone(),
-        }
-    }
-}
-
-impl<SP: SessionParameters, P: Protocol<SP>> WrappedScalarFunction<SP, P> {
-    pub fn new<Ret: Erasable>(
-        function: impl 'static + Fn(&P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
-    ) -> Self {
+impl<SP: SessionParameters> WrappedScalarFunction<SP> {
+    pub fn new<Ret: Erasable>(function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError>) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
-        let wrapped =
-            Arc::new(move |shared_data: &P::SharedData, args: Args<SP>| function(shared_data, args).map(Value::new));
+        let wrapped = Arc::new(move |args: Args<SP>| function(args).map(Value::new));
         Self {
             function: wrapped,
             name,
         }
     }
 
-    pub fn call(&self, shared_data: &P::SharedData, args: Args<SP>) -> Result<Value, ComputeError> {
-        (self.function)(shared_data, args)
+    pub fn call(&self, args: Args<SP>) -> Result<Value, ComputeError> {
+        (self.function)(args)
     }
 }
 
-pub(crate) struct WrappedArrayFunction<SP: SessionParameters, P: Protocol<SP>> {
+#[derive_where::derive_where(Clone)]
+pub(crate) struct WrappedArrayFunction<SP: SessionParameters> {
     #[allow(clippy::type_complexity)]
-    function: Arc<dyn Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Result<Value, ComputeError>>,
+    function: Arc<dyn Fn(&SP::Verifier, Args<SP>) -> Result<Value, ComputeError>>,
     name: String,
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Debug for WrappedArrayFunction<SP, P> {
+impl<SP: SessionParameters> Debug for WrappedArrayFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "WrappedScalarFunction {{ function: {} }}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for WrappedArrayFunction<SP, P> {
+impl<SP: SessionParameters> Display for WrappedArrayFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Clone for WrappedArrayFunction<SP, P> {
-    fn clone(&self) -> Self {
-        Self {
-            function: self.function.clone(),
-            name: self.name.clone(),
-        }
-    }
-}
-
-impl<SP: SessionParameters, P: Protocol<SP>> WrappedArrayFunction<SP, P> {
+impl<SP: SessionParameters> WrappedArrayFunction<SP> {
     pub fn new<Ret: Erasable>(
-        function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
+        function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
     ) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
-        Self::new_pre_erased(
-            name,
-            move |id: &SP::Verifier, shared_data: &P::SharedData, args: Args<SP>| {
-                function(id, shared_data, args).map(Value::new)
-            },
-        )
+        Self::new_pre_erased(name, move |id: &SP::Verifier, args: Args<SP>| {
+            function(id, args).map(Value::new)
+        })
     }
 
     pub(crate) fn new_pre_erased(
         name: impl Into<String>,
-        function: impl 'static + Fn(&SP::Verifier, &P::SharedData, Args<SP>) -> Result<Value, ComputeError>,
+        function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Value, ComputeError>,
     ) -> Self {
         let wrapped = Arc::new(function);
         Self {
@@ -121,111 +99,85 @@ impl<SP: SessionParameters, P: Protocol<SP>> WrappedArrayFunction<SP, P> {
         }
     }
 
-    pub fn call(&self, id: &SP::Verifier, shared_data: &P::SharedData, args: Args<SP>) -> Result<Value, ComputeError> {
-        (self.function)(id, shared_data, args)
+    pub fn call(&self, id: &SP::Verifier, args: Args<SP>) -> Result<Value, ComputeError> {
+        (self.function)(id, args)
     }
 }
 
-pub(crate) struct WrappedScalarFunctionPrivate<SP: SessionParameters, P: Protocol<SP>> {
+#[derive_where::derive_where(Clone)]
+pub(crate) struct WrappedScalarFunctionPrivate<SP: SessionParameters> {
     #[allow(clippy::type_complexity)]
-    function: Arc<dyn Fn(&mut dyn CryptoRngCore, &P::SharedData, Args<SP>) -> Result<Value, ComputeError>>,
+    function: Arc<dyn Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Value, ComputeError>>,
     name: String,
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Debug for WrappedScalarFunctionPrivate<SP, P> {
+impl<SP: SessionParameters> Debug for WrappedScalarFunctionPrivate<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "WrappedScalarFunctionPrivate {{ function: {} }}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for WrappedScalarFunctionPrivate<SP, P> {
+impl<SP: SessionParameters> Display for WrappedScalarFunctionPrivate<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Clone for WrappedScalarFunctionPrivate<SP, P> {
-    fn clone(&self) -> Self {
-        Self {
-            function: self.function.clone(),
-            name: self.name.clone(),
-        }
-    }
-}
-
-impl<SP: SessionParameters, P: Protocol<SP>> WrappedScalarFunctionPrivate<SP, P> {
+impl<SP: SessionParameters> WrappedScalarFunctionPrivate<SP> {
     pub fn new<Ret, F>(function: F) -> Self
     where
-        F: 'static + Fn(&mut dyn CryptoRngCore, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
+        F: 'static + Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Ret, ComputeError>,
         Ret: Erasable,
     {
         let name = core::any::type_name_of_val(&function).to_string();
-        let wrapped = Arc::new(
-            move |rng: &mut dyn CryptoRngCore, shared_data: &P::SharedData, args: Args<SP>| {
-                function(rng, shared_data, args).map(Value::new)
-            },
-        );
+        let wrapped = Arc::new(move |rng: &mut dyn CryptoRngCore, args: Args<SP>| function(rng, args).map(Value::new));
         Self {
             function: wrapped,
             name,
         }
     }
 
-    pub fn call(
-        &self,
-        rng: &mut impl CryptoRngCore,
-        shared_data: &P::SharedData,
-        args: Args<SP>,
-    ) -> Result<Value, ComputeError> {
-        (self.function)(rng, shared_data, args)
+    pub fn call(&self, rng: &mut impl CryptoRngCore, args: Args<SP>) -> Result<Value, ComputeError> {
+        (self.function)(rng, args)
     }
 }
 
-pub(crate) struct WrappedArrayFunctionPrivate<SP: SessionParameters, P: Protocol<SP>> {
+#[derive_where::derive_where(Clone)]
+pub(crate) struct WrappedArrayFunctionPrivate<SP: SessionParameters> {
     #[allow(clippy::type_complexity)]
-    function:
-        Arc<dyn Fn(&mut dyn CryptoRngCore, &SP::Verifier, &P::SharedData, Args<SP>) -> Result<Value, ComputeError>>,
+    function: Arc<dyn Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Value, ComputeError>>,
     name: String,
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Debug for WrappedArrayFunctionPrivate<SP, P> {
+impl<SP: SessionParameters> Debug for WrappedArrayFunctionPrivate<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "WrappedScalarFunctionPrivate {{ function: {} }}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for WrappedArrayFunctionPrivate<SP, P> {
+impl<SP: SessionParameters> Display for WrappedArrayFunctionPrivate<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}", self.name)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Clone for WrappedArrayFunctionPrivate<SP, P> {
-    fn clone(&self) -> Self {
-        Self {
-            function: self.function.clone(),
-            name: self.name.clone(),
-        }
-    }
-}
-
-impl<SP: SessionParameters, P: Protocol<SP>> WrappedArrayFunctionPrivate<SP, P> {
+impl<SP: SessionParameters> WrappedArrayFunctionPrivate<SP> {
     pub fn new<F, Ret: Erasable>(function: F) -> Self
     where
-        F: 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &P::SharedData, Args<SP>) -> Result<Ret, ComputeError>,
+        F: 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
     {
         let name = core::any::type_name_of_val(&function).to_string();
         Self::new_pre_erased(
             name,
-            move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, shared_data: &P::SharedData, args: Args<SP>| {
-                function(rng, id, shared_data, args).map(Value::new)
+            move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>| {
+                function(rng, id, args).map(Value::new)
             },
         )
     }
 
     pub(crate) fn new_pre_erased<F>(name: impl Into<String>, function: F) -> Self
     where
-        F: 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &P::SharedData, Args<SP>) -> Result<Value, ComputeError>,
+        F: 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Value, ComputeError>,
     {
         let wrapped = Arc::new(function);
         Self {
@@ -234,32 +186,26 @@ impl<SP: SessionParameters, P: Protocol<SP>> WrappedArrayFunctionPrivate<SP, P> 
         }
     }
 
-    pub fn call(
-        &self,
-        rng: &mut impl CryptoRngCore,
-        id: &SP::Verifier,
-        shared_data: &P::SharedData,
-        args: Args<SP>,
-    ) -> Result<Value, ComputeError> {
-        (self.function)(rng, id, shared_data, args)
+    pub fn call(&self, rng: &mut impl CryptoRngCore, id: &SP::Verifier, args: Args<SP>) -> Result<Value, ComputeError> {
+        (self.function)(rng, id, args)
     }
 }
 
 #[derive(Debug)]
 #[derive_where::derive_where(Clone)]
-pub(crate) enum ScalarFunction<SP: SessionParameters, P: Protocol<SP>> {
-    Public(WrappedScalarFunction<SP, P>),
-    Private(WrappedScalarFunctionPrivate<SP, P>),
+pub(crate) enum ScalarFunction<SP: SessionParameters> {
+    Public(WrappedScalarFunction<SP>),
+    Private(WrappedScalarFunctionPrivate<SP>),
 }
 
 #[derive(Debug)]
 #[derive_where::derive_where(Clone)]
-pub(crate) enum ArrayFunction<SP: SessionParameters, P: Protocol<SP>> {
-    Public(WrappedArrayFunction<SP, P>),
-    Private(WrappedArrayFunctionPrivate<SP, P>),
+pub(crate) enum ArrayFunction<SP: SessionParameters> {
+    Public(WrappedArrayFunction<SP>),
+    Private(WrappedArrayFunctionPrivate<SP>),
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for ScalarFunction<SP, P> {
+impl<SP: SessionParameters> Display for ScalarFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::Private(function) => write!(f, "{function}[PRIVATE]"),
@@ -268,7 +214,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Display for ScalarFunction<SP, P> {
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for ArrayFunction<SP, P> {
+impl<SP: SessionParameters> Display for ArrayFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::Private(function) => write!(f, "{function}[PRIVATE]"),

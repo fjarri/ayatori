@@ -20,46 +20,28 @@ struct DistributedRNGShared<SP: SessionParameters> {
     parties: Vec<SP::Verifier>,
 }
 
-fn sample_value<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
-    _shared_data: &DistributedRNGShared<SP>,
-    _args: Args<SP>,
-) -> Result<u64, ComputeError> {
+fn sample_value<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, ComputeError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn sample_nonce<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
-    _shared_data: &DistributedRNGShared<SP>,
-    _args: Args<SP>,
-) -> Result<u64, ComputeError> {
+fn sample_nonce<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, ComputeError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn commit_to_value<SP: SessionParameters>(
-    _shared_data: &DistributedRNGShared<SP>,
-    args: Args<SP>,
-) -> Result<u64, ComputeError> {
+fn commit_to_value<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError> {
     let b = args.get::<u64>("my_b")?;
     let r = args.get::<u64>("my_r")?;
     Ok(b + r)
 }
 
-fn verify_commitment<SP: SessionParameters>(
-    _id: &SP::Verifier,
-    _shared_data: &DistributedRNGShared<SP>,
-    args: Args<SP>,
-) -> Result<(), ComputeError> {
+fn verify_commitment<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) -> Result<(), ComputeError> {
     let b = args.get::<u64>("b")?;
     let r = args.get::<u64>("r")?;
     let c = args.get::<u64>("c")?;
     if b + r == *c { Ok(()) } else { Err(ComputeError::Data) }
 }
 
-fn gen_output<SP: SessionParameters>(
-    _shared_data: &DistributedRNGShared<SP>,
-    args: Args<SP>,
-) -> Result<u64, ComputeError> {
+fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError> {
     let bs = args.get_map::<u64>("b")?;
     Ok(bs.values().copied().sum())
 }
@@ -67,7 +49,7 @@ fn gen_output<SP: SessionParameters>(
 impl<SP: SessionParameters> Protocol<SP> for DistributedRNG {
     type SharedData = DistributedRNGShared<SP>;
     type Output = u64;
-    fn build(_my_id: &SP::Verifier, shared_data: &Self::SharedData) -> Result<Node<SP, Self>, LocalError> {
+    fn build(_my_id: &SP::Verifier, shared_data: &Self::SharedData) -> Result<Node<SP>, LocalError> {
         let message_b = ProtocolMessage::new::<u64>("b");
         let message_r = ProtocolMessage::new::<u64>("r");
         let message_c = ProtocolMessage::new::<u64>("c");
