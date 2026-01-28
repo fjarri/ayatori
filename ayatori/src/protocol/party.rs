@@ -25,6 +25,7 @@ impl<Id: PartyId> PartyGroup<Id> {
         &self.ids == ids
     }
 
+    #[must_use]
     pub fn except(&self, id: &Id) -> Self {
         let mut ids = self.ids.clone();
         ids.remove(id);
@@ -34,7 +35,7 @@ impl<Id: PartyId> PartyGroup<Id> {
 
 impl<Id: PartyId> Display for PartyGroup<Id> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let ids = self.ids.iter().map(|id| format!("{:?}", id)).join(", ");
+        let ids = self.ids.iter().map(|id| format!("{id:?}")).join(", ");
         write!(f, "{{{ids}}}")
     }
 }

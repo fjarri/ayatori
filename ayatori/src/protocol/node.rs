@@ -1,10 +1,4 @@
-use alloc::{
-    collections::BTreeMap,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 use core::fmt::{self, Debug, Display};
 
 use itertools::Itertools;
@@ -124,20 +118,24 @@ pub struct Args<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Args<SP> {
-    pub(crate) fn new(signer: &Arc<SP::Signer>, my_id: &SP::Verifier, values: BTreeMap<Tag, Value>) -> Self {
+    pub(crate) fn new(
+        signer: &Arc<SP::Signer>,
+        my_id: &SP::Verifier,
+        values: BTreeMap<Tag, Value>,
+    ) -> Result<Self, LocalError> {
         // TODO (#11): for now checking if there are name clashes.
         // If we encounter a situation where we do need arguments with the same name but different TagKind,
         // we need to rethink this.
         let duplicates = values.keys().duplicates_by(|tag| tag.name.clone()).collect::<Vec<_>>();
         if !duplicates.is_empty() {
-            panic!("Duplicate names of arguments: {duplicates:?}");
+            return Err(LocalError::new(format!("Duplicate names of arguments: {duplicates:?}")));
         }
 
-        Self {
+        Ok(Self {
             my_id: my_id.clone(),
             signer: signer.clone(),
             values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
-        }
+        })
     }
 
     pub(crate) fn signer(&self) -> &SP::Signer {
@@ -193,12 +191,14 @@ impl<SP: SessionParameters, P: Protocol<SP>> Node<SP, P> {
         self.as_ref().group()
     }
 
+    #[must_use]
     pub fn with_dependencies(self, dependencies: &[&Self]) -> Self {
         let mut typed_node = Arc::unwrap_or_clone(self.0);
         typed_node.dependencies.extend(nodes_to_owned(dependencies));
         Self::new(typed_node)
     }
 
+    #[must_use]
     pub fn store_in(self, name: &str) -> Self {
         let mut typed_node = Arc::unwrap_or_clone(self.0);
         typed_node.store_in = typed_node.store_in.with_name(name);
@@ -270,11 +270,10 @@ fn nodes_to_owned<SP: SessionParameters, P: Protocol<SP>>(nodes: &[&Node<SP, P>]
 impl<SP: SessionParameters, P: Protocol<SP>> NodeKind<SP, P> {
     pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         match self {
-            Self::ComputeScalar { .. } => None,
-            Self::ComputeArray { group, .. } => Some(group),
-            Self::DirectMessage { group, .. } => Some(group),
-            Self::Collect { .. } => None,
-            Self::Receive { group, .. } => Some(group),
+            Self::ComputeArray { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
+                Some(group)
+            }
+            Self::Collect { .. } | Self::ComputeScalar { .. } => None,
         }
     }
 }
@@ -382,7 +381,7 @@ pub fn verify<SP: SessionParameters, P: Protocol<SP>>(
 /// since some RustCrypto libraries don't accept a `?Sized` RNG.
 struct Rng<'a>(&'a mut dyn CryptoRngCore);
 
-impl<'a> signature::rand_core::RngCore for Rng<'a> {
+impl signature::rand_core::RngCore for Rng<'_> {
     fn next_u32(&mut self) -> u32 {
         self.0.next_u32()
     }
@@ -390,14 +389,14 @@ impl<'a> signature::rand_core::RngCore for Rng<'a> {
         self.0.next_u64()
     }
     fn fill_bytes(&mut self, bytes: &mut [u8]) {
-        self.0.fill_bytes(bytes)
+        self.0.fill_bytes(bytes);
     }
     fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), signature::rand_core::Error> {
         self.0.try_fill_bytes(bytes)
     }
 }
 
-impl<'a> signature::rand_core::CryptoRng for Rng<'a> {}
+impl signature::rand_core::CryptoRng for Rng<'_> {}
 
 fn serialize<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
@@ -419,7 +418,7 @@ pub fn broadcast<SP: SessionParameters, P: Protocol<SP>>(
     group: &PartyGroup<SP::Verifier>,
 ) -> Result<Node<SP, P>, LocalError> {
     let cloned_message = message.clone();
-    let value_name = scalar.as_ref().store_in().name.to_string();
+    let value_name = scalar.as_ref().store_in().name.clone();
 
     if scalar.group().is_some() {
         return Err(LocalError::new(
@@ -460,7 +459,7 @@ pub fn send<SP: SessionParameters, P: Protocol<SP>>(
     array: &Node<SP, P>,
 ) -> Result<Node<SP, P>, LocalError> {
     let cloned_message = message.clone();
-    let value_name = array.as_ref().store_in().name.to_string();
+    let value_name = array.as_ref().store_in().name.clone();
 
     let group = array
         .as_ref()

@@ -107,7 +107,7 @@ impl<SP: SessionParameters> Protocol<SP> for TestProtocol {
 #[test]
 fn run_messages_protocol() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-    let ids = signers.iter().map(|signer| signer.verifying_key()).collect::<Vec<_>>();
+    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let shared_data = TestProtocolShared { parties: ids.clone() };
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);

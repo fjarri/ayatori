@@ -47,7 +47,7 @@ where
     }
 
     fn debug(&self) -> String {
-        format!("{:?}", self)
+        format!("{self:?}")
     }
 }
 
@@ -83,7 +83,7 @@ impl Value {
         // as we go through the logic.
         let arc = self.0.clone();
 
-        let raw = Arc::into_raw(arc) as *const T;
+        let raw = Arc::into_raw(arc).cast::<T>();
 
         // SAFETY:
         // - `TypeId` was checked

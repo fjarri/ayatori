@@ -25,7 +25,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
     while !sessions.is_empty() {
         let mut finished = Vec::new();
 
-        for (id, session) in sessions.iter_mut() {
+        for (id, session) in &mut sessions {
             for message in messages
                 .get_mut(id)
                 .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?

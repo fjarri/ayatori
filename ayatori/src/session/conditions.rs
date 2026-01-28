@@ -45,14 +45,10 @@ impl<Id: PartyId> Condition<Id> {
 
     pub fn update_with_value_ready(&mut self, tag: &Tag) {
         self.all_of.retain_mut(|leaf| match leaf {
-            LeafCondition::Array { tag: condition_tag, .. } => {
+            LeafCondition::Array { tag: condition_tag, .. }
+            | LeafCondition::ArrayElement { tag: condition_tag, .. } => {
                 if condition_tag == tag {
-                    panic!()
-                }
-                true
-            }
-            LeafCondition::ArrayElement { tag: condition_tag, .. } => {
-                if condition_tag == tag {
+                    // TODO (#12)
                     panic!()
                 }
                 true
@@ -81,6 +77,7 @@ impl<Id: PartyId> Condition<Id> {
             } => !(condition_tag == tag && condition_id == id),
             LeafCondition::Value { tag: condition_tag } => {
                 if condition_tag == tag {
+                    // TODO (#12)
                     panic!()
                 }
                 true
@@ -110,7 +107,7 @@ impl<Id: PartyId> Display for Condition<Id> {
         if self.all_of.is_empty() {
             write!(f, "True")
         } else {
-            write!(f, "{}", self.all_of.iter().map(|leaf| leaf.to_string()).join(" AND "))
+            write!(f, "{}", self.all_of.iter().map(ToString::to_string).join(" AND "))
         }
     }
 }

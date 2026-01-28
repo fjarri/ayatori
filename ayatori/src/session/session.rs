@@ -240,7 +240,7 @@ where
 {
     pub fn new(signer: SP::Signer, shared_data: P::SharedData) -> Result<Self, LocalError> {
         let output_node = P::build(&signer.verifying_key(), &shared_data)?;
-        let ruleset = Ruleset::new(output_node);
+        let ruleset = Ruleset::new(output_node)?;
         let storage = Storage::new();
         let signer = Arc::new(signer);
         Ok(Self {
@@ -269,10 +269,7 @@ where
         }
 
         loop {
-            let action = match self.ruleset.pop_action() {
-                Some(action) => action,
-                None => break,
-            };
+            let Some(action) = self.ruleset.pop_action() else { break };
 
             match action {
                 Action::Send {
@@ -302,7 +299,7 @@ where
                         .iter()
                         .map(|tag: &Tag| self.storage.get(tag).map(|value| (tag.clone(), value)))
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values);
+                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {
@@ -335,7 +332,7 @@ where
                             Arg::ArrayElem(tag) => self.storage.get_elem(tag, &index).map(|value| (tag.clone(), value)),
                         })
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values);
+                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {
@@ -368,7 +365,7 @@ where
     pub fn add_message(&mut self, message: Message<SP>) -> Result<(), LocalError> {
         for value in message.values() {
             match value.verify() {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(VerificationError::Local(error)) => return Err(error),
                 Err(VerificationError::SignatureMismatch) => todo!(),
             }

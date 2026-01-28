@@ -25,7 +25,7 @@ fn sample_value<SP: SessionParameters>(
     _shared_data: &DistributedRNGShared<SP>,
     _args: Args<SP>,
 ) -> Result<u64, ComputeError> {
-    Ok(rng.next_u32() as u64)
+    Ok(u64::from(rng.next_u32()))
 }
 
 fn sample_nonce<SP: SessionParameters>(
@@ -33,7 +33,7 @@ fn sample_nonce<SP: SessionParameters>(
     _shared_data: &DistributedRNGShared<SP>,
     _args: Args<SP>,
 ) -> Result<u64, ComputeError> {
-    Ok(rng.next_u32() as u64)
+    Ok(u64::from(rng.next_u32()))
 }
 
 fn commit_to_value<SP: SessionParameters>(
@@ -61,7 +61,7 @@ fn gen_output<SP: SessionParameters>(
     args: Args<SP>,
 ) -> Result<u64, ComputeError> {
     let bs = args.get_map::<u64>("b")?;
-    Ok(bs.values().cloned().sum())
+    Ok(bs.values().copied().sum())
 }
 
 impl<SP: SessionParameters> Protocol<SP> for DistributedRNG {
@@ -93,7 +93,7 @@ impl<SP: SessionParameters> Protocol<SP> for DistributedRNG {
 #[test]
 fn run_protocol() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-    let ids = signers.iter().map(|signer| signer.verifying_key()).collect::<Vec<_>>();
+    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let shared_data = DistributedRNGShared { parties: ids.clone() };
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
