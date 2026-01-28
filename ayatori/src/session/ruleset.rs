@@ -6,7 +6,7 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{ArrayFunction, Node, NodeKind, Protocol, ScalarFunction, SessionParameters, Tag},
+    protocol::{ArrayFunction, InnerNode, Node, NodeKind, Protocol, ScalarFunction, SessionParameters, Tag},
 };
 
 #[derive(Debug)]
@@ -54,6 +54,7 @@ pub(crate) struct Ruleset<SP: SessionParameters, P: Protocol<SP>> {
 
 impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
     pub fn new(output_node: Node<SP, P>) -> Result<Self, LocalError> {
+        let output_node = output_node.into_inner();
         let output_tag = output_node.as_ref().store_in().clone();
 
         let mut nodes_to_process = vec![output_node];
@@ -84,7 +85,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                         });
                     }
                 }
-                nodes_to_process.push(dependency.get_strong_ref());
+                nodes_to_process.push(dependency.clone());
             }
 
             let mut actions = Vec::new();
@@ -96,7 +97,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                         specific_condition.and(LeafCondition::Value {
                             tag: arg.as_ref().store_in().clone(),
                         });
-                        nodes_to_process.push(arg.get_strong_ref());
+                        nodes_to_process.push(arg.clone());
                     }
                     actions.push((
                         Action::ComputeScalar {
@@ -104,7 +105,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                             function: function.clone(),
                             args: args
                                 .iter()
-                                .map(|arg: &Node<SP, P>| arg.as_ref().store_in().clone())
+                                .map(|arg: &InnerNode<SP, P>| arg.as_ref().store_in().clone())
                                 .collect(),
                         },
                         specific_condition,
@@ -130,7 +131,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                                     tag: arg.as_ref().store_in().clone(),
                                 });
                             }
-                            nodes_to_process.push(arg.get_strong_ref());
+                            nodes_to_process.push(arg.clone());
                         }
 
                         actions.push((
@@ -140,7 +141,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                                 index: id.clone(),
                                 args: args
                                     .iter()
-                                    .map(|arg: &Node<SP, P>| {
+                                    .map(|arg: &InnerNode<SP, P>| {
                                         let tag = arg.as_ref().store_in().clone();
                                         if arg.as_ref().group().is_some() {
                                             Arg::ArrayElem(tag)
@@ -155,7 +156,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                     }
                 }
                 NodeKind::DirectMessage { data, group } => {
-                    nodes_to_process.push(data.get_strong_ref());
+                    nodes_to_process.push(data.clone());
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         specific_condition.and(LeafCondition::ArrayElement {
@@ -180,7 +181,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                         group: group.clone(),
                         got_ids: BTreeSet::new(),
                     });
-                    nodes_to_process.push(values.get_strong_ref());
+                    nodes_to_process.push(values.clone());
 
                     actions.push((
                         Action::Collect {
