@@ -27,31 +27,14 @@ impl<T> PartyId for T where
 {
 }
 
-/*
-Why the asymmetry between serialization and deserialization?
-
-If we had a method returning an object of a type implementing `serde::Serializer`,
-we could organize the serialization in the same way as deserialization.
-But libraries generally expose `T where &mut T: Serializer`,
-and it's tricky to write a similar persistent wrapper as we do for the deserializer
-(see https://github.com/fjarri/serde-persistent-deserializer/issues/2).
-
-So for serialization we have to instead type-erase the value itself and pass it somewhere
-where the serializer type is known (see `SerdeAdapter::serialize()`);
-but for the deserialization we instead type-erase the deserializer and pass it somewhere
-the type of the target value is known (see `SerdeAdapter::deserialize()`).
-*/
-
 /// A (de)serializer that will be used for the protocol messages.
 pub trait WireFormat: 'static + Debug {
     /// Serializes the given object into a bytestring.
     fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, LocalError>;
 
-    /// The deserializer type.
-    type Deserializer<'de>: serde::Deserializer<'de>;
+    type DeError: serde::de::Error;
 
-    /// Creates a `serde` deserializer given a bytestring.
-    fn deserializer(bytes: &[u8]) -> Self::Deserializer<'_>;
+    fn deserialize<'de, T: Deserialize<'de>>(bytes: &'de [u8]) -> Result<T, Self::DeError>;
 }
 
 pub trait SessionParameters: 'static {

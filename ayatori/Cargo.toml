@@ -17,12 +17,10 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 signature = { version = "2", default-features = false, features = ["digest", "rand_core"] }
 serde-encoded-bytes = { version = "0.2", default-features = false, features = ["hex"] }
 displaydoc = { version = "0.2", default-features = false }
-erased-serde = { version = "0.4", default-features = false, features = ["alloc"] }
 
 # TODO: to be moved to dev-dependencies after generalizing
 postcard = { version = "1", default-features = false, features = ["alloc"], optional = true }
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
-serde-persistent-deserializer = { version = "0.3", optional = true }
 
 [dev-dependencies]
 rand_chacha = { version = "0.3", default-features = false }
@@ -31,10 +29,9 @@ impls = "1"
 # These mirror the versions from the optional dependencies above.
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
-serde-persistent-deserializer = "0.3"
 
 [features]
-dev = ["postcard", "serde_json", "serde-persistent-deserializer"]
+dev = ["postcard", "serde_json"]
 
 [package.metadata.docs.rs]
 all-features = true

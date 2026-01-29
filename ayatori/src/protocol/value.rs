@@ -129,30 +129,27 @@ impl DeserializationError {
     }
 }
 
-trait DynAdapter {
-    fn as_serialize<'a>(&'a self, value: &'a Value) -> Result<&'a dyn erased_serde::Serialize, LocalError>;
-    fn deserialize(&self, deserializer: &mut dyn erased_serde::Deserializer<'_>)
-    -> Result<Value, DeserializationError>;
-    fn clone_boxed(&self) -> Box<dyn DynAdapter>;
+trait DynAdapter<F: WireFormat> {
+    fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError>;
+    fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError>;
+    fn clone_boxed(&self) -> Box<dyn DynAdapter<F>>;
     fn debug(&self) -> String;
 }
 
-impl<T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdapter for DynAdapterHolder<T> {
-    fn as_serialize<'a>(&'a self, value: &'a Value) -> Result<&'a dyn erased_serde::Serialize, LocalError> {
-        Ok(value.downcast_ref::<T>()?)
+impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdapter<F> for DynAdapterHolder<F, T> {
+    fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError> {
+        let typed_value = value.downcast_ref::<T>()?;
+        Ok(SerializedValue::new(F::serialize(typed_value)?))
     }
 
-    fn deserialize(
-        &self,
-        deserializer: &mut dyn erased_serde::Deserializer<'_>,
-    ) -> Result<Value, DeserializationError> {
-        erased_serde::deserialize::<T>(deserializer)
+    fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError> {
+        F::deserialize::<T>(serialized_value.as_ref())
             .map(Value::new)
             .map_err(|err| DeserializationError::new::<T>(err.to_string()))
     }
 
-    fn clone_boxed(&self) -> Box<dyn DynAdapter> {
-        Box::new(DynAdapterHolder::<T>(PhantomData))
+    fn clone_boxed(&self) -> Box<dyn DynAdapter<F>> {
+        Box::new(DynAdapterHolder::<F, T>(PhantomData))
     }
 
     fn debug(&self) -> String {
@@ -160,39 +157,31 @@ impl<T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdapter for DynAdap
     }
 }
 
-struct DynAdapterHolder<T>(PhantomData<T>);
+struct DynAdapterHolder<F, T>(PhantomData<(F, T)>);
 
-pub(crate) struct SerdeAdapter(Box<dyn DynAdapter>);
+pub(crate) struct SerdeAdapter<F: WireFormat>(Box<dyn DynAdapter<F>>);
 
-impl SerdeAdapter {
+impl<F: WireFormat> SerdeAdapter<F> {
     pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>() -> Self {
-        Self(Box::new(DynAdapterHolder::<T>(PhantomData)))
+        Self(Box::new(DynAdapterHolder::<F, T>(PhantomData)))
     }
 
-    pub fn serialize<F: WireFormat>(&self, value: &Value) -> Result<SerializedValue, LocalError> {
-        self.0
-            .as_serialize(value)
-            .and_then(F::serialize)
-            .map(SerializedValue::new)
+    pub fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError> {
+        self.0.serialize(value)
     }
 
-    pub fn deserialize<F: WireFormat>(
-        &self,
-        serialized_value: &SerializedValue,
-    ) -> Result<Value, DeserializationError> {
-        let deserializer = F::deserializer(serialized_value.as_ref());
-        let mut erased_deserializer = Box::new(<dyn erased_serde::Deserializer<'_>>::erase(deserializer));
-        self.0.deserialize(&mut erased_deserializer)
+    pub fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError> {
+        self.0.deserialize(serialized_value)
     }
 }
 
-impl Clone for SerdeAdapter {
+impl<F: WireFormat> Clone for SerdeAdapter<F> {
     fn clone(&self) -> Self {
         Self(self.0.clone_boxed())
     }
 }
 
-impl Debug for SerdeAdapter {
+impl<F: WireFormat> Debug for SerdeAdapter<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "SerdeAdapter({})", self.0.as_ref().debug())
     }
@@ -246,9 +235,9 @@ mod tests {
     fn serialize_roundtrip() {
         let typed_value = Serializable { x: 10, y: true };
         let value = Value::new(typed_value);
-        let adapter = SerdeAdapter::new::<Serializable>();
-        let serialized = adapter.serialize::<BinaryFormat>(&value).unwrap();
-        let value_back = adapter.deserialize::<BinaryFormat>(&serialized).unwrap();
+        let adapter = SerdeAdapter::<BinaryFormat>::new::<Serializable>();
+        let serialized = adapter.serialize(&value).unwrap();
+        let value_back = adapter.deserialize(&serialized).unwrap();
         let typed_value_back = value_back.downcast::<Serializable>().unwrap();
         assert_eq!(typed_value, typed_value_back);
     }

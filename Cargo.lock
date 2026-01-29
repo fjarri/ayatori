@@ -8,14 +8,12 @@ version = "0.0.1"
 dependencies = [
  "derive-where",
  "displaydoc",
- "erased-serde",
  "impls",
  "itertools",
  "postcard",
  "rand_chacha",
  "serde",
  "serde-encoded-bytes",
- "serde-persistent-deserializer",
  "serde_json",
  "signature",
 ]
@@ -87,17 +85,6 @@ name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
-
-[[package]]
-name = "erased-serde"
-version = "0.4.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89e8918065695684b2b0702da20382d5ae6065cf3327bc2d6436bd49a71ce9f3"
-dependencies = [
- "serde",
- "serde_core",
- "typeid",
-]
 
 [[package]]
 name = "generic-array"
@@ -218,15 +205,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-persistent-deserializer"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1f52002cbca6cb233262e7ab1a04d4214c3a13f4ee93cec344286ff14b01147"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,12 +277,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "typeid"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "typenum"
