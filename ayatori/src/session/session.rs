@@ -12,6 +12,7 @@ use crate::{
     protocol::{
         Args, ArrayFunction, ComputeError, Erasable, PartyId, Protocol, ScalarFunction, SessionParameters, Tag, Value,
         WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        constant,
     },
 };
 
@@ -226,7 +227,6 @@ pub enum AddMessageResult {
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: Protocol<SP>> {
     signer: Arc<SP::Signer>,
-    shared_data: Value,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
     phantom: PhantomData<P>,
@@ -237,8 +237,10 @@ where
     SP: SessionParameters,
     P: Protocol<SP>,
 {
-    pub fn new(signer: SP::Signer, shared_data: P::SharedData) -> Result<Self, LocalError> {
-        let output_node = P::build(&signer.verifying_key(), &shared_data)?;
+    pub fn new(signer: SP::Signer, build_data: &P::BuildData, shared_data: P::SharedData) -> Result<Self, LocalError> {
+        // TODO: make sure there are no name clashes. Special tag type?
+        let input_node = constant("input", shared_data);
+        let output_node = P::build(&signer.verifying_key(), build_data, &input_node)?;
         let ruleset = Ruleset::new(output_node)?;
         let storage = Storage::new();
         let signer = Arc::new(signer);
@@ -246,7 +248,6 @@ where
             signer,
             ruleset,
             storage,
-            shared_data: Value::new(shared_data),
             phantom: PhantomData,
         })
     }
@@ -299,7 +300,7 @@ where
                         .iter()
                         .map(|tag: &Tag| self.storage.get(tag).map(|value| (tag.clone(), value)))
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), self.shared_data.clone(), arg_values)?;
+                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {
@@ -330,7 +331,7 @@ where
                             Arg::ArrayElem(tag) => self.storage.get_elem(tag, &index).map(|value| (tag.clone(), value)),
                         })
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), self.shared_data.clone(), arg_values)?;
+                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {

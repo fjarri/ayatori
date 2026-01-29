@@ -8,7 +8,7 @@ pub(crate) use function::{
     ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
     WrappedScalarFunctionPrivate,
 };
-pub(crate) use node::{InnerNode, NodeKind, Tag};
+pub(crate) use node::{InnerNode, NodeKind, Tag, constant};
 pub(crate) use value::{SerializedValue, Value};
 
 pub use crate::error::LocalError;

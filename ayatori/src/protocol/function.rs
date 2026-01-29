@@ -47,10 +47,17 @@ impl<SP: SessionParameters> Display for WrappedScalarFunction<SP> {
 impl<SP: SessionParameters> WrappedScalarFunction<SP> {
     pub fn new<Ret: Erasable>(function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError>) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
-        let wrapped = Arc::new(move |args: Args<SP>| function(args).map(Value::new));
+        Self::new_pre_erased(name, move |args: Args<SP>| function(args).map(Value::new))
+    }
+
+    pub fn new_pre_erased(
+        name: impl Into<String>,
+        function: impl 'static + Fn(Args<SP>) -> Result<Value, ComputeError>,
+    ) -> Self {
+        let wrapped = Arc::new(function);
         Self {
             function: wrapped,
-            name,
+            name: name.into(),
         }
     }
 

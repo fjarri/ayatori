@@ -11,7 +11,7 @@ use super::{
         WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
     party::PartyGroup,
-    traits::{Protocol, SessionParameters},
+    traits::SessionParameters,
     value::{Erasable, SerdeAdapter, SerializedValue, Value},
 };
 use crate::{error::LocalError, session::SignedValue};
@@ -115,14 +115,12 @@ pub struct Args<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
     my_id: SP::Verifier,
     values: BTreeMap<String, Value>,
-    shared_data: Value,
 }
 
 impl<SP: SessionParameters> Args<SP> {
     pub(crate) fn new(
         signer: &Arc<SP::Signer>,
         my_id: &SP::Verifier,
-        shared_data: Value,
         values: BTreeMap<Tag, Value>,
     ) -> Result<Self, LocalError> {
         // TODO (#11): for now checking if there are name clashes.
@@ -137,12 +135,7 @@ impl<SP: SessionParameters> Args<SP> {
             my_id: my_id.clone(),
             signer: signer.clone(),
             values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
-            shared_data: shared_data.clone(),
         })
-    }
-
-    pub fn shared_data<P: Protocol<SP>>(&self) -> Result<&P::SharedData, LocalError> {
-        self.shared_data.downcast_ref::<P::SharedData>()
     }
 
     pub(crate) fn signer(&self) -> &SP::Signer {
@@ -303,6 +296,21 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::Collect { .. } | Self::ComputeScalar { .. } => None,
         }
     }
+}
+
+pub(crate) fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
+    let erased_value = Value::new(value);
+    let inner = TypedNode {
+        store_in: Tag::computed(name),
+        dependencies: Vec::new(),
+        kind: NodeKind::ComputeScalar {
+            function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(name, move |_args| {
+                Ok(erased_value.clone())
+            })),
+            args: Vec::new(),
+        },
+    };
+    Node(InnerNode::new(inner))
 }
 
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
