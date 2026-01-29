@@ -1,6 +1,8 @@
+mod args;
 mod function;
 mod node;
 mod party;
+mod tag;
 mod traits;
 mod value;
 
@@ -8,13 +10,15 @@ pub(crate) use function::{
     ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
     WrappedScalarFunctionPrivate,
 };
-pub(crate) use node::{InnerNode, NodeKind, Tag, constant};
+pub(crate) use node::{InnerNode, NodeKind, constant};
+pub(crate) use tag::Tag;
 pub(crate) use value::{SerializedValue, Value};
 
 pub use crate::error::LocalError;
+pub use args::Args;
 pub use function::ComputeError;
 pub use node::{
-    Args, Node, ProtocolMessage, broadcast, collect, compute_array, compute_array_private, compute_scalar,
+    Node, ProtocolMessage, broadcast, collect, compute_array, compute_array_private, compute_scalar,
     compute_scalar_private, receive, send, verify,
 };
 pub use party::PartyGroup;

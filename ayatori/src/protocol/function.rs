@@ -7,7 +7,7 @@ use core::fmt::{self, Debug, Display};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
-    node::Args,
+    args::Args,
     traits::SessionParameters,
     value::{Erasable, Value},
 };

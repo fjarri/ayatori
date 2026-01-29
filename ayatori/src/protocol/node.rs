@@ -1,169 +1,25 @@
-use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
-use core::fmt::{self, Debug, Display};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::fmt::Debug;
 
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
+    args::Args,
     function::{
         ArrayFunction, ComputeError, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
         WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
     party::PartyGroup,
+    tag::Tag,
     traits::SessionParameters,
     value::{Erasable, SerdeAdapter, SerializedValue, Value},
 };
 use crate::{error::LocalError, session::SignedValue};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum TagKind {
-    Computed,
-    Sent,
-    Received,
-    Deserialized,
-    Signed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Tag {
-    name: String,
-    kind: TagKind,
-    collected: bool,
-}
-
-impl Tag {
-    pub fn with_name(&self, name: &str) -> Self {
-        Self {
-            name: name.into(),
-            kind: self.kind,
-            collected: self.collected,
-        }
-    }
-
-    pub fn computed(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            kind: TagKind::Computed,
-            collected: false,
-        }
-    }
-
-    pub fn sent(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            kind: TagKind::Sent,
-            collected: false,
-        }
-    }
-
-    pub fn received(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            kind: TagKind::Received,
-            collected: false,
-        }
-    }
-
-    pub fn deserialized(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            kind: TagKind::Deserialized,
-            collected: false,
-        }
-    }
-
-    pub fn signed(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            kind: TagKind::Signed,
-            collected: false,
-        }
-    }
-
-    pub fn collected(&self) -> Self {
-        assert!(!self.collected);
-        Self {
-            name: self.name.clone(),
-            kind: self.kind,
-            collected: true,
-        }
-    }
-}
-
-impl Display for Tag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        if self.collected {
-            write!(f, "collected(")?;
-        }
-        match self.kind {
-            TagKind::Computed => write!(f, "{}", self.name),
-            TagKind::Sent => write!(f, "sent({})", self.name),
-            TagKind::Received => write!(f, "received({})", self.name),
-            TagKind::Deserialized => write!(f, "deserialized({})", self.name),
-            TagKind::Signed => write!(f, "signed({})", self.name),
-        }?;
-        if self.collected {
-            write!(f, ")")?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct Args<SP: SessionParameters> {
-    signer: Arc<SP::Signer>,
-    my_id: SP::Verifier,
-    values: BTreeMap<String, Value>,
-}
-
-impl<SP: SessionParameters> Args<SP> {
-    pub(crate) fn new(
-        signer: &Arc<SP::Signer>,
-        my_id: &SP::Verifier,
-        values: BTreeMap<Tag, Value>,
-    ) -> Result<Self, LocalError> {
-        // TODO (#11): for now checking if there are name clashes.
-        // If we encounter a situation where we do need arguments with the same name but different TagKind,
-        // we need to rethink this.
-        let duplicates = values.keys().duplicates_by(|tag| tag.name.clone()).collect::<Vec<_>>();
-        if !duplicates.is_empty() {
-            return Err(LocalError::new(format!("Duplicate names of arguments: {duplicates:?}")));
-        }
-
-        Ok(Self {
-            my_id: my_id.clone(),
-            signer: signer.clone(),
-            values: values.into_iter().map(|(tag, value)| (tag.name, value)).collect(),
-        })
-    }
-
-    pub(crate) fn signer(&self) -> &SP::Signer {
-        self.signer.as_ref()
-    }
-
-    pub fn my_id(&self) -> &SP::Verifier {
-        &self.my_id
-    }
-
-    pub(crate) fn get_value(&self, name: &str) -> Result<&Value, LocalError> {
-        self.values
-            .get(name)
-            .ok_or_else(|| LocalError::new(format!("Value {name} is present in the Args")))
-    }
-
-    pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, LocalError> {
-        self.get_value(name)?.downcast_ref::<T>()
-    }
-
-    pub fn get_map<T: Clone + Erasable>(&self, name: &str) -> Result<BTreeMap<&SP::Verifier, &T>, LocalError> {
-        let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name)?;
-        value_map
-            .iter()
-            .map(|(id, value)| value.downcast_ref::<T>().map(|value_ref| (id, value_ref)))
-            .collect()
-    }
-}
 
 // `Node` intentionally does not implement `Clone` - our clones are shallow, which may be confusing for the user.
 #[derive(Debug)]
@@ -189,7 +45,7 @@ impl<SP: SessionParameters> Node<SP> {
 
     #[must_use]
     pub fn store_in(self, name: &str) -> Self {
-        Self(self.0.store_in(name))
+        Self(self.0.with_store_in(name))
     }
 }
 
@@ -210,7 +66,7 @@ impl<SP: SessionParameters> InnerNode<SP> {
     }
 
     #[must_use]
-    pub fn store_in(self, name: &str) -> Self {
+    pub fn with_store_in(self, name: &str) -> Self {
         let mut typed_node = Arc::unwrap_or_clone(self.0);
         typed_node.store_in = typed_node.store_in.with_name(name);
         Self::new(typed_node)
@@ -226,7 +82,7 @@ impl<SP: SessionParameters> InnerNode<SP> {
     }
 
     pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
-        self.as_ref().group()
+        self.0.group()
     }
 }
 
@@ -236,6 +92,24 @@ pub(crate) struct TypedNode<SP: SessionParameters> {
     store_in: Tag,
     kind: NodeKind<SP>,
     dependencies: Vec<InnerNode<SP>>,
+}
+
+impl<SP: SessionParameters> TypedNode<SP> {
+    pub fn store_in(&self) -> &Tag {
+        &self.store_in
+    }
+
+    pub fn dependencies(&self) -> &[InnerNode<SP>] {
+        &self.dependencies
+    }
+
+    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
+        self.kind.group()
+    }
+
+    pub fn kind(&self) -> &NodeKind<SP> {
+        &self.kind
+    }
 }
 
 #[derive(Debug)]
@@ -263,24 +137,6 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
     Receive {
         group: PartyGroup<SP::Verifier>,
     },
-}
-
-impl<SP: SessionParameters> TypedNode<SP> {
-    pub fn store_in(&self) -> &Tag {
-        &self.store_in
-    }
-
-    pub fn dependencies(&self) -> &[InnerNode<SP>] {
-        &self.dependencies
-    }
-
-    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
-        self.kind.group()
-    }
-
-    pub fn kind(&self) -> &NodeKind<SP> {
-        &self.kind
-    }
 }
 
 fn nodes_to_owned<SP: SessionParameters>(nodes: &[&Node<SP>]) -> impl Iterator<Item = InnerNode<SP>> {
@@ -452,7 +308,7 @@ pub fn broadcast<SP: SessionParameters>(
 ) -> Result<Node<SP>, LocalError> {
     let scalar = scalar.as_inner_ref().clone();
     let cloned_message = message.clone();
-    let value_name = scalar.as_ref().store_in().name.clone();
+    let value_name = scalar.as_ref().store_in().name().to_string();
 
     if scalar.group().is_some() {
         return Err(LocalError::new(
@@ -468,7 +324,7 @@ pub fn broadcast<SP: SessionParameters>(
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
                 move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>| {
-                    serialize::<SP>(rng, id, value_name.clone(), args, &cloned_message)
+                    serialize::<SP>(rng, id, value_name.to_string(), args, &cloned_message)
                 },
             )),
             returns_nothing: false,
@@ -491,7 +347,7 @@ pub fn broadcast<SP: SessionParameters>(
 pub fn send<SP: SessionParameters>(message: &ProtocolMessage, array: &Node<SP>) -> Result<Node<SP>, LocalError> {
     let array = array.as_inner_ref().clone();
     let cloned_message = message.clone();
-    let value_name = array.as_ref().store_in().name.clone();
+    let value_name = array.as_ref().store_in().name().to_string();
 
     let group = array
         .as_ref()
