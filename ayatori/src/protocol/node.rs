@@ -292,17 +292,17 @@ fn serialize<SP: SessionParameters>(
     id: &SP::Verifier,
     value_name: String,
     args: Args<SP>,
-    message: &ProtocolMessage,
+    message: &ProtocolMessage<SP>,
 ) -> Result<Value, ComputeError> {
     let value = args.get_value(&value_name)?;
-    let serialized_value = message.serde_adapter.serialize::<SP::WireFormat>(value)?;
+    let serialized_value = message.serde_adapter.serialize(value)?;
     let mut typed_rng = Rng(rng);
     let signed_value = SignedValue::<SP>::new(&mut typed_rng, args.signer(), &message.name, id, serialized_value)?;
     Ok(Value::new(signed_value))
 }
 
 pub fn broadcast<SP: SessionParameters>(
-    message: &ProtocolMessage,
+    message: &ProtocolMessage<SP>,
     scalar: &Node<SP>,
     group: &PartyGroup<SP::Verifier>,
 ) -> Result<Node<SP>, LocalError> {
@@ -344,7 +344,7 @@ pub fn broadcast<SP: SessionParameters>(
     collect(&send_node)
 }
 
-pub fn send<SP: SessionParameters>(message: &ProtocolMessage, array: &Node<SP>) -> Result<Node<SP>, LocalError> {
+pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<SP>) -> Result<Node<SP>, LocalError> {
     let array = array.as_inner_ref().clone();
     let cloned_message = message.clone();
     let value_name = array.as_ref().store_in().name().to_string();
@@ -383,15 +383,15 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage, array: &Node<SP>) 
     collect(&send_node)
 }
 
-fn deserialize<SP: SessionParameters>(args: Args<SP>, message: &ProtocolMessage) -> Result<Value, ComputeError> {
+fn deserialize<SP: SessionParameters>(args: Args<SP>, message: &ProtocolMessage<SP>) -> Result<Value, ComputeError> {
     let received = args.get::<SerializedValue>(&message.name)?;
     message
         .serde_adapter
-        .deserialize::<SP::WireFormat>(received)
+        .deserialize(received)
         .map_err(|_err| ComputeError::Data)
 }
 
-pub fn receive<SP: SessionParameters>(message: &ProtocolMessage, group: &PartyGroup<SP::Verifier>) -> Node<SP> {
+pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>, group: &PartyGroup<SP::Verifier>) -> Node<SP> {
     let received = InnerNode::new(TypedNode {
         store_in: Tag::received(&message.name),
         dependencies: Vec::new(),
@@ -430,14 +430,15 @@ pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, Loc
     })))
 }
 
-#[derive(Debug, Clone)]
-pub struct ProtocolMessage {
+#[derive(Debug)]
+#[derive_where::derive_where(Clone)]
+pub struct ProtocolMessage<SP: SessionParameters> {
     name: String,
-    serde_adapter: SerdeAdapter,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
 }
 
-impl ProtocolMessage {
-    pub fn new<T: Clone + Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
+impl<SP: SessionParameters> ProtocolMessage<SP> {
+    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
         Self {
             name: name.into(),
             serde_adapter: SerdeAdapter::new::<T>(),
