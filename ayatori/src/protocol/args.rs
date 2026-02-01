@@ -20,6 +20,7 @@ pub struct Args<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
     my_id: SP::Verifier,
     values: BTreeMap<String, Value>,
+    shared_data: Option<Value>,
 }
 
 impl<SP: SessionParameters> Args<SP> {
@@ -27,6 +28,7 @@ impl<SP: SessionParameters> Args<SP> {
         signer: &Arc<SP::Signer>,
         my_id: &SP::Verifier,
         values: BTreeMap<Tag, Value>,
+        shared_data: Option<Value>,
     ) -> Result<Self, LocalError> {
         // TODO (#11): for now checking if there are name clashes.
         // If we encounter a situation where we do need arguments with the same name but different TagKind,
@@ -43,6 +45,7 @@ impl<SP: SessionParameters> Args<SP> {
                 .into_iter()
                 .map(|(tag, value)| (tag.name().to_string(), value))
                 .collect(),
+            shared_data,
         })
     }
 
@@ -73,6 +76,9 @@ impl<SP: SessionParameters> Args<SP> {
     }
 
     pub fn get_shared_data<T: Erasable>(&self) -> Result<&T, LocalError> {
-        self.get_value("shared_data")?.downcast_ref::<T>()
+        self.shared_data
+            .as_ref()
+            .ok_or_else(|| LocalError::new("This function was not declared to take shared data"))?
+            .downcast_ref::<T>()
     }
 }

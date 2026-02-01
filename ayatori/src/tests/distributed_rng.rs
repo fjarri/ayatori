@@ -44,11 +44,7 @@ impl<SP: SessionParameters> Protocol<SP> for DistributedRNG {
     type SharedData = ();
     type BuildData = PartyGroup<SP::Verifier>;
     type Output = u64;
-    fn build(
-        _my_id: &SP::Verifier,
-        build_data: &Self::BuildData,
-        _shared_data: &Node<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    fn build(_my_id: &SP::Verifier, build_data: &Self::BuildData) -> Result<Node<SP>, LocalError> {
         let message_b = ProtocolMessage::new::<u64>("b");
         let message_r = ProtocolMessage::new::<u64>("r");
         let message_c = ProtocolMessage::new::<u64>("c");

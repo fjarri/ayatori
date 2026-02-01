@@ -12,7 +12,7 @@ use crate::{
     protocol::{
         Args, ArrayFunction, ComputeError, Erasable, PartyId, Protocol, ScalarFunction, SessionParameters, Tag, Value,
         WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
-        constant,
+        build_protocol, constant,
     },
 };
 
@@ -240,7 +240,7 @@ where
     pub fn new(signer: SP::Signer, build_data: &P::BuildData, shared_data: P::SharedData) -> Result<Self, LocalError> {
         // TODO: make sure there are no name clashes. Special tag type?
         let input_node = constant("input", shared_data);
-        let output_node = P::build(&signer.verifying_key(), build_data, &input_node)?;
+        let output_node = build_protocol::<SP, P>(&signer.verifying_key(), build_data, &input_node)?;
         let ruleset = Ruleset::new(output_node)?;
         let storage = Storage::new();
         let signer = Arc::new(signer);
@@ -295,12 +295,14 @@ where
                     store_in,
                     function,
                     args,
+                    shared_data,
                 } => {
                     let arg_values = args
                         .iter()
                         .map(|tag: &Tag| self.storage.get(tag).map(|value| (tag.clone(), value)))
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
+                    let shared_data = shared_data.as_ref().map(|tag| self.storage.get(tag)).transpose()?;
+                    let args = Args::new(&self.signer, &self.id(), arg_values, shared_data)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {
@@ -323,6 +325,7 @@ where
                     function,
                     index,
                     args,
+                    shared_data,
                 } => {
                     let arg_values = args
                         .iter()
@@ -331,7 +334,8 @@ where
                             Arg::ArrayElem(tag) => self.storage.get_elem(tag, &index).map(|value| (tag.clone(), value)),
                         })
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
+                    let shared_data = shared_data.as_ref().map(|tag| self.storage.get(tag)).transpose()?;
+                    let args = Args::new(&self.signer, &self.id(), arg_values, shared_data)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {

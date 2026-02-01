@@ -55,9 +55,5 @@ pub trait Protocol<SP: SessionParameters>: Sized + Debug {
     // TODO: we may not need `Clone` here
     type Output: 'static + Clone + Erasable;
 
-    fn build(
-        my_id: &SP::Verifier,
-        build_data: &Self::BuildData,
-        shared_data: &Node<SP>,
-    ) -> Result<Node<SP>, LocalError>;
+    fn build(my_id: &SP::Verifier, build_data: &Self::BuildData) -> Result<Node<SP>, LocalError>;
 }

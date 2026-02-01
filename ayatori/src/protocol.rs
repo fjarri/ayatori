@@ -1,5 +1,6 @@
 mod args;
 mod function;
+//mod inner_node;
 mod node;
 mod party;
 mod tag;
@@ -10,7 +11,7 @@ pub(crate) use function::{
     ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
     WrappedScalarFunctionPrivate,
 };
-pub(crate) use node::{InnerNode, NodeKind, constant};
+pub(crate) use node::{NodeKind, build_protocol, constant};
 pub(crate) use tag::Tag;
 pub(crate) use value::{SerializedValue, Value};
 

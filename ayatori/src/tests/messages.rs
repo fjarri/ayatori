@@ -65,11 +65,7 @@ impl<SP: SessionParameters> Protocol<SP> for TestProtocol {
     type BuildData = PartyGroup<SP::Verifier>;
     type SharedData = ();
     type Output = ();
-    fn build(
-        my_id: &SP::Verifier,
-        build_data: &Self::BuildData,
-        _shared_data: &Node<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    fn build(my_id: &SP::Verifier, build_data: &Self::BuildData) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
         let message_z = ProtocolMessage::new::<Message3<SP::Verifier>>("z");
