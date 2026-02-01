@@ -6,7 +6,7 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{ArrayFunction, InnerNode, Node, NodeKind, Protocol, ScalarFunction, SessionParameters, Tag},
+    protocol::{ArrayFunction, InnerNode, Node, NodeKind, ScalarFunction, SessionParameters, Tag},
 };
 
 #[derive(Debug)]
@@ -16,16 +16,16 @@ pub(crate) enum Arg {
 }
 
 #[derive(Debug)]
-pub(crate) enum Action<SP: SessionParameters, P: Protocol<SP>> {
+pub(crate) enum Action<SP: SessionParameters> {
     ComputeScalar {
         store_in: Tag,
-        function: ScalarFunction<SP, P>,
+        function: ScalarFunction<SP>,
         args: Vec<Tag>,
     },
     ComputeArrayElement {
         store_in: Tag,
         index: SP::Verifier,
-        function: ArrayFunction<SP, P>,
+        function: ArrayFunction<SP>,
         args: Vec<Arg>,
     },
     Send {
@@ -41,19 +41,19 @@ pub(crate) enum Action<SP: SessionParameters, P: Protocol<SP>> {
 }
 
 #[derive(Debug)]
-struct Rule<SP: SessionParameters, P: Protocol<SP>> {
+struct Rule<SP: SessionParameters> {
     condition: Condition<SP::Verifier>,
-    action: Action<SP, P>,
+    action: Action<SP>,
 }
 
 #[derive(Debug)]
-pub(crate) struct Ruleset<SP: SessionParameters, P: Protocol<SP>> {
+pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: Tag,
-    rules: Vec<Rule<SP, P>>,
+    rules: Vec<Rule<SP>>,
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
-    pub fn new(output_node: Node<SP, P>) -> Result<Self, LocalError> {
+impl<SP: SessionParameters> Ruleset<SP> {
+    pub fn new(output_node: Node<SP>) -> Result<Self, LocalError> {
         let output_node = output_node.into_inner();
         let output_tag = output_node.as_ref().store_in().clone();
 
@@ -105,7 +105,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                             function: function.clone(),
                             args: args
                                 .iter()
-                                .map(|arg: &InnerNode<SP, P>| arg.as_ref().store_in().clone())
+                                .map(|arg: &InnerNode<SP>| arg.as_ref().store_in().clone())
                                 .collect(),
                         },
                         specific_condition,
@@ -141,7 +141,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
                                 index: id.clone(),
                                 args: args
                                     .iter()
-                                    .map(|arg: &InnerNode<SP, P>| {
+                                    .map(|arg: &InnerNode<SP>| {
                                         let tag = arg.as_ref().store_in().clone();
                                         if arg.as_ref().group().is_some() {
                                             Arg::ArrayElem(tag)
@@ -216,7 +216,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
         }
     }
 
-    fn pop_send_action(&mut self) -> Option<Action<SP, P>> {
+    fn pop_send_action(&mut self) -> Option<Action<SP>> {
         self.rules
             .extract_if(.., |rule| {
                 matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
@@ -225,7 +225,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
             .map(|rule| rule.action)
     }
 
-    fn pop_local_action(&mut self) -> Option<Action<SP, P>> {
+    fn pop_local_action(&mut self) -> Option<Action<SP>> {
         self.rules
             .extract_if(.., |rule| {
                 !matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
@@ -234,7 +234,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
             .map(|rule| rule.action)
     }
 
-    pub fn pop_action(&mut self) -> Option<Action<SP, P>> {
+    pub fn pop_action(&mut self) -> Option<Action<SP>> {
         self.pop_local_action().or_else(|| self.pop_send_action())
     }
 
@@ -247,7 +247,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> Ruleset<SP, P> {
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for Action<SP, P> {
+impl<SP: SessionParameters> Display for Action<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::ComputeScalar {
@@ -295,14 +295,14 @@ impl<SP: SessionParameters, P: Protocol<SP>> Display for Action<SP, P> {
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for Rule<SP, P> {
+impl<SP: SessionParameters> Display for Rule<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         writeln!(f, "if {}:", self.condition)?;
         write!(f, "  {}", self.action)
     }
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> Display for Ruleset<SP, P> {
+impl<SP: SessionParameters> Display for Ruleset<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         writeln!(f, "Ruleset:")?;
         for rule in &self.rules {

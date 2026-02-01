@@ -12,12 +12,6 @@ use signature::{Keypair, rand_core::SeedableRng};
 #[derive(Debug)]
 struct TestProtocol;
 
-#[derive(Clone)]
-#[derive_where::derive_where(Debug)]
-struct TestProtocolShared<SP: SessionParameters> {
-    parties: Vec<SP::Verifier>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message1<Id>(Id);
 
@@ -27,16 +21,12 @@ struct Message2<Id>(Id, Id);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message3<Id>(Id, Id);
 
-fn make_scalar_value<SP: SessionParameters>(
-    _shared_data: &TestProtocolShared<SP>,
-    args: Args<SP>,
-) -> Result<Message1<SP::Verifier>, ComputeError> {
+fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError> {
     Ok(Message1(args.my_id().clone()))
 }
 
 fn make_array_elem<SP: SessionParameters>(
     id: &SP::Verifier,
-    _shared_data: &TestProtocolShared<SP>,
     args: Args<SP>,
 ) -> Result<Message2<SP::Verifier>, ComputeError> {
     Ok(Message2(args.my_id().clone(), id.clone()))
@@ -44,16 +34,12 @@ fn make_array_elem<SP: SessionParameters>(
 
 fn make_array_elem_sans_me<SP: SessionParameters>(
     id: &SP::Verifier,
-    _shared_data: &TestProtocolShared<SP>,
     args: Args<SP>,
 ) -> Result<Message3<SP::Verifier>, ComputeError> {
     Ok(Message3(args.my_id().clone(), id.clone()))
 }
 
-fn gen_output<SP: SessionParameters>(
-    _shared_data: &TestProtocolShared<SP>,
-    args: Args<SP>,
-) -> Result<(), ComputeError> {
+fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -76,21 +62,26 @@ fn gen_output<SP: SessionParameters>(
 }
 
 impl<SP: SessionParameters> Protocol<SP> for TestProtocol {
-    type SharedData = TestProtocolShared<SP>;
+    type BuildData = PartyGroup<SP::Verifier>;
+    type SharedData = ();
     type Output = ();
-    fn build(my_id: &SP::Verifier, shared_data: &Self::SharedData) -> Result<Node<SP, Self>, LocalError> {
+    fn build(
+        my_id: &SP::Verifier,
+        build_data: &Self::BuildData,
+        _shared_data: &Node<SP>,
+    ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
         let message_z = ProtocolMessage::new::<Message3<SP::Verifier>>("z");
 
-        let all_parties = PartyGroup::new(&shared_data.parties);
+        let all_parties = build_data;
 
         let my_x = compute_scalar("my_x", make_scalar_value, &[])?;
-        let x_broadcasted = broadcast(&message_x, &my_x, &all_parties)?;
-        let x = receive(&message_x, &all_parties);
+        let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
+        let x = receive(&message_x, all_parties);
         let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted]);
 
-        let my_y = compute_array("my_y", make_array_elem, &all_parties, &[])?;
+        let my_y = compute_array("my_y", make_array_elem, all_parties, &[])?;
         let y_sent = send(&message_y, &my_y)?;
         let y = receive(&message_y, my_y.group().unwrap());
         let all_y = collect(&y)?.with_dependencies(&[&y_sent]);
@@ -108,15 +99,13 @@ impl<SP: SessionParameters> Protocol<SP> for TestProtocol {
 fn run_messages_protocol() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let shared_data = TestProtocolShared { parties: ids.clone() };
+    let build_data = PartyGroup::new(&ids);
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
 
     let sessions = signers
         .into_iter()
-        .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(signer, shared_data.clone()).unwrap()
-        })
+        .map(|signer| Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(signer, &build_data, ()).unwrap())
         .collect::<Vec<_>>();
     let _results = run_sessions_sync(&mut rng, sessions);
 }

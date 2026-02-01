@@ -1,5 +1,5 @@
 use alloc::{collections::BTreeMap, format, sync::Arc, vec};
-use core::fmt::Debug;
+use core::{fmt::Debug, marker::PhantomData};
 
 use signature::{Keypair, rand_core::CryptoRngCore};
 
@@ -12,6 +12,7 @@ use crate::{
     protocol::{
         Args, ArrayFunction, ComputeError, Erasable, PartyId, Protocol, ScalarFunction, SessionParameters, Tag, Value,
         WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        constant,
     },
 };
 
@@ -79,30 +80,29 @@ impl<Id: PartyId> Storage<Id> {
 }
 
 #[derive(Debug)]
-enum ComputeFunction<SP: SessionParameters, P: Protocol<SP>> {
+enum ComputeFunction<SP: SessionParameters> {
     Scalar {
-        function: WrappedScalarFunction<SP, P>,
+        function: WrappedScalarFunction<SP>,
     },
     Array {
-        function: WrappedArrayFunction<SP, P>,
+        function: WrappedArrayFunction<SP>,
         id: SP::Verifier,
     },
 }
 
 #[derive(Debug)]
-pub struct ComputeTask<SP: SessionParameters, P: Protocol<SP>> {
+pub struct ComputeTask<SP: SessionParameters> {
     store_in: Tag,
-    function: ComputeFunction<SP, P>,
+    function: ComputeFunction<SP>,
     args: Args<SP>,
-    shared_data: Arc<P::SharedData>,
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> ComputeTask<SP, P> {
+impl<SP: SessionParameters> ComputeTask<SP> {
     pub fn compute(self) -> Result<TaskResult<SP::Verifier>, LocalError> {
         let store_in = self.store_in.clone();
         match self.function {
             ComputeFunction::Scalar { function } => {
-                let result = match function.call(&self.shared_data, self.args) {
+                let result = match function.call(self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
@@ -110,7 +110,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> ComputeTask<SP, P> {
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeFunction::Array { function, id } => {
-                let result = match function.call(&id, &self.shared_data, self.args) {
+                let result = match function.call(&id, self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => {
@@ -124,30 +124,29 @@ impl<SP: SessionParameters, P: Protocol<SP>> ComputeTask<SP, P> {
 }
 
 #[derive(Debug)]
-enum ComputeWithRngFunction<SP: SessionParameters, P: Protocol<SP>> {
+enum ComputeWithRngFunction<SP: SessionParameters> {
     Scalar {
-        function: WrappedScalarFunctionPrivate<SP, P>,
+        function: WrappedScalarFunctionPrivate<SP>,
     },
     Array {
-        function: WrappedArrayFunctionPrivate<SP, P>,
+        function: WrappedArrayFunctionPrivate<SP>,
         id: SP::Verifier,
     },
 }
 
 #[derive(Debug)]
-pub struct ComputeWithRngTask<SP: SessionParameters, P: Protocol<SP>> {
+pub struct ComputeWithRngTask<SP: SessionParameters> {
     store_in: Tag,
-    function: ComputeWithRngFunction<SP, P>,
+    function: ComputeWithRngFunction<SP>,
     args: Args<SP>,
-    shared_data: Arc<P::SharedData>,
 }
 
-impl<SP: SessionParameters, P: Protocol<SP>> ComputeWithRngTask<SP, P> {
+impl<SP: SessionParameters> ComputeWithRngTask<SP> {
     pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP::Verifier>, LocalError> {
         let store_in = self.store_in.clone();
         match self.function {
             ComputeWithRngFunction::Scalar { function } => {
-                let result = match function.call(rng, &self.shared_data, self.args) {
+                let result = match function.call(rng, self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
@@ -155,7 +154,7 @@ impl<SP: SessionParameters, P: Protocol<SP>> ComputeWithRngTask<SP, P> {
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeWithRngFunction::Array { function, id } => {
-                let result = match function.call(rng, &id, &self.shared_data, self.args) {
+                let result = match function.call(rng, &id, self.args) {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => {
@@ -200,10 +199,10 @@ impl FinalizeTask {
 }
 
 #[derive(Debug)]
-pub enum Task<SP: SessionParameters, P: Protocol<SP>> {
+pub enum Task<SP: SessionParameters> {
     Send(SendTask<SP>),
-    Compute(ComputeTask<SP, P>),
-    ComputeWithRng(ComputeWithRngTask<SP, P>),
+    Compute(ComputeTask<SP>),
+    ComputeWithRng(ComputeWithRngTask<SP>),
     Finalize(FinalizeTask),
 }
 
@@ -228,9 +227,9 @@ pub enum AddMessageResult {
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: Protocol<SP>> {
     signer: Arc<SP::Signer>,
-    shared_data: Arc<P::SharedData>,
-    ruleset: Ruleset<SP, P>,
+    ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
+    phantom: PhantomData<P>,
 }
 
 impl<SP, P> Session<SP, P>
@@ -238,8 +237,10 @@ where
     SP: SessionParameters,
     P: Protocol<SP>,
 {
-    pub fn new(signer: SP::Signer, shared_data: P::SharedData) -> Result<Self, LocalError> {
-        let output_node = P::build(&signer.verifying_key(), &shared_data)?;
+    pub fn new(signer: SP::Signer, build_data: &P::BuildData, shared_data: P::SharedData) -> Result<Self, LocalError> {
+        // TODO: make sure there are no name clashes. Special tag type?
+        let input_node = constant("input", shared_data);
+        let output_node = P::build(&signer.verifying_key(), build_data, &input_node)?;
         let ruleset = Ruleset::new(output_node)?;
         let storage = Storage::new();
         let signer = Arc::new(signer);
@@ -247,7 +248,7 @@ where
             signer,
             ruleset,
             storage,
-            shared_data: Arc::new(shared_data),
+            phantom: PhantomData,
         })
     }
 
@@ -255,7 +256,7 @@ where
         self.signer.verifying_key()
     }
 
-    pub fn make_task(&mut self) -> Result<Option<Task<SP, P>>, LocalError> {
+    pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
         if self.storage.contains(self.ruleset.output_tag()) {
             return Ok(Some(Task::Finalize(FinalizeTask {
                 outcome: self.storage.get(self.ruleset.output_tag())?,
@@ -306,7 +307,6 @@ where
                                 store_in,
                                 function: ComputeFunction::Scalar { function },
                                 args,
-                                shared_data: self.shared_data.clone(),
                             })));
                         }
                         ScalarFunction::Private(function) => {
@@ -314,7 +314,6 @@ where
                                 store_in,
                                 function: ComputeWithRngFunction::Scalar { function },
                                 args,
-                                shared_data: self.shared_data.clone(),
                             })));
                         }
                     }
@@ -339,7 +338,6 @@ where
                                 store_in,
                                 function: ComputeFunction::Array { function, id: index },
                                 args,
-                                shared_data: self.shared_data.clone(),
                             })));
                         }
                         ArrayFunction::Private(function) => {
@@ -347,7 +345,6 @@ where
                                 store_in,
                                 function: ComputeWithRngFunction::Array { function, id: index },
                                 args,
-                                shared_data: self.shared_data.clone(),
                             })));
                         }
                     }
