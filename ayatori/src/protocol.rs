@@ -10,7 +10,7 @@ pub(crate) use function::{
     ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
     WrappedScalarFunctionPrivate,
 };
-pub(crate) use node::{InnerNode, NodeKind, constant};
+pub(crate) use node::{NodeKind, constant};
 pub(crate) use tag::Tag;
 pub(crate) use value::{SerializedValue, Value};
 
