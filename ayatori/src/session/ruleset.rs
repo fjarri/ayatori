@@ -15,7 +15,7 @@ pub(crate) enum Arg {
     ArrayElem(Tag),
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub(crate) enum Action<SP: SessionParameters> {
     ComputeScalar {
         store_in: Tag,

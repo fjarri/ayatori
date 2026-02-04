@@ -4,7 +4,11 @@ use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest};
 
-use super::{node::Node, value::Erasable};
+use super::{
+    args::{ProtocolArgs, ProtocolSignature},
+    node::Node,
+    value::Erasable,
+};
 use crate::error::LocalError;
 
 pub trait PartyId:
@@ -49,15 +53,23 @@ pub trait SessionParameters: 'static {
     type WireFormat: WireFormat;
 }
 
-pub trait Protocol<SP: SessionParameters>: Sized + Debug {
-    type BuildData;
-    type SharedData: Erasable;
+pub trait OuterProtocol<SP: SessionParameters>: Sized + Debug + InnerProtocol<SP> {
+    type SharedData;
     // TODO: we may not need `Clone` here
     type Output: 'static + Clone + Erasable;
+
+    fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP>;
+    fn make_build_data(shared_data: &Self::SharedData) -> <Self as InnerProtocol<SP>>::BuildData;
+}
+
+pub trait InnerProtocol<SP: SessionParameters>: Sized + Debug {
+    type BuildData;
+
+    fn signature() -> ProtocolSignature;
 
     fn build(
         my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        shared_data: &Node<SP>,
+        inputs: ProtocolArgs<SP>,
     ) -> Result<Node<SP>, LocalError>;
 }

@@ -10,17 +10,17 @@ pub(crate) use function::{
     ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
     WrappedScalarFunctionPrivate,
 };
-pub(crate) use node::{NodeKind, constant};
+pub(crate) use node::NodeKind;
 pub(crate) use tag::Tag;
 pub(crate) use value::{SerializedValue, Value};
 
 pub use crate::error::LocalError;
-pub use args::Args;
+pub use args::{Args, ProtocolArgs, ProtocolSignature};
 pub use function::ComputeError;
 pub use node::{
     Node, ProtocolMessage, broadcast, collect, compute_array, compute_array_private, compute_scalar,
     compute_scalar_private, receive, send, verify,
 };
 pub use party::PartyGroup;
-pub use traits::{PartyId, Protocol, SessionParameters, WireFormat};
+pub use traits::{InnerProtocol, OuterProtocol, PartyId, SessionParameters, WireFormat};
 pub use value::Erasable;
