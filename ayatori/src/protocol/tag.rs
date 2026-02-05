@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{format, string::String};
 use core::fmt::{self, Display};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,6 +20,10 @@ pub(crate) struct Tag {
 impl Tag {
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn short_name(&self) -> &str {
+        self.name.rsplit_once("/").map(|result| result.1).unwrap_or(&self.name)
     }
 
     pub fn with_name(&self, name: &str) -> Self {
@@ -76,6 +80,16 @@ impl Tag {
             name: self.name.clone(),
             kind: self.kind,
             collected: true,
+        }
+    }
+
+    pub fn with_prefix(self, prefix: &str) -> Self {
+        let new_name = format!("{}/{}", prefix, self.name);
+
+        Self {
+            name: new_name,
+            kind: self.kind,
+            collected: self.collected,
         }
     }
 }

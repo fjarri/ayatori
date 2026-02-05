@@ -6,7 +6,7 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{ArrayFunction, Node, NodeKind, ScalarFunction, SessionParameters, Tag},
+    protocol::{ArrayFunction, Node, NodeKind, ScalarFunction, SessionParameters, Tag, serialize_function},
 };
 
 #[derive(Debug)]
@@ -140,6 +140,41 @@ impl<SP: SessionParameters> Ruleset<SP> {
                                         }
                                     })
                                     .collect(),
+                            },
+                            specific_condition,
+                        ));
+                    }
+                }
+                NodeKind::Serialize { data, group, adapter } => {
+                    nodes_to_process.push(data.get_strong_ref());
+
+                    for id in group.ids() {
+                        let mut specific_condition = Condition::empty();
+                        if data.group().is_some() {
+                            specific_condition.and(LeafCondition::ArrayElement {
+                                tag: data.store_in().clone(),
+                                id: id.clone(),
+                            });
+                        } else {
+                            specific_condition.and(LeafCondition::Value {
+                                tag: data.store_in().clone(),
+                            });
+                        }
+
+                        let function = serialize_function(node.store_in(), data, adapter);
+                        let data_tag = data.store_in().clone();
+                        let arg = if data.group().is_some() {
+                            Arg::ArrayElem(data_tag)
+                        } else {
+                            Arg::Scalar(data_tag)
+                        };
+
+                        actions.push((
+                            Action::ComputeArrayElement {
+                                store_in: node.store_in().clone(),
+                                function,
+                                index: id.clone(),
+                                args: [arg].into(),
                             },
                             specific_condition,
                         ));

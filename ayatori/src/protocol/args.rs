@@ -9,7 +9,7 @@ use alloc::{
 use itertools::Itertools;
 
 use super::{
-    node::{Node, constant},
+    node::{Node, alias, constant},
     tag::Tag,
     traits::SessionParameters,
     value::{Erasable, Value},
@@ -32,7 +32,7 @@ impl<SP: SessionParameters> Args<SP> {
         // TODO (#11): for now checking if there are name clashes.
         // If we encounter a situation where we do need arguments with the same name but different TagKind,
         // we need to rethink this.
-        let duplicates = values.keys().duplicates_by(|tag| tag.name()).collect::<Vec<_>>();
+        let duplicates = values.keys().duplicates_by(|tag| tag.short_name()).collect::<Vec<_>>();
         if !duplicates.is_empty() {
             return Err(LocalError::new(format!("Duplicate names of arguments: {duplicates:?}")));
         }
@@ -42,7 +42,7 @@ impl<SP: SessionParameters> Args<SP> {
             signer: signer.clone(),
             values: values
                 .into_iter()
-                .map(|(tag, value)| (tag.name().to_string(), value))
+                .map(|(tag, value)| (tag.short_name().to_string(), value))
                 .collect(),
         })
     }
@@ -56,9 +56,12 @@ impl<SP: SessionParameters> Args<SP> {
     }
 
     pub(crate) fn get_value(&self, name: &str) -> Result<&Value, LocalError> {
-        self.values
-            .get(name)
-            .ok_or_else(|| LocalError::new(format!("Value {name} is not present in the Args")))
+        self.values.get(name).ok_or_else(|| {
+            LocalError::new(format!(
+                "Value {name} is not present in the Args (have: {})",
+                self.values.keys().join(", ")
+            ))
+        })
     }
 
     pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, LocalError> {
@@ -92,10 +95,28 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
         Self(args)
     }
 
+    pub fn input_node(self, name: &str, value: &Node<SP>) -> Self {
+        let mut args = self.0;
+        args.insert(name.to_string(), value.get_strong_ref());
+        Self(args)
+    }
+
     pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
         self.0
             .get(name)
             .ok_or_else(|| LocalError::new(format!("Argument {name} was not found")))
+    }
+
+    pub(crate) fn with_aliases(self, signature: ProtocolSignature) -> Result<(Self, Vec<Node<SP>>), LocalError> {
+        let mut new_nodes = BTreeMap::new();
+        for name in signature.0.iter() {
+            let node = self.0.get(name).ok_or_else(|| {
+                LocalError::new(format!("{name} is in the signature but not among the given arguments"))
+            })?;
+            let alias = alias(name, node);
+            new_nodes.insert(name.to_string(), alias);
+        }
+        Ok((Self(new_nodes), self.0.into_values().collect()))
     }
 }
 
