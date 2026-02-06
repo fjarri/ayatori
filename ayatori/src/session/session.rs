@@ -10,8 +10,9 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ArrayFunction, ComputeError, Erasable, OuterProtocol, PartyId, ScalarFunction, SessionParameters, Tag,
-        Value, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        Args, ArrayFunction, ComputeError, Erasable, ExecutableProtocol, PartyId, ScalarFunction, SessionParameters,
+        Tag, Value, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
+        WrappedScalarFunctionPrivate,
     },
 };
 
@@ -225,7 +226,7 @@ pub enum AddMessageResult {
 
 // TODO: do we need to be generic over P here?
 #[derive(Debug)]
-pub struct Session<SP: SessionParameters, P: OuterProtocol<SP>> {
+pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     signer: Arc<SP::Signer>,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
@@ -235,7 +236,7 @@ pub struct Session<SP: SessionParameters, P: OuterProtocol<SP>> {
 impl<SP, P> Session<SP, P>
 where
     SP: SessionParameters,
-    P: OuterProtocol<SP>,
+    P: ExecutableProtocol<SP>,
 {
     pub fn new(signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
         let inputs = P::make_inputs(shared_data);

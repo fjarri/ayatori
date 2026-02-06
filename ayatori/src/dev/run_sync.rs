@@ -4,11 +4,11 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     error::LocalError,
-    protocol::{OuterProtocol, SessionParameters},
+    protocol::{ExecutableProtocol, SessionParameters},
     session::{AddMessageResult, Message, Session, Task},
 };
 
-pub fn run_sessions_sync<SP: SessionParameters, P: OuterProtocol<SP>>(
+pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
 ) -> Result<BTreeMap<SP::Verifier, P::Output>, LocalError> {

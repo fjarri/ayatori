@@ -15,7 +15,7 @@ use super::{
     node::{Node, NodeKind, nodes_to_owned},
     party::PartyGroup,
     tag::{FullName, Tag},
-    traits::{InnerProtocol, SessionParameters},
+    traits::{ComposableProtocol, SessionParameters},
     value::{Erasable, SerdeAdapter, SerializedValue, Value},
 };
 use crate::{error::LocalError, session::SignedValue};
@@ -297,7 +297,7 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
 }
 
 // TODO: can we avoid passing `my_id` explicitly?
-pub fn call_protocol<SP: SessionParameters, P: InnerProtocol<SP>>(
+pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     prefix: &str,
     my_id: &SP::Verifier,
     build_data: &P::BuildData,

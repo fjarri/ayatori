@@ -40,7 +40,7 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError
     Ok(bs.values().copied().sum())
 }
 
-impl<SP: SessionParameters> OuterProtocol<SP> for DistributedRNG {
+impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = u64;
 
@@ -53,7 +53,7 @@ impl<SP: SessionParameters> OuterProtocol<SP> for DistributedRNG {
     }
 }
 
-impl<SP: SessionParameters> InnerProtocol<SP> for DistributedRNG {
+impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {

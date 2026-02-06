@@ -53,16 +53,16 @@ pub trait SessionParameters: 'static {
     type WireFormat: WireFormat;
 }
 
-pub trait OuterProtocol<SP: SessionParameters>: Sized + Debug + InnerProtocol<SP> {
+pub trait ExecutableProtocol<SP: SessionParameters>: Sized + Debug + ComposableProtocol<SP> {
     type SharedData;
     // TODO: we may not need `Clone` here
     type Output: 'static + Clone + Erasable;
 
     fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP>;
-    fn make_build_data(shared_data: &Self::SharedData) -> <Self as InnerProtocol<SP>>::BuildData;
+    fn make_build_data(shared_data: &Self::SharedData) -> <Self as ComposableProtocol<SP>>::BuildData;
 }
 
-pub trait InnerProtocol<SP: SessionParameters>: Sized + Debug {
+pub trait ComposableProtocol<SP: SessionParameters>: Sized + Debug {
     type BuildData;
 
     fn signature() -> ProtocolSignature;

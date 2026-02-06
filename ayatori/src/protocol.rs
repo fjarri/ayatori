@@ -25,5 +25,5 @@ pub use constructors::{
 pub use function::ComputeError;
 pub use node::Node;
 pub use party::PartyGroup;
-pub use traits::{InnerProtocol, OuterProtocol, PartyId, SessionParameters, WireFormat};
+pub use traits::{ComposableProtocol, ExecutableProtocol, PartyId, SessionParameters, WireFormat};
 pub use value::Erasable;

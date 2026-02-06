@@ -61,7 +61,7 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError>
     Ok(())
 }
 
-impl<SP: SessionParameters> OuterProtocol<SP> for TestProtocol {
+impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
     fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
@@ -72,7 +72,7 @@ impl<SP: SessionParameters> OuterProtocol<SP> for TestProtocol {
     }
 }
 
-impl<SP: SessionParameters> InnerProtocol<SP> for TestProtocol {
+impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {

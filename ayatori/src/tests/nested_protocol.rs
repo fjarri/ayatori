@@ -31,7 +31,7 @@ fn make_protocol2_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, C
     Ok(xs.values().map(|message| message.0).sum())
 }
 
-impl<SP: SessionParameters> OuterProtocol<SP> for Protocol2 {
+impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol2 {
     type SharedData = Protocol2SharedData<SP>;
     type Output = u64;
 
@@ -44,7 +44,7 @@ impl<SP: SessionParameters> OuterProtocol<SP> for Protocol2 {
     }
 }
 
-impl<SP: SessionParameters> InnerProtocol<SP> for Protocol2 {
+impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -92,7 +92,7 @@ fn make_protocol1_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, C
     Ok(xs.values().map(|message| message.0).sum())
 }
 
-impl<SP: SessionParameters> OuterProtocol<SP> for Protocol1 {
+impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol1 {
     type SharedData = Protocol1SharedData<SP>;
     type Output = u64;
 
@@ -105,7 +105,7 @@ impl<SP: SessionParameters> OuterProtocol<SP> for Protocol1 {
     }
 }
 
-impl<SP: SessionParameters> InnerProtocol<SP> for Protocol1 {
+impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
