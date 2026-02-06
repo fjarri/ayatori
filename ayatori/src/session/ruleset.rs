@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeSet, format, string::ToString, vec, vec::Vec};
+use alloc::{collections::BTreeSet, format, string::ToString, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
@@ -56,17 +56,9 @@ impl<SP: SessionParameters> Ruleset<SP> {
     pub fn new(output_node: Node<SP>) -> Result<Self, LocalError> {
         let output_tag = output_node.store_in().clone();
 
-        let mut nodes_to_process = vec![output_node];
         let mut rules = Vec::new();
 
-        let mut nodes_seen = BTreeSet::<usize>::new();
-
-        while let Some(node) = nodes_to_process.pop() {
-            if nodes_seen.contains(&node.id()) {
-                continue;
-            }
-            nodes_seen.insert(node.id());
-
+        for node in output_node.flattened(None) {
             if let NodeKind::Receive { .. } = node.kind() {
                 continue;
             }
@@ -84,7 +76,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         });
                     }
                 }
-                nodes_to_process.push(dependency.get_strong_ref());
             }
 
             let mut actions = Vec::new();
@@ -96,7 +87,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         specific_condition.and(LeafCondition::Value {
                             tag: arg.store_in().clone(),
                         });
-                        nodes_to_process.push(arg.get_strong_ref());
                     }
                     actions.push((
                         Action::ComputeScalar {
@@ -121,7 +111,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                                     tag: arg.store_in().clone(),
                                 });
                             }
-                            nodes_to_process.push(arg.get_strong_ref());
                         }
 
                         actions.push((
@@ -146,8 +135,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     }
                 }
                 NodeKind::Serialize { data, group, adapter } => {
-                    nodes_to_process.push(data.get_strong_ref());
-
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         if data.group().is_some() {
@@ -181,7 +168,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     }
                 }
                 NodeKind::DirectMessage { data, group } => {
-                    nodes_to_process.push(data.get_strong_ref());
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         specific_condition.and(LeafCondition::ArrayElement {
@@ -206,7 +192,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         group: group.clone(),
                         got_ids: BTreeSet::new(),
                     });
-                    nodes_to_process.push(values.get_strong_ref());
 
                     actions.push((
                         Action::Collect {

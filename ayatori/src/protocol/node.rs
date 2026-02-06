@@ -90,23 +90,36 @@ impl<SP: SessionParameters> Node<SP> {
     pub fn shallow_display(&self) -> String {
         format!("{}", self.0.as_ref())
     }
-}
 
-impl<SP: SessionParameters> Display for Node<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+    pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>) -> Vec<Self> {
         let mut nodes_to_process = vec![self.get_strong_ref()];
-        let mut nodes_seen = BTreeSet::<usize>::new();
+        let mut nodes_seen = BTreeSet::new();
+        let mut flat_nodes = Vec::new();
+        let terminate_at_ids = terminate_at
+            .map(|nodes| nodes.iter().map(|node| node.id()).collect::<BTreeSet<_>>())
+            .unwrap_or_default();
 
         while let Some(node) = nodes_to_process.pop() {
-            writeln!(f, "{}", node.shallow_display())?;
             nodes_seen.insert(node.id());
+            flat_nodes.push(node.get_strong_ref());
             nodes_to_process.extend(node.all_dependencies().filter_map(|dependency| {
-                if nodes_seen.contains(&dependency.id()) {
+                let id = dependency.id();
+                if nodes_seen.contains(&id) || terminate_at_ids.contains(&id) {
                     None
                 } else {
                     Some(dependency.get_strong_ref())
                 }
             }));
+        }
+        flat_nodes.reverse();
+        flat_nodes
+    }
+}
+
+impl<SP: SessionParameters> Display for Node<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        for node in self.flattened(None) {
+            writeln!(f, "{}", node.shallow_display())?;
         }
         Ok(())
     }
@@ -640,35 +653,15 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
 
 fn prefix_nodes<SP: SessionParameters>(prefix: &str, root: Node<SP>, terminate_at: Vec<Node<SP>>) -> Node<SP> {
     let root_id = root.id();
-    let mut nodes_to_process: Vec<_> = [root].into();
     let mut replacement_nodes = terminate_at
         .iter()
         .map(|node| (node.id(), node.get_strong_ref()))
         .collect::<BTreeMap<_, _>>();
 
-    while let Some(node) = nodes_to_process.pop() {
-        if replacement_nodes.contains_key(&node.id()) {
-            continue;
-        }
-
-        if node
-            .all_dependencies()
-            .all(|dependency| replacement_nodes.contains_key(&dependency.id()))
-        {
-            let old_id = node.id();
-            let new_node = node.with_replacements(&replacement_nodes).with_prefix(prefix);
-            replacement_nodes.insert(old_id, new_node);
-            continue;
-        }
-
-        nodes_to_process.push(node.get_strong_ref());
-        nodes_to_process.extend(node.all_dependencies().filter_map(|dependency| {
-            if replacement_nodes.contains_key(&dependency.id()) {
-                None
-            } else {
-                Some(dependency.get_strong_ref())
-            }
-        }));
+    for node in root.flattened(Some(&terminate_at)) {
+        let old_id = node.id();
+        let new_node = node.with_replacements(&replacement_nodes).with_prefix(prefix);
+        replacement_nodes.insert(old_id, new_node);
     }
 
     replacement_nodes.remove(&root_id).expect("The root node was processed")
