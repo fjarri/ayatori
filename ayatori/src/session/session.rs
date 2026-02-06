@@ -10,9 +10,9 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ArrayFunction, ComputeError, Erasable, PartyId, Protocol, ScalarFunction, SessionParameters, Tag, Value,
-        WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
-        constant,
+        Args, ArrayFunction, ComputeError, Erasable, ExecutableProtocol, PartyId, ScalarFunction, SessionParameters,
+        Tag, Value, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
+        WrappedScalarFunctionPrivate,
     },
 };
 
@@ -224,8 +224,9 @@ pub enum AddMessageResult {
     InvalidSignature,
 }
 
+// TODO: do we need to be generic over P here?
 #[derive(Debug)]
-pub struct Session<SP: SessionParameters, P: Protocol<SP>> {
+pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     signer: Arc<SP::Signer>,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
@@ -235,12 +236,12 @@ pub struct Session<SP: SessionParameters, P: Protocol<SP>> {
 impl<SP, P> Session<SP, P>
 where
     SP: SessionParameters,
-    P: Protocol<SP>,
+    P: ExecutableProtocol<SP>,
 {
-    pub fn new(signer: SP::Signer, build_data: &P::BuildData, shared_data: P::SharedData) -> Result<Self, LocalError> {
-        // TODO: make sure there are no name clashes. Special tag type?
-        let input_node = constant("input", shared_data);
-        let output_node = P::build(&signer.verifying_key(), build_data, &input_node)?;
+    pub fn new(signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
+        let inputs = P::make_inputs(shared_data);
+        let build_data = P::make_build_data(shared_data);
+        let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
         let ruleset = Ruleset::new(output_node)?;
         let storage = Storage::new();
         let signer = Arc::new(signer);
@@ -367,7 +368,7 @@ where
                 Err(VerificationError::SignatureMismatch) => return Ok(AddMessageResult::InvalidSignature),
             }
             let source = value.source().clone();
-            let tag = Tag::received(value.metadata().name());
+            let tag = Tag::received_with_full_name(value.metadata().full_name());
             self.storage
                 .set_elem(&tag, &source, Value::new(value.serialized_value()))?;
             self.ruleset.update_with_array_element_ready(&tag, &source);

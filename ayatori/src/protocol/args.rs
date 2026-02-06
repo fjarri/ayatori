@@ -1,5 +1,5 @@
 use alloc::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     format,
     string::{String, ToString},
     sync::Arc,
@@ -9,6 +9,8 @@ use alloc::{
 use itertools::Itertools;
 
 use super::{
+    constructors::{alias, constant},
+    node::Node,
     tag::Tag,
     traits::SessionParameters,
     value::{Erasable, Value},
@@ -55,9 +57,12 @@ impl<SP: SessionParameters> Args<SP> {
     }
 
     pub(crate) fn get_value(&self, name: &str) -> Result<&Value, LocalError> {
-        self.values
-            .get(name)
-            .ok_or_else(|| LocalError::new(format!("Value {name} is present in the Args")))
+        self.values.get(name).ok_or_else(|| {
+            LocalError::new(format!(
+                "Value {name} is not present in the Args (have: {})",
+                self.values.keys().join(", ")
+            ))
+        })
     }
 
     pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, LocalError> {
@@ -74,5 +79,59 @@ impl<SP: SessionParameters> Args<SP> {
 
     pub fn get_shared_data<T: Erasable>(&self) -> Result<&T, LocalError> {
         self.get_value("shared_data")?.downcast_ref::<T>()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+
+impl<SP: SessionParameters> ProtocolArgs<SP> {
+    pub fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
+        let mut args = self.0;
+        args.insert(name.to_string(), constant(name, value));
+        Self(args)
+    }
+
+    pub fn input_node(self, name: &str, value: &Node<SP>) -> Self {
+        let mut args = self.0;
+        args.insert(name.to_string(), value.get_strong_ref());
+        Self(args)
+    }
+
+    pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
+        self.0
+            .get(name)
+            .ok_or_else(|| LocalError::new(format!("Argument {name} was not found")))
+    }
+
+    pub(crate) fn with_aliases(self, signature: ProtocolSignature) -> Result<(Self, Vec<Node<SP>>), LocalError> {
+        let mut new_nodes = BTreeMap::new();
+        for name in signature.0.iter() {
+            let node = self.0.get(name).ok_or_else(|| {
+                LocalError::new(format!("{name} is in the signature but not among the given arguments"))
+            })?;
+            let alias = alias(name, node);
+            new_nodes.insert(name.to_string(), alias);
+        }
+        Ok((Self(new_nodes), self.0.into_values().collect()))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ProtocolSignature(BTreeSet<String>);
+
+impl ProtocolSignature {
+    pub fn new() -> Self {
+        Self(BTreeSet::new())
+    }
+
+    pub fn input(self, name: &str) -> Self {
+        let mut args = self.0;
+        args.insert(name.to_string());
+        Self(args)
     }
 }

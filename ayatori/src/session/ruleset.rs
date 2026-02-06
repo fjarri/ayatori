@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeSet, format, string::ToString, vec, vec::Vec};
+use alloc::{collections::BTreeSet, format, string::ToString, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
@@ -6,7 +6,7 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{ArrayFunction, InnerNode, Node, NodeKind, ScalarFunction, SessionParameters, Tag},
+    protocol::{ArrayFunction, Node, NodeKind, ScalarFunction, SessionParameters, Tag, serialize_function},
 };
 
 #[derive(Debug)]
@@ -15,7 +15,7 @@ pub(crate) enum Arg {
     ArrayElem(Tag),
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub(crate) enum Action<SP: SessionParameters> {
     ComputeScalar {
         store_in: Tag,
@@ -54,96 +54,75 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
 
 impl<SP: SessionParameters> Ruleset<SP> {
     pub fn new(output_node: Node<SP>) -> Result<Self, LocalError> {
-        let output_node = output_node.into_inner();
-        let output_tag = output_node.as_ref().store_in().clone();
+        let output_tag = output_node.store_in().clone();
 
-        let mut nodes_to_process = vec![output_node];
         let mut rules = Vec::new();
 
-        let mut nodes_seen = BTreeSet::<usize>::new();
-
-        while let Some(node) = nodes_to_process.pop() {
-            if nodes_seen.contains(&node.id()) {
-                continue;
-            }
-            nodes_seen.insert(node.id());
-
-            if let NodeKind::Receive { .. } = node.as_ref().kind() {
+        for node in output_node.flattened(None) {
+            if let NodeKind::Receive { .. } = node.kind() {
                 continue;
             }
 
             let mut shared_condition = Condition::empty();
 
-            for dependency in node.as_ref().dependencies() {
-                match dependency.as_ref().group() {
+            for dependency in node.dependencies() {
+                match dependency.group() {
                     Some(_group) => {
                         return Err(LocalError::new("Only scalar nodes are allowed as dependencies"));
                     }
                     None => {
                         shared_condition.and(LeafCondition::Value {
-                            tag: dependency.as_ref().store_in().clone(),
+                            tag: dependency.store_in().clone(),
                         });
                     }
                 }
-                nodes_to_process.push(dependency.clone());
             }
 
             let mut actions = Vec::new();
 
-            match node.as_ref().kind() {
+            match node.kind() {
                 NodeKind::ComputeScalar { function, args } => {
                     let mut specific_condition = Condition::empty();
                     for arg in args {
                         specific_condition.and(LeafCondition::Value {
-                            tag: arg.as_ref().store_in().clone(),
+                            tag: arg.store_in().clone(),
                         });
-                        nodes_to_process.push(arg.clone());
                     }
                     actions.push((
                         Action::ComputeScalar {
-                            store_in: node.as_ref().store_in().clone(),
+                            store_in: node.store_in().clone(),
                             function: function.clone(),
-                            args: args
-                                .iter()
-                                .map(|arg: &InnerNode<SP>| arg.as_ref().store_in().clone())
-                                .collect(),
+                            args: args.iter().map(|arg: &Node<SP>| arg.store_in().clone()).collect(),
                         },
                         specific_condition,
                     ));
                 }
-                NodeKind::ComputeArray {
-                    function,
-                    args,
-                    group,
-                    #[allow(unused)]
-                    returns_nothing,
-                } => {
+                NodeKind::ComputeArray { function, args, group } => {
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         for arg in args {
-                            if arg.as_ref().group().is_some() {
+                            if arg.group().is_some() {
                                 specific_condition.and(LeafCondition::ArrayElement {
-                                    tag: arg.as_ref().store_in().clone(),
+                                    tag: arg.store_in().clone(),
                                     id: id.clone(),
                                 });
                             } else {
                                 specific_condition.and(LeafCondition::Value {
-                                    tag: arg.as_ref().store_in().clone(),
+                                    tag: arg.store_in().clone(),
                                 });
                             }
-                            nodes_to_process.push(arg.clone());
                         }
 
                         actions.push((
                             Action::ComputeArrayElement {
-                                store_in: node.as_ref().store_in().clone(),
+                                store_in: node.store_in().clone(),
                                 function: function.clone(),
                                 index: id.clone(),
                                 args: args
                                     .iter()
-                                    .map(|arg: &InnerNode<SP>| {
-                                        let tag = arg.as_ref().store_in().clone();
-                                        if arg.as_ref().group().is_some() {
+                                    .map(|arg: &Node<SP>| {
+                                        let tag = arg.store_in().clone();
+                                        if arg.group().is_some() {
                                             Arg::ArrayElem(tag)
                                         } else {
                                             Arg::Scalar(tag)
@@ -155,18 +134,50 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         ));
                     }
                 }
+                NodeKind::Serialize { data, group, adapter } => {
+                    for id in group.ids() {
+                        let mut specific_condition = Condition::empty();
+                        if data.group().is_some() {
+                            specific_condition.and(LeafCondition::ArrayElement {
+                                tag: data.store_in().clone(),
+                                id: id.clone(),
+                            });
+                        } else {
+                            specific_condition.and(LeafCondition::Value {
+                                tag: data.store_in().clone(),
+                            });
+                        }
+
+                        let function = serialize_function(node.store_in(), data, adapter);
+                        let data_tag = data.store_in().clone();
+                        let arg = if data.group().is_some() {
+                            Arg::ArrayElem(data_tag)
+                        } else {
+                            Arg::Scalar(data_tag)
+                        };
+
+                        actions.push((
+                            Action::ComputeArrayElement {
+                                store_in: node.store_in().clone(),
+                                function,
+                                index: id.clone(),
+                                args: [arg].into(),
+                            },
+                            specific_condition,
+                        ));
+                    }
+                }
                 NodeKind::DirectMessage { data, group } => {
-                    nodes_to_process.push(data.clone());
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         specific_condition.and(LeafCondition::ArrayElement {
-                            tag: data.as_ref().store_in().clone(),
+                            tag: data.store_in().clone(),
                             id: id.clone(),
                         });
                         actions.push((
                             Action::Send {
-                                store_in: node.as_ref().store_in().clone(),
-                                to_send: data.as_ref().store_in().clone(),
+                                store_in: node.store_in().clone(),
+                                to_send: data.store_in().clone(),
                                 destination: id.clone(),
                                 index: Some(id.clone()),
                             },
@@ -177,16 +188,15 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 NodeKind::Collect { values, group } => {
                     let mut specific_condition = Condition::empty();
                     specific_condition.and(LeafCondition::Array {
-                        tag: values.as_ref().store_in().clone(),
+                        tag: values.store_in().clone(),
                         group: group.clone(),
                         got_ids: BTreeSet::new(),
                     });
-                    nodes_to_process.push(values.clone());
 
                     actions.push((
                         Action::Collect {
-                            store_in: node.as_ref().store_in().clone(),
-                            values: values.as_ref().store_in().clone(),
+                            store_in: node.store_in().clone(),
+                            values: values.store_in().clone(),
                         },
                         specific_condition,
                     ));

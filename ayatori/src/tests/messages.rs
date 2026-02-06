@@ -61,14 +61,28 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError>
     Ok(())
 }
 
-impl<SP: SessionParameters> Protocol<SP> for TestProtocol {
-    type BuildData = PartyGroup<SP::Verifier>;
-    type SharedData = ();
+impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
+    type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
+    fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
+        ProtocolArgs::new()
+    }
+    fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
+        shared_data.clone()
+    }
+}
+
+impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
+    type BuildData = PartyGroup<SP::Verifier>;
+
+    fn signature() -> ProtocolSignature {
+        ProtocolSignature::new()
+    }
+
     fn build(
         my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        _shared_data: &Node<SP>,
+        _inputs: ProtocolArgs<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
@@ -99,13 +113,13 @@ impl<SP: SessionParameters> Protocol<SP> for TestProtocol {
 fn run_messages_protocol() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let build_data = PartyGroup::new(&ids);
+    let party_group = PartyGroup::new(&ids);
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
 
     let sessions = signers
         .into_iter()
-        .map(|signer| Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(signer, &build_data, ()).unwrap())
+        .map(|signer| Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(signer, &party_group).unwrap())
         .collect::<Vec<_>>();
-    let _results = run_sessions_sync(&mut rng, sessions);
+    let _results = run_sessions_sync(&mut rng, sessions).unwrap();
 }

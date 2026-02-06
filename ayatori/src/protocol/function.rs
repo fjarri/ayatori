@@ -198,15 +198,13 @@ impl<SP: SessionParameters> WrappedArrayFunctionPrivate<SP> {
     }
 }
 
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
+#[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ScalarFunction<SP: SessionParameters> {
     Public(WrappedScalarFunction<SP>),
     Private(WrappedScalarFunctionPrivate<SP>),
 }
 
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
+#[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ArrayFunction<SP: SessionParameters> {
     Public(WrappedArrayFunction<SP>),
     Private(WrappedArrayFunctionPrivate<SP>),

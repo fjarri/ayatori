@@ -4,11 +4,11 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     error::LocalError,
-    protocol::{Protocol, SessionParameters},
+    protocol::{ExecutableProtocol, SessionParameters},
     session::{AddMessageResult, Message, Session, Task},
 };
 
-pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
+pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
 ) -> Result<BTreeMap<SP::Verifier, P::Output>, LocalError> {
@@ -24,6 +24,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
 
     while !sessions.is_empty() {
         let mut finished = Vec::new();
+        let mut task_processed = false;
 
         for (id, session) in &mut sessions {
             for message in messages
@@ -41,30 +42,38 @@ pub fn run_sessions_sync<SP: SessionParameters, P: Protocol<SP>>(
                 };
             }
 
-            match session.make_task()? {
-                Some(Task::Compute(task)) => {
-                    let result = task.compute()?;
-                    session.add_result(result)?;
+            if let Some(task) = session.make_task()? {
+                match task {
+                    Task::Compute(task) => {
+                        let result = task.compute()?;
+                        session.add_result(result)?;
+                    }
+                    Task::ComputeWithRng(task) => {
+                        let result = task.compute(rng)?;
+                        session.add_result(result)?;
+                    }
+                    Task::Send(task) => {
+                        let (message, result) = task.compute()?;
+                        let destination = message.destination().clone();
+                        messages
+                            .get_mut(&destination)
+                            .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
+                            .push(message);
+                        session.add_result(result)?;
+                    }
+                    Task::Finalize(task) => {
+                        results.insert(id.clone(), task.value()?);
+                        finished.push(id.clone());
+                    }
                 }
-                Some(Task::ComputeWithRng(task)) => {
-                    let result = task.compute(rng)?;
-                    session.add_result(result)?;
-                }
-                Some(Task::Send(task)) => {
-                    let (message, result) = task.compute()?;
-                    let destination = message.destination().clone();
-                    messages
-                        .get_mut(&destination)
-                        .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
-                        .push(message);
-                    session.add_result(result)?;
-                }
-                Some(Task::Finalize(task)) => {
-                    results.insert(id.clone(), task.value()?);
-                    finished.push(id.clone());
-                }
-                None => {}
+                task_processed = true;
             }
+        }
+
+        if !task_processed {
+            return Err(LocalError::new(
+                "Sessions are stuck: there are still active rules, but no tasks are being created",
+            ));
         }
 
         for id in finished {

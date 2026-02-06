@@ -40,14 +40,30 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError
     Ok(bs.values().copied().sum())
 }
 
-impl<SP: SessionParameters> Protocol<SP> for DistributedRNG {
-    type SharedData = ();
-    type BuildData = PartyGroup<SP::Verifier>;
+impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
+    type SharedData = PartyGroup<SP::Verifier>;
     type Output = u64;
+
+    fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
+        ProtocolArgs::new()
+    }
+
+    fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
+        shared_data.clone()
+    }
+}
+
+impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
+    type BuildData = PartyGroup<SP::Verifier>;
+
+    fn signature() -> ProtocolSignature {
+        ProtocolSignature::new()
+    }
+
     fn build(
         _my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        _shared_data: &Node<SP>,
+        _inputs: ProtocolArgs<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_b = ProtocolMessage::new::<u64>("b");
         let message_r = ProtocolMessage::new::<u64>("r");
@@ -75,13 +91,13 @@ impl<SP: SessionParameters> Protocol<SP> for DistributedRNG {
 fn run_protocol() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let build_data = PartyGroup::new(&ids);
+    let party_group = PartyGroup::new(&ids);
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
 
     let sessions = signers
         .into_iter()
-        .map(|signer| Session::<TestSessionParams<BinaryFormat>, DistributedRNG>::new(signer, &build_data, ()).unwrap())
+        .map(|signer| Session::<TestSessionParams<BinaryFormat>, DistributedRNG>::new(signer, &party_group).unwrap())
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
