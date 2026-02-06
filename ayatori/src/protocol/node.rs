@@ -54,7 +54,8 @@ impl<SP: SessionParameters> Node<SP> {
         Self(self.0.clone())
     }
 
-    pub(crate) fn id(&self) -> usize {
+    /// NOTE: use with care. If a node is dropped and another one is created, it may get the same ID.
+    fn id(&self) -> usize {
         // A little hacky. Is there a better way?
         Arc::as_ptr(&self.0) as usize
     }
