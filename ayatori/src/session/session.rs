@@ -367,7 +367,7 @@ where
                 Err(VerificationError::SignatureMismatch) => return Ok(AddMessageResult::InvalidSignature),
             }
             let source = value.source().clone();
-            let tag = Tag::received(value.metadata().name());
+            let tag = Tag::received_with_full_name(value.metadata().full_name());
             self.storage
                 .set_elem(&tag, &source, Value::new(value.serialized_value()))?;
             self.ruleset.update_with_array_element_ready(&tag, &source);

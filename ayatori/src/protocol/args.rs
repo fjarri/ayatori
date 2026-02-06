@@ -32,7 +32,7 @@ impl<SP: SessionParameters> Args<SP> {
         // TODO (#11): for now checking if there are name clashes.
         // If we encounter a situation where we do need arguments with the same name but different TagKind,
         // we need to rethink this.
-        let duplicates = values.keys().duplicates_by(|tag| tag.short_name()).collect::<Vec<_>>();
+        let duplicates = values.keys().duplicates_by(|tag| tag.name()).collect::<Vec<_>>();
         if !duplicates.is_empty() {
             return Err(LocalError::new(format!("Duplicate names of arguments: {duplicates:?}")));
         }
@@ -42,7 +42,7 @@ impl<SP: SessionParameters> Args<SP> {
             signer: signer.clone(),
             values: values
                 .into_iter()
-                .map(|(tag, value)| (tag.short_name().to_string(), value))
+                .map(|(tag, value)| (tag.name().to_string(), value))
                 .collect(),
         })
     }

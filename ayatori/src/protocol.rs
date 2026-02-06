@@ -11,7 +11,7 @@ pub(crate) use function::{
     WrappedScalarFunctionPrivate,
 };
 pub(crate) use node::{NodeKind, serialize_function};
-pub(crate) use tag::Tag;
+pub(crate) use tag::{FullName, Tag};
 pub(crate) use value::{SerializedValue, Value};
 
 pub use crate::error::LocalError;

@@ -21,7 +21,7 @@ use super::{
         WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
     party::PartyGroup,
-    tag::Tag,
+    tag::{FullName, Tag},
     traits::{InnerProtocol, SessionParameters},
     value::{Erasable, SerdeAdapter, SerializedValue, Value},
 };
@@ -173,7 +173,7 @@ impl<SP: SessionParameters> TypedNode<SP> {
 
     pub fn with_prefix(self, prefix: &str) -> Self {
         let mut new_node = self;
-        new_node.store_in = new_node.store_in.with_prefix(prefix);
+        new_node.store_in = new_node.store_in.with_added_prefix(prefix);
         new_node
     }
 }
@@ -488,7 +488,7 @@ fn serialize<SP: SessionParameters>(
     id: &SP::Verifier,
     args: Args<SP>,
     value_name: &str,
-    message_name: &str,
+    message_name: &FullName,
     serde_adapter: &SerdeAdapter<SP::WireFormat>,
 ) -> Result<Value, ComputeError> {
     let value = args.get_value(value_name)?;
@@ -504,8 +504,8 @@ pub(crate) fn serialize_function<SP: SessionParameters>(
     adapter: &SerdeAdapter<SP::WireFormat>,
 ) -> ArrayFunction<SP> {
     let adapter = adapter.clone();
-    let value_name = data.store_in().short_name().to_string();
-    let message_name = store_in.name().to_string();
+    let value_name = data.store_in().name().to_string();
+    let message_name = store_in.full_name().clone();
     ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
         "serialize",
         move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>| {
@@ -613,7 +613,7 @@ pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, Loc
         .clone();
 
     Ok(Node::new(TypedNode {
-        store_in: Tag::collected(values.store_in()),
+        store_in: values.store_in().collected(),
         dependencies: Vec::new(),
         kind: NodeKind::Collect {
             values: values.get_strong_ref(),

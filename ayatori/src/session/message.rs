@@ -1,21 +1,21 @@
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, vec::Vec};
 
 use serde::{Deserialize, Serialize};
 use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest, rand_core::CryptoRngCore};
 
 use crate::{
     error::LocalError,
-    protocol::{SerializedValue, SessionParameters, WireFormat},
+    protocol::{FullName, SerializedValue, SessionParameters, WireFormat},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ValueMetadata<Id> {
-    name: String,
+    name: FullName,
     destination: Id,
 }
 
 impl<Id> ValueMetadata<Id> {
-    pub fn name(&self) -> &str {
+    pub fn full_name(&self) -> &FullName {
         &self.name
     }
 }
@@ -47,12 +47,12 @@ impl<SP: SessionParameters> SignedValue<SP> {
     pub fn new(
         rng: &mut impl CryptoRngCore,
         signer: &SP::Signer,
-        name: &str,
+        name: &FullName,
         destination: &SP::Verifier,
         value: SerializedValue,
     ) -> Result<Self, LocalError> {
         let metadata = ValueMetadata::<SP::Verifier> {
-            name: name.into(),
+            name: name.clone(),
             destination: destination.clone(),
         };
         let value_len =

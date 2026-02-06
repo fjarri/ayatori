@@ -1,5 +1,10 @@
-use alloc::{format, string::String};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::fmt::{self, Display};
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TagKind {
@@ -10,25 +15,73 @@ pub(crate) enum TagKind {
     Signed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) struct FullName {
+    prefix: Vec<String>,
+    name: String,
+}
+
+impl FullName {
+    pub fn new(name: &str) -> Self {
+        Self {
+            prefix: Vec::new(),
+            name: name.to_string(),
+        }
+    }
+
+    pub fn with_name(self, name: &str) -> Self {
+        Self {
+            prefix: self.prefix,
+            name: name.to_string(),
+        }
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut full_prefix = self.prefix;
+        full_prefix.push(prefix.to_string());
+        Self {
+            prefix: full_prefix,
+            name: self.name,
+        }
+    }
+}
+
+impl Display for FullName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        for prefix in self.prefix.iter() {
+            write!(f, "{}/", prefix)?;
+        }
+        write!(f, "{}", self.name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Tag {
-    name: String,
+    full_name: FullName,
     kind: TagKind,
     collected: bool,
 }
 
 impl Tag {
     pub fn name(&self) -> &str {
-        &self.name
+        &self.full_name.name
     }
 
-    pub fn short_name(&self) -> &str {
-        self.name.rsplit_once("/").map(|result| result.1).unwrap_or(&self.name)
+    pub fn full_name(&self) -> &FullName {
+        &self.full_name
     }
 
-    pub fn with_name(&self, name: &str) -> Self {
+    pub fn with_name(self, name: &str) -> Self {
         Self {
-            name: name.into(),
+            full_name: self.full_name.with_name(name),
+            kind: self.kind,
+            collected: self.collected,
+        }
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self {
+            full_name: self.full_name.with_added_prefix(prefix),
             kind: self.kind,
             collected: self.collected,
         }
@@ -36,7 +89,7 @@ impl Tag {
 
     pub fn computed(name: &str) -> Self {
         Self {
-            name: name.into(),
+            full_name: FullName::new(name),
             kind: TagKind::Computed,
             collected: false,
         }
@@ -44,7 +97,7 @@ impl Tag {
 
     pub fn sent(name: &str) -> Self {
         Self {
-            name: name.into(),
+            full_name: FullName::new(name),
             kind: TagKind::Sent,
             collected: false,
         }
@@ -52,7 +105,15 @@ impl Tag {
 
     pub fn received(name: &str) -> Self {
         Self {
-            name: name.into(),
+            full_name: FullName::new(name),
+            kind: TagKind::Received,
+            collected: false,
+        }
+    }
+
+    pub fn received_with_full_name(full_name: &FullName) -> Self {
+        Self {
+            full_name: full_name.clone(),
             kind: TagKind::Received,
             collected: false,
         }
@@ -60,7 +121,7 @@ impl Tag {
 
     pub fn deserialized(name: &str) -> Self {
         Self {
-            name: name.into(),
+            full_name: FullName::new(name),
             kind: TagKind::Deserialized,
             collected: false,
         }
@@ -68,7 +129,7 @@ impl Tag {
 
     pub fn signed(name: &str) -> Self {
         Self {
-            name: name.into(),
+            full_name: FullName::new(name),
             kind: TagKind::Signed,
             collected: false,
         }
@@ -77,19 +138,9 @@ impl Tag {
     pub fn collected(&self) -> Self {
         assert!(!self.collected);
         Self {
-            name: self.name.clone(),
+            full_name: self.full_name.clone(),
             kind: self.kind,
             collected: true,
-        }
-    }
-
-    pub fn with_prefix(self, prefix: &str) -> Self {
-        let new_name = format!("{}/{}", prefix, self.name);
-
-        Self {
-            name: new_name,
-            kind: self.kind,
-            collected: self.collected,
         }
     }
 }
@@ -100,11 +151,11 @@ impl Display for Tag {
             write!(f, "collected(")?;
         }
         match self.kind {
-            TagKind::Computed => write!(f, "{}", self.name),
-            TagKind::Sent => write!(f, "sent({})", self.name),
-            TagKind::Received => write!(f, "received({})", self.name),
-            TagKind::Deserialized => write!(f, "deserialized({})", self.name),
-            TagKind::Signed => write!(f, "signed({})", self.name),
+            TagKind::Computed => write!(f, "{}", self.full_name),
+            TagKind::Sent => write!(f, "sent({})", self.full_name),
+            TagKind::Received => write!(f, "received({})", self.full_name),
+            TagKind::Deserialized => write!(f, "deserialized({})", self.full_name),
+            TagKind::Signed => write!(f, "signed({})", self.full_name),
         }?;
         if self.collected {
             write!(f, ")")?;
