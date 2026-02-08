@@ -19,6 +19,7 @@ use super::{
     traits::SessionParameters,
     value::SerdeAdapter,
 };
+use crate::error::LocalError;
 
 // `Node` intentionally does not implement `Clone` - our clones are shallow, which may be confusing for the user.
 #[derive(Debug)]
@@ -236,12 +237,12 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
         function: ScalarFunction<SP>,
-        args: Vec<Node<SP>>,
+        args: BTreeMap<String, Node<SP>>,
     },
     ComputeArray {
         function: ArrayFunction<SP>,
         group: PartyGroup<SP::Verifier>,
-        args: Vec<Node<SP>>,
+        args: BTreeMap<String, Node<SP>>,
     },
     Serialize {
         data: Node<SP>,
@@ -268,7 +269,9 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                 write!(
                     f,
                     "{function}({})",
-                    args.iter().map(|arg| arg.store_in().to_string()).join(", ")
+                    args.iter()
+                        .map(|(name, arg)| format!("{}={}", name, arg.store_in()))
+                        .join(", ")
                 )
             }
             Self::ComputeArray {
@@ -279,7 +282,9 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                 write!(
                     f,
                     "{function}[]({})",
-                    args.iter().map(|arg| arg.store_in().to_string()).join(", ")
+                    args.iter()
+                        .map(|(name, arg)| format!("{}={}", name, arg.store_in()))
+                        .join(", ")
                 )
             }
             Self::DirectMessage { data, group: _group } => {
@@ -313,12 +318,12 @@ impl<SP: SessionParameters> NodeKind<SP> {
         match self {
             Self::ComputeScalar { function, args } => Self::ComputeScalar {
                 function: function.clone(),
-                args: nodes_to_owned(args.iter()),
+                args: arg_map_to_owned(args),
             },
             Self::ComputeArray { function, group, args } => Self::ComputeArray {
                 function: function.clone(),
                 group: group.clone(),
-                args: nodes_to_owned(args.iter()),
+                args: arg_map_to_owned(args),
             },
             Self::DirectMessage { data, group } => Self::DirectMessage {
                 data: data.get_strong_ref(),
@@ -339,7 +344,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
 
     pub fn all_dependencies(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
         match self {
-            Self::ComputeScalar { args, .. } | Self::ComputeArray { args, .. } => Box::new(args.iter()),
+            Self::ComputeScalar { args, .. } | Self::ComputeArray { args, .. } => Box::new(args.values()),
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
             Self::Serialize { data, .. } => Box::new(core::iter::once(data)),
             Self::DirectMessage { data, .. } => Box::new(core::iter::once(data)),
@@ -349,14 +354,33 @@ impl<SP: SessionParameters> NodeKind<SP> {
 
     pub fn replace(&mut self, replacements: &BTreeMap<usize, Node<SP>>) {
         match self {
-            Self::ComputeScalar { args, .. } => maybe_replace_slice(args, replacements),
-            Self::ComputeArray { args, .. } => maybe_replace_slice(args, replacements),
+            Self::ComputeScalar { args, .. } => maybe_replace_map(args, replacements),
+            Self::ComputeArray { args, .. } => maybe_replace_map(args, replacements),
             Self::Collect { values, .. } => maybe_replace(values, replacements),
             Self::Serialize { data, .. } => maybe_replace(data, replacements),
             Self::DirectMessage { data, .. } => maybe_replace(data, replacements),
             Self::Receive { .. } => {}
         }
     }
+}
+
+pub(crate) fn arg_map_to_owned<SP: SessionParameters>(args: &BTreeMap<String, Node<SP>>) -> BTreeMap<String, Node<SP>> {
+    args.iter()
+        .map(|(name, node)| (name.clone(), node.get_strong_ref()))
+        .collect()
+}
+
+pub(crate) fn args_to_owned<'a, SP: SessionParameters>(
+    nodes: impl Iterator<Item = (&'a str, &'a Node<SP>)>,
+) -> Result<BTreeMap<String, Node<SP>>, LocalError> {
+    let mut result = BTreeMap::new();
+    for (name, node) in nodes {
+        if result.contains_key(name) {
+            return Err(LocalError::new(format!("Repeating argument name: {name}")));
+        }
+        result.insert(name.into(), node.get_strong_ref());
+    }
+    Ok(result)
 }
 
 pub(crate) fn nodes_to_owned<'a, SP: SessionParameters>(nodes: impl Iterator<Item = &'a Node<SP>>) -> Vec<Node<SP>> {
@@ -371,6 +395,15 @@ fn maybe_replace<SP: SessionParameters>(node: &mut Node<SP>, replacements: &BTre
 
 fn maybe_replace_slice<SP: SessionParameters>(nodes: &mut [Node<SP>], replacements: &BTreeMap<usize, Node<SP>>) {
     for node in nodes {
+        maybe_replace(node, replacements)
+    }
+}
+
+fn maybe_replace_map<SP: SessionParameters>(
+    nodes: &mut BTreeMap<String, Node<SP>>,
+    replacements: &BTreeMap<usize, Node<SP>>,
+) {
+    for node in nodes.values_mut() {
         maybe_replace(node, replacements)
     }
 }

@@ -105,7 +105,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let z = receive(&message_z, my_z.group().unwrap());
         let all_z = collect(&z)?.with_dependencies(&[&z_sent]);
 
-        compute_scalar("output", gen_output, &[&all_x, &all_y, &all_z])
+        compute_scalar("output", gen_output, &[("x", &all_x), ("y", &all_y), ("z", &all_z)])
     }
 }
 

@@ -11,7 +11,6 @@ use itertools::Itertools;
 use super::{
     constructors::{alias, constant},
     node::Node,
-    tag::Tag,
     traits::SessionParameters,
     value::{Erasable, Value},
 };
@@ -28,23 +27,12 @@ impl<SP: SessionParameters> Args<SP> {
     pub(crate) fn new(
         signer: &Arc<SP::Signer>,
         my_id: &SP::Verifier,
-        values: BTreeMap<Tag, Value>,
+        values: BTreeMap<String, Value>,
     ) -> Result<Self, LocalError> {
-        // TODO (#11): for now checking if there are name clashes.
-        // If we encounter a situation where we do need arguments with the same name but different TagKind,
-        // we need to rethink this.
-        let duplicates = values.keys().duplicates_by(|tag| tag.name()).collect::<Vec<_>>();
-        if !duplicates.is_empty() {
-            return Err(LocalError::new(format!("Duplicate names of arguments: {duplicates:?}")));
-        }
-
         Ok(Self {
             my_id: my_id.clone(),
             signer: signer.clone(),
-            values: values
-                .into_iter()
-                .map(|(tag, value)| (tag.name().to_string(), value))
-                .collect(),
+            values,
         })
     }
 

@@ -63,10 +63,6 @@ pub(crate) struct Tag {
 }
 
 impl Tag {
-    pub fn name(&self) -> &str {
-        &self.full_name.name
-    }
-
     pub fn full_name(&self) -> &FullName {
         &self.full_name
     }

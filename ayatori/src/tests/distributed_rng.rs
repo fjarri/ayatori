@@ -23,8 +23,8 @@ fn sample_nonce<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<
 }
 
 fn commit_to_value<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError> {
-    let b = args.get::<u64>("my_b")?;
-    let r = args.get::<u64>("my_r")?;
+    let b = args.get::<u64>("b")?;
+    let r = args.get::<u64>("r")?;
     Ok(b + r)
 }
 
@@ -72,7 +72,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
         let all_parties = build_data;
         let my_b = compute_scalar_private("my_b", sample_value, &[])?;
         let my_r = compute_scalar_private("my_r", sample_nonce, &[])?;
-        let my_c = compute_scalar("my_c", commit_to_value, &[&my_b, &my_r])?;
+        let my_c = compute_scalar("my_c", commit_to_value, &[("b", &my_b), ("r", &my_r)])?;
         let c_broadcasted = broadcast(&message_c, &my_c, all_parties)?;
         let c = receive(&message_c, all_parties);
         let all_c = collect(&c)?.with_dependencies(&[&c_broadcasted]);
@@ -80,10 +80,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
         let r_broadcasted = broadcast(&message_r, &my_r, all_parties)?.with_dependencies(&[&all_c]);
         let b = receive(&message_b, all_parties);
         let r = receive(&message_r, all_parties);
-        let hash_correct = verify("hash_correct", verify_commitment, &[&c, &b, &r])?;
+        let hash_correct = verify("hash_correct", verify_commitment, &[("c", &c), ("b", &b), ("r", &r)])?;
         let all_hash_correct = collect(&hash_correct)?.with_dependencies(&[&b_broadcasted, &r_broadcasted]);
         let all_b = collect(&b)?.with_dependencies(&[&b_broadcasted]);
-        Ok(compute_scalar("output", gen_output, &[&all_b])?.with_dependencies(&[&all_hash_correct]))
+        Ok(compute_scalar("output", gen_output, &[("b", &all_b)])?.with_dependencies(&[&all_hash_correct]))
     }
 }
 

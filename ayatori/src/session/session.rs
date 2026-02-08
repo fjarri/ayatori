@@ -299,7 +299,7 @@ where
                 } => {
                     let arg_values = args
                         .iter()
-                        .map(|tag: &Tag| self.storage.get(tag).map(|value| (tag.clone(), value)))
+                        .map(|(name, tag)| self.storage.get(tag).map(|value| (name.clone(), value)))
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
                     let args = Args::new(&self.signer, &self.id(), arg_values)?;
                     match function {
@@ -327,9 +327,11 @@ where
                 } => {
                     let arg_values = args
                         .iter()
-                        .map(|arg: &Arg| match arg {
-                            Arg::Scalar(tag) => self.storage.get(tag).map(|value| (tag.clone(), value)),
-                            Arg::ArrayElem(tag) => self.storage.get_elem(tag, &index).map(|value| (tag.clone(), value)),
+                        .map(|(name, arg)| match arg {
+                            Arg::Scalar(tag) => self.storage.get(tag).map(|value| (name.clone(), value)),
+                            Arg::ArrayElem(tag) => {
+                                self.storage.get_elem(tag, &index).map(|value| (name.clone(), value))
+                            }
                         })
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
                     let args = Args::new(&self.signer, &self.id(), arg_values)?;
