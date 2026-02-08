@@ -195,7 +195,7 @@ pub fn broadcast<SP: SessionParameters>(
     }
 
     let serialize_and_sign = Node::new(
-        Tag::signed(&message.name),
+        Tag::signed_local(&message.name),
         NodeKind::Serialize {
             data: scalar.get_strong_ref(),
             group: group.clone(),
@@ -221,7 +221,7 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
         .clone();
 
     let serialize_and_sign = Node::new(
-        Tag::signed(&message.name),
+        Tag::signed_local(&message.name),
         NodeKind::Serialize {
             data: array.get_strong_ref(),
             group: group.clone(),
@@ -253,13 +253,16 @@ fn deserialize<SP: SessionParameters>(
 }
 
 pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>, group: &PartyGroup<SP::Verifier>) -> Node<SP> {
-    let received = Node::new(Tag::received(&message.name), NodeKind::Receive { group: group.clone() });
+    let received = Node::new(
+        Tag::signed_remote(&message.name),
+        NodeKind::Receive { group: group.clone() },
+    );
 
     let cloned_message = message.clone();
     let arg_name = "_value".to_string();
 
     Node::new(
-        Tag::deserialized(&message.name),
+        Tag::received(&message.name),
         NodeKind::ComputeArray {
             args: [(arg_name.clone(), received)].into(),
             function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(

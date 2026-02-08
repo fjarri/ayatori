@@ -8,11 +8,27 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TagKind {
+    /// A locally computed value coming from an explicit computation/verification node
+    /// (not from serialization/deserialization).
+    /// The name of the tag will come from what the user provided when creating the node.
+    /// The contents are of some user type.
     Computed,
+    /// A marker indicating that a value was sent out.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents of the value are `()`.
     Sent,
+    /// A signed value + metadata originating from another node.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents are `SignedValue`.
+    SignedRemote,
+    /// A signed value + metadata originating from this node.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents are `SignedValue`.
+    SignedLocal,
+    /// A value deserialized from a message received from another node.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents are of some user type.
     Received,
-    Deserialized,
-    Signed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -99,6 +115,22 @@ impl Tag {
         }
     }
 
+    pub fn signed_remote(name: &str) -> Self {
+        Self {
+            full_name: FullName::new(name),
+            kind: TagKind::SignedRemote,
+            collected: false,
+        }
+    }
+
+    pub fn signed_remote_with_full_name(full_name: &FullName) -> Self {
+        Self {
+            full_name: full_name.clone(),
+            kind: TagKind::SignedRemote,
+            collected: false,
+        }
+    }
+
     pub fn received(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
@@ -107,26 +139,10 @@ impl Tag {
         }
     }
 
-    pub fn received_with_full_name(full_name: &FullName) -> Self {
-        Self {
-            full_name: full_name.clone(),
-            kind: TagKind::Received,
-            collected: false,
-        }
-    }
-
-    pub fn deserialized(name: &str) -> Self {
+    pub fn signed_local(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
-            kind: TagKind::Deserialized,
-            collected: false,
-        }
-    }
-
-    pub fn signed(name: &str) -> Self {
-        Self {
-            full_name: FullName::new(name),
-            kind: TagKind::Signed,
+            kind: TagKind::SignedLocal,
             collected: false,
         }
     }
@@ -150,8 +166,8 @@ impl Display for Tag {
             TagKind::Computed => write!(f, "{}", self.full_name),
             TagKind::Sent => write!(f, "sent({})", self.full_name),
             TagKind::Received => write!(f, "received({})", self.full_name),
-            TagKind::Deserialized => write!(f, "deserialized({})", self.full_name),
-            TagKind::Signed => write!(f, "signed({})", self.full_name),
+            TagKind::SignedLocal => write!(f, "signed-local({})", self.full_name),
+            TagKind::SignedRemote => write!(f, "signed-remote({})", self.full_name),
         }?;
         if self.collected {
             write!(f, ")")?;
