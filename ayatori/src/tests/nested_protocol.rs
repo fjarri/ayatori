@@ -61,12 +61,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
         let all_parties = build_data;
         let p2 = inputs.get("p2")?;
 
-        let my_x = compute_scalar("my_x", make_protocol2_value, &[p2])?;
+        let my_x = compute_scalar("my_x", make_protocol2_value, &[("p2", p2)])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
         let x = receive(&message_x, all_parties);
         let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted]);
 
-        compute_scalar("output", make_protocol2_output, &[&all_x])
+        compute_scalar("output", make_protocol2_output, &[("x", &all_x)])
     }
 }
 
@@ -122,12 +122,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         let all_parties = build_data;
         let p1 = inputs.get("p1")?;
 
-        let my_x = compute_scalar("my_x", make_protocol1_value, &[p1])?;
+        let my_x = compute_scalar("my_x", make_protocol1_value, &[("p1", p1)])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
         let x = receive(&message_x, all_parties);
         let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted]);
 
-        let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[&all_x])?;
+        let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", &all_x)])?;
 
         let args = ProtocolArgs::new().input_node("p2", &p1_sum);
         call_protocol::<SP, Protocol2>("protocol2", my_id, build_data, args)

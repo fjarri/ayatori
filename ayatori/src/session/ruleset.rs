@@ -1,4 +1,9 @@
-use alloc::{collections::BTreeSet, format, string::ToString, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
@@ -20,13 +25,13 @@ pub(crate) enum Action<SP: SessionParameters> {
     ComputeScalar {
         store_in: Tag,
         function: ScalarFunction<SP>,
-        args: Vec<Tag>,
+        args: BTreeMap<String, Tag>,
     },
     ComputeArrayElement {
         store_in: Tag,
         index: SP::Verifier,
         function: ArrayFunction<SP>,
-        args: Vec<Arg>,
+        args: BTreeMap<String, Arg>,
     },
     Send {
         store_in: Tag,
@@ -83,7 +88,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             match node.kind() {
                 NodeKind::ComputeScalar { function, args } => {
                     let mut specific_condition = Condition::empty();
-                    for arg in args {
+                    for arg in args.values() {
                         specific_condition.and(LeafCondition::Value {
                             tag: arg.store_in().clone(),
                         });
@@ -92,7 +97,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         Action::ComputeScalar {
                             store_in: node.store_in().clone(),
                             function: function.clone(),
-                            args: args.iter().map(|arg: &Node<SP>| arg.store_in().clone()).collect(),
+                            args: args
+                                .iter()
+                                .map(|(name, arg)| (name.clone(), arg.store_in().clone()))
+                                .collect(),
                         },
                         specific_condition,
                     ));
@@ -100,7 +108,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 NodeKind::ComputeArray { function, args, group } => {
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
-                        for arg in args {
+                        for arg in args.values() {
                             if arg.group().is_some() {
                                 specific_condition.and(LeafCondition::ArrayElement {
                                     tag: arg.store_in().clone(),
@@ -120,13 +128,14 @@ impl<SP: SessionParameters> Ruleset<SP> {
                                 index: id.clone(),
                                 args: args
                                     .iter()
-                                    .map(|arg: &Node<SP>| {
+                                    .map(|(name, arg)| {
                                         let tag = arg.store_in().clone();
-                                        if arg.group().is_some() {
+                                        let arg = if arg.group().is_some() {
                                             Arg::ArrayElem(tag)
                                         } else {
                                             Arg::Scalar(tag)
-                                        }
+                                        };
+                                        (name.clone(), arg)
                                     })
                                     .collect(),
                             },
@@ -148,7 +157,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             });
                         }
 
-                        let function = serialize_function(node.store_in(), data, adapter);
+                        let arg_name = "_value";
+                        let function = serialize_function(arg_name, node.store_in(), adapter);
                         let data_tag = data.store_in().clone();
                         let arg = if data.group().is_some() {
                             Arg::ArrayElem(data_tag)
@@ -161,7 +171,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                                 store_in: node.store_in().clone(),
                                 function,
                                 index: id.clone(),
-                                args: [arg].into(),
+                                args: [(arg_name.into(), arg)].into(),
                             },
                             specific_condition,
                         ));
@@ -265,7 +275,7 @@ impl<SP: SessionParameters> Display for Action<SP> {
                 function,
                 args,
             } => {
-                let joined_args = args.iter().map(ToString::to_string).join(", ");
+                let joined_args = args.iter().map(|(name, arg)| format!("{}={}", name, arg)).join(", ");
                 write!(f, "{store_in} = {function}({joined_args})")
             }
             Self::ComputeArrayElement {
@@ -276,9 +286,12 @@ impl<SP: SessionParameters> Display for Action<SP> {
             } => {
                 let joined_args = args
                     .iter()
-                    .map(|arg| match arg {
-                        Arg::Scalar(tag) => tag.to_string(),
-                        Arg::ArrayElem(tag) => format!("{tag}[{index:?}]"),
+                    .map(|(name, arg)| {
+                        let arg_str = match arg {
+                            Arg::Scalar(tag) => tag.to_string(),
+                            Arg::ArrayElem(tag) => format!("{tag}[{index:?}]"),
+                        };
+                        format!("{}={}", name, arg_str)
                     })
                     .join(", ");
                 write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")

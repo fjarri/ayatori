@@ -299,7 +299,7 @@ where
                 } => {
                     let arg_values = args
                         .iter()
-                        .map(|tag: &Tag| self.storage.get(tag).map(|value| (tag.clone(), value)))
+                        .map(|(name, tag)| self.storage.get(tag).map(|value| (name.clone(), value)))
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
                     let args = Args::new(&self.signer, &self.id(), arg_values)?;
                     match function {
@@ -327,9 +327,11 @@ where
                 } => {
                     let arg_values = args
                         .iter()
-                        .map(|arg: &Arg| match arg {
-                            Arg::Scalar(tag) => self.storage.get(tag).map(|value| (tag.clone(), value)),
-                            Arg::ArrayElem(tag) => self.storage.get_elem(tag, &index).map(|value| (tag.clone(), value)),
+                        .map(|(name, arg)| match arg {
+                            Arg::Scalar(tag) => self.storage.get(tag).map(|value| (name.clone(), value)),
+                            Arg::ArrayElem(tag) => {
+                                self.storage.get_elem(tag, &index).map(|value| (name.clone(), value))
+                            }
                         })
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
                     let args = Args::new(&self.signer, &self.id(), arg_values)?;
@@ -368,7 +370,7 @@ where
                 Err(VerificationError::SignatureMismatch) => return Ok(AddMessageResult::InvalidSignature),
             }
             let source = value.source().clone();
-            let tag = Tag::received_with_full_name(value.metadata().full_name());
+            let tag = Tag::signed_remote_with_full_name(value.metadata().full_name());
             self.storage
                 .set_elem(&tag, &source, Value::new(value.serialized_value()))?;
             self.ruleset.update_with_array_element_ready(&tag, &source);
