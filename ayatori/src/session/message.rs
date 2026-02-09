@@ -95,8 +95,8 @@ impl<SP: SessionParameters> SignedValue<SP> {
         &self.metadata
     }
 
-    pub fn serialized_value(self) -> SerializedValue {
-        self.value
+    pub fn serialized_value(&self) -> &SerializedValue {
+        &self.value
     }
 }
 

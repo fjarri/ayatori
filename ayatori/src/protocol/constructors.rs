@@ -1,10 +1,5 @@
-use alloc::{
-    collections::BTreeMap,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
 
-use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
@@ -13,11 +8,11 @@ use super::{
         ArrayFunction, ComputeError, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
         WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
-    node::{Node, NodeKind, args_to_owned},
+    node::{Node, NodeKind, ProtocolMessage, args_to_owned},
     party::PartyGroup,
     tag::{FullName, Tag},
     traits::{ComposableProtocol, SessionParameters},
-    value::{Erasable, SerdeAdapter, SerializedValue, Value},
+    value::{Erasable, SerdeAdapter, Value},
 };
 use crate::{error::LocalError, session::SignedValue};
 
@@ -195,16 +190,16 @@ pub fn broadcast<SP: SessionParameters>(
     }
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(&message.name),
+        Tag::signed_local(message.name()),
         NodeKind::Serialize {
             data: scalar.get_strong_ref(),
             group: group.clone(),
-            adapter: message.serde_adapter.clone(),
+            adapter: message.serde_adapter().clone(),
         },
     );
 
     let send_node = Node::new(
-        Tag::sent(&message.name),
+        Tag::sent(message.name()),
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group: group.clone(),
@@ -221,16 +216,16 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
         .clone();
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(&message.name),
+        Tag::signed_local(message.name()),
         NodeKind::Serialize {
             data: array.get_strong_ref(),
             group: group.clone(),
-            adapter: message.serde_adapter.clone(),
+            adapter: message.serde_adapter().clone(),
         },
     );
 
     let send_node = Node::new(
-        Tag::sent(&message.name),
+        Tag::sent(message.name()),
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group,
@@ -245,33 +240,54 @@ fn deserialize<SP: SessionParameters>(
     arg_name: &str,
     message: &ProtocolMessage<SP>,
 ) -> Result<Value, ComputeError> {
-    let received = args.get::<SerializedValue>(arg_name)?;
+    let received = args.get::<SignedValue<SP>>(arg_name)?;
     message
-        .serde_adapter
-        .deserialize(received)
+        .serde_adapter()
+        .deserialize(received.serialized_value())
         .map_err(|_err| ComputeError::Data)
 }
 
-pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>, group: &PartyGroup<SP::Verifier>) -> Node<SP> {
-    let received = Node::new(
-        Tag::signed_remote(&message.name),
-        NodeKind::Receive { group: group.clone() },
-    );
+pub fn receive_signed<SP: SessionParameters>(
+    message: &ProtocolMessage<SP>,
+    group: &PartyGroup<SP::Verifier>,
+) -> Node<SP> {
+    Node::new(
+        Tag::signed_remote(message.name()),
+        NodeKind::Receive {
+            group: group.clone(),
+            message: message.clone(),
+        },
+    )
+}
+
+pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
+    let (group, message) = match received.kind() {
+        NodeKind::Receive { group, message } => (group, message),
+        _ => return Err(LocalError::new("The given node must be a Receive node")),
+    };
 
     let cloned_message = message.clone();
     let arg_name = "_value".to_string();
 
-    Node::new(
-        Tag::received(&message.name),
+    Ok(Node::new(
+        Tag::received(message.name()),
         NodeKind::ComputeArray {
-            args: [(arg_name.clone(), received)].into(),
+            args: [(arg_name.clone(), received.get_strong_ref())].into(),
             function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
                 "deserialize",
                 move |_id: &SP::Verifier, args: Args<SP>| deserialize::<SP>(args, &arg_name, &cloned_message),
             )),
             group: group.clone(),
         },
-    )
+    ))
+}
+
+pub fn receive<SP: SessionParameters>(
+    message: &ProtocolMessage<SP>,
+    group: &PartyGroup<SP::Verifier>,
+) -> Result<Node<SP>, LocalError> {
+    let received = receive_signed(message, group);
+    deserialize_received(&received)
 }
 
 pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, LocalError> {
@@ -287,22 +303,6 @@ pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, Loc
             group,
         },
     ))
-}
-
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
-pub struct ProtocolMessage<SP: SessionParameters> {
-    name: String,
-    serde_adapter: SerdeAdapter<SP::WireFormat>,
-}
-
-impl<SP: SessionParameters> ProtocolMessage<SP> {
-    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            serde_adapter: SerdeAdapter::new::<T>(),
-        }
-    }
 }
 
 // TODO: can we avoid passing `my_id` explicitly?

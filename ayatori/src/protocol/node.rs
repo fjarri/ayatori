@@ -11,13 +11,14 @@ use alloc::{
 use core::fmt::Debug;
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 use super::{
     function::{ArrayFunction, ScalarFunction},
     party::PartyGroup,
     tag::Tag,
     traits::SessionParameters,
-    value::SerdeAdapter,
+    value::{Erasable, SerdeAdapter},
 };
 use crate::error::LocalError;
 
@@ -234,6 +235,30 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 }
 
 #[derive(Debug)]
+#[derive_where::derive_where(Clone)]
+pub struct ProtocolMessage<SP: SessionParameters> {
+    name: String,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+}
+
+impl<SP: SessionParameters> ProtocolMessage<SP> {
+    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            serde_adapter: SerdeAdapter::new::<T>(),
+        }
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
+        &self.serde_adapter
+    }
+}
+
+#[derive(Debug)]
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
         function: ScalarFunction<SP>,
@@ -259,6 +284,7 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
     },
     Receive {
         group: PartyGroup<SP::Verifier>,
+        message: ProtocolMessage<SP>,
     },
 }
 
@@ -293,7 +319,10 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             Self::Collect { values, group: _group } => {
                 write!(f, "collect({})", values.store_in())
             }
-            Self::Receive { group: _group } => write!(f, "receive()"),
+            Self::Receive {
+                group: _group,
+                message: _message,
+            } => write!(f, "receive()"),
             Self::Serialize {
                 data,
                 group: _group,
@@ -333,7 +362,10 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 values: values.get_strong_ref(),
                 group: group.clone(),
             },
-            Self::Receive { group } => Self::Receive { group: group.clone() },
+            Self::Receive { group, message } => Self::Receive {
+                group: group.clone(),
+                message: message.clone(),
+            },
             Self::Serialize { data, group, adapter } => Self::Serialize {
                 data: data.get_strong_ref(),
                 group: group.clone(),

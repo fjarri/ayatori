@@ -371,8 +371,7 @@ where
             }
             let source = value.source().clone();
             let tag = Tag::signed_remote_with_full_name(value.metadata().full_name());
-            self.storage
-                .set_elem(&tag, &source, Value::new(value.serialized_value()))?;
+            self.storage.set_elem(&tag, &source, Value::new(value))?;
             self.ruleset.update_with_array_element_ready(&tag, &source);
         }
         Ok(AddMessageResult::Success)
