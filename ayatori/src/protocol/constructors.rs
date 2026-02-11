@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{error::LocalError, session::SignedValue};
 
-pub(crate) fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
+pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
     Node::new(
         Tag::computed(name),
@@ -29,17 +29,30 @@ pub(crate) fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: 
     )
 }
 
-pub(crate) fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
+pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
-    Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeScalar {
-            function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased("alias", move |args| {
-                args.get_value(arg_name).cloned().map_err(ComputeError::Local)
-            })),
-            args: [(arg_name.into(), node.get_strong_ref())].into(),
-        },
-    )
+    if let Some(group) = node.group() {
+        Node::new(
+            Tag::computed(name),
+            NodeKind::ComputeArray {
+                function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased("alias", move |_id, args| {
+                    args.get_value(arg_name).cloned().map_err(ComputeError::Local)
+                })),
+                args: [(arg_name.into(), node.get_strong_ref())].into(),
+                group: group.clone(),
+            },
+        )
+    } else {
+        Node::new(
+            Tag::computed(name),
+            NodeKind::ComputeScalar {
+                function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased("alias", move |args| {
+                    args.get_value(arg_name).cloned().map_err(ComputeError::Local)
+                })),
+                args: [(arg_name.into(), node.get_strong_ref())].into(),
+            },
+        )
+    }
 }
 
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
@@ -315,5 +328,6 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     let signature = P::signature();
     let (aliased_args, original_nodes) = args.with_aliases(signature)?;
     let output = P::build(my_id, build_data, aliased_args)?;
-    Ok(output.with_added_prefix(prefix, original_nodes))
+    let prefixed = output.with_added_prefix(prefix, original_nodes);
+    Ok(prefixed)
 }

@@ -19,8 +19,8 @@ pub(crate) use value::{SerializedValue, Value};
 pub use crate::error::LocalError;
 pub use args::{Args, ProtocolArgs, ProtocolSignature};
 pub use constructors::{
-    broadcast, call_protocol, collect, compute_array, compute_array_private, compute_scalar, compute_scalar_private,
-    deserialize_received, receive, receive_signed, send, verify,
+    alias, broadcast, call_protocol, collect, compute_array, compute_array_private, compute_scalar,
+    compute_scalar_private, constant, deserialize_received, receive, receive_signed, send, verify,
 };
 pub use function::ComputeError;
 pub use node::{Node, ProtocolMessage};

@@ -13,16 +13,6 @@ use crate::{
     session::*,
 };
 
-#[derive(Debug)]
-struct TestProtocol;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Message1<Id>(Id);
-
-fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError<SP>> {
-    Ok(Message1(args.my_id().clone()))
-}
-
 fn repackage_signed_values<SP: SessionParameters>(
     args: Args<SP>,
 ) -> Result<BTreeMap<SP::Verifier, SignedValue<SP>>, ComputeError<SP>> {
@@ -90,6 +80,68 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
     Ok(())
 }
 
+#[derive(Debug)]
+struct EchoBroadcast;
+
+impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
+    type BuildData = (ProtocolMessage<SP>, PartyGroup<SP::Verifier>);
+
+    fn signature() -> ProtocolSignature {
+        ProtocolSignature::new().input("x")
+    }
+
+    fn build(
+        _my_id: &SP::Verifier,
+        build_data: &Self::BuildData,
+        inputs: ProtocolArgs<SP>,
+    ) -> Result<Node<SP>, LocalError> {
+        let (message, all_parties) = build_data;
+        let my_x = inputs.get("x")?;
+
+        let x_broadcasted = broadcast(message, my_x, all_parties)?;
+        let x_signed = receive_signed(message, all_parties);
+        let x = deserialize_received(&x_signed)?;
+
+        let all_x_signed = collect(&x_signed)?;
+
+        let message_echo_x = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedValue<SP>>>("echo");
+        let my_all_x_signed = compute_scalar(
+            "my_all_x_signed",
+            repackage_signed_values,
+            &[("x_signed", &all_x_signed)],
+        )?;
+
+        let all_x_signed_broadcasted = broadcast(&message_echo_x, &my_all_x_signed, all_parties)?;
+        let all_x_signed = receive(&message_echo_x, all_parties)?;
+
+        let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
+        let echos_correct = verify(
+            "echos_correct",
+            verify_echos_correct,
+            &[
+                ("all_ids", &all_ids),
+                ("received", &my_all_x_signed),
+                ("echoed", &all_x_signed),
+            ],
+        )?;
+        let all_echos_correct = collect(&echos_correct)?;
+        let output =
+            alias("output", &x).with_dependencies(&[&x_broadcasted, &all_echos_correct, &all_x_signed_broadcasted]);
+
+        Ok(output)
+    }
+}
+
+#[derive(Debug)]
+struct TestProtocol;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Message1<Id>(Id);
+
+fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError<SP>> {
+    Ok(Message1(args.my_id().clone()))
+}
+
 fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError<SP>> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
@@ -102,8 +154,8 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError<
 impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
-    fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new().input("all_ids", shared_data.ids().cloned().collect::<BTreeSet<_>>())
+    fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
+        ProtocolArgs::new()
     }
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
         shared_data.clone()
@@ -114,43 +166,28 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
-        ProtocolSignature::new().input("all_ids")
+        ProtocolSignature::new()
     }
 
     fn build(
-        _my_id: &SP::Verifier,
+        my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        inputs: ProtocolArgs<SP>,
+        _inputs: ProtocolArgs<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
 
         let all_parties = build_data;
 
         let my_x = compute_scalar("my_x", make_scalar_value, &[])?;
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x_signed = receive_signed(&message_x, all_parties);
-        let x = deserialize_received(&x_signed)?;
 
-        let message_echo_x = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedValue<SP>>>("echo_x");
-        let my_all_x_signed = compute_scalar(
-            "my_all_x_signed",
-            repackage_signed_values,
-            &[("x_signed", &collect(&x_signed)?)],
+        let x = call_protocol::<SP, EchoBroadcast>(
+            "echo_x",
+            my_id,
+            &(message_x, all_parties.clone()),
+            ProtocolArgs::new().input_node("x", &my_x),
         )?;
-        let all_x_signed_broadcasted = broadcast(&message_echo_x, &my_all_x_signed, all_parties)?;
-        let all_x_signed = receive(&message_echo_x, all_parties)?;
-        let echos_correct = verify(
-            "echos_correct",
-            verify_echos_correct,
-            &[
-                ("all_ids", inputs.get("all_ids")?),
-                ("received", &my_all_x_signed),
-                ("echoed", &all_x_signed),
-            ],
-        )?;
-        let all_echos_correct = collect(&echos_correct)?;
 
-        let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted, &all_x_signed_broadcasted, &all_echos_correct]);
+        let all_x = collect(&x)?;
 
         compute_scalar("output", gen_output, &[("x", &all_x)])
     }
