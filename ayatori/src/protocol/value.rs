@@ -187,18 +187,18 @@ impl<F: WireFormat> Debug for SerdeAdapter<F> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SerializedValue(
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SerializedValue(
     // TODO: would be nice to store it as is if the serializer is human-readable
     #[serde(with = "SliceLike::<Hex>")] Box<[u8]>,
 );
 
 impl SerializedValue {
-    pub fn new(data: Box<[u8]>) -> Self {
+    pub(crate) fn new(data: Box<[u8]>) -> Self {
         Self(data)
     }
 
-    pub fn as_ref(&self) -> &[u8] {
+    pub(crate) fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }

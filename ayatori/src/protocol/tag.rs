@@ -32,27 +32,27 @@ pub(crate) enum TagKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct FullName {
+pub struct FullName {
     prefix: Vec<String>,
     name: String,
 }
 
 impl FullName {
-    pub fn new(name: &str) -> Self {
+    pub(crate) fn new(name: &str) -> Self {
         Self {
             prefix: Vec::new(),
             name: name.to_string(),
         }
     }
 
-    pub fn with_name(self, name: &str) -> Self {
+    pub(crate) fn with_name(self, name: &str) -> Self {
         Self {
             prefix: self.prefix,
             name: name.to_string(),
         }
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
+    pub(crate) fn with_added_prefix(self, prefix: &str) -> Self {
         let mut full_prefix = self.prefix;
         full_prefix.push(prefix.to_string());
         Self {

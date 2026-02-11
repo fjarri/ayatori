@@ -4,7 +4,5 @@ mod ruleset;
 #[allow(clippy::module_inception)]
 mod session;
 
-pub use message::Message;
+pub use message::{Message, SignedValue, ValueMetadata};
 pub use session::{AddMessageResult, Session, Task};
-
-pub(crate) use message::SignedValue;

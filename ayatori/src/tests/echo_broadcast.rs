@@ -1,13 +1,17 @@
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
+
+use rand_chacha::ChaCha8Rng;
+use serde::{Deserialize, Serialize};
+use signature::{Keypair, rand_core::SeedableRng};
+
 use crate::{
     dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
     protocol::*,
     session::*,
 };
-use alloc::{collections::BTreeMap, vec::Vec};
-
-use rand_chacha::ChaCha8Rng;
-use serde::{Deserialize, Serialize};
-use signature::{Keypair, rand_core::SeedableRng};
 
 #[derive(Debug)]
 struct TestProtocol;
@@ -30,16 +34,37 @@ fn repackage_signed_values<SP: SessionParameters>(
     Ok(cloned)
 }
 
-fn verify_echos_correct<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) -> Result<(), ComputeError> {
-    // The messages we sent
-    let _sent_map = args.get::<BTreeMap<SP::Verifier, SignedValue<SP>>>("my_x")?;
+fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), ComputeError> {
+    let all_ids = args.get::<BTreeSet<SP::Verifier>>("all_ids")?;
 
-    // Echos received from `id`
-    let _echos_map = args.get::<BTreeMap<SP::Verifier, SignedValue<SP>>>("remote_x")?;
+    // The messages we received from all nodes
+    // Their validity (correct metadata and contents) is checked elsewhere,
+    // so here we assumed they are correct.
+    let received = args.get::<BTreeMap<SP::Verifier, SignedValue<SP>>>("received")?;
 
-    // - check that all the parties are present in the `echos_map`
-    // - check that the signatures are correct
-    // - check that the payload and metadata is the same (except for the `destination` part, which will differ)
+    // The echoed messages we received from `id`
+    let echoed = args.get::<BTreeMap<SP::Verifier, SignedValue<SP>>>("echoed")?;
+
+    // Check that all the parties are present in the `echos_map`
+    let ids_received = echoed.keys().cloned().collect::<BTreeSet<_>>();
+    assert_eq!(&ids_received, all_ids); // provable error of `id`
+
+    // Check that the messages are correctly signed and have correct metadata
+    for (from, message) in echoed.iter() {
+        assert_eq!(from, message.source()); // provable error of `id`
+        assert_eq!(id, message.metadata().destination()); // provable error of `id`
+
+        let ethalon = received.get(from).unwrap();
+        assert_eq!(ethalon.metadata().full_name(), message.metadata().full_name()); // provable error of `id`
+
+        assert!(message.verify().is_ok()); // provable error of `id`
+    }
+
+    // Check that the payload and metadata is the same (except for the `destination` part, which will differ)
+    for (from, message) in echoed.iter() {
+        let ethalon = received.get(from).unwrap();
+        assert_eq!(ethalon.serialized_value(), message.serialized_value()); // provable error of `from`
+    }
 
     Ok(())
 }
@@ -56,8 +81,8 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError>
 impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
-    fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new()
+    fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
+        ProtocolArgs::new().input("all_ids", shared_data.ids().cloned().collect::<BTreeSet<_>>())
     }
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
         shared_data.clone()
@@ -68,17 +93,23 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
-        ProtocolSignature::new()
+        ProtocolSignature::new().input("all_ids")
     }
 
     fn build(
         _my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        _inputs: ProtocolArgs<SP>,
+        inputs: ProtocolArgs<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
 
         let all_parties = build_data;
+
+        /*
+        -> S_i (j, x_i)
+        <- S_j (i, x_j)
+        <- S_j ({S_k (j, x_k)})
+        */
 
         let my_x = compute_scalar("my_x", make_scalar_value, &[])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
@@ -96,7 +127,11 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let echos_correct = verify(
             "echos_correct",
             verify_echos_correct,
-            &[("my_x", &my_all_x_signed), ("remote_x", &all_x_signed)],
+            &[
+                ("all_ids", inputs.get("all_ids")?),
+                ("received", &my_all_x_signed),
+                ("echoed", &all_x_signed),
+            ],
         )?;
         let all_echos_correct = collect(&echos_correct)?;
 

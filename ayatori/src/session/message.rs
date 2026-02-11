@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ValueMetadata<Id> {
+pub struct ValueMetadata<Id> {
     name: FullName,
     destination: Id,
 }
@@ -18,10 +18,14 @@ impl<Id> ValueMetadata<Id> {
     pub fn full_name(&self) -> &FullName {
         &self.name
     }
+
+    pub fn destination(&self) -> &Id {
+        &self.destination
+    }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum VerificationError {
+pub enum VerificationError {
     Local(LocalError),
     SignatureMismatch,
 }
@@ -34,7 +38,7 @@ impl From<LocalError> for VerificationError {
 
 #[derive(Serialize, Deserialize)]
 #[derive_where::derive_where(Debug, Clone)]
-pub(crate) struct SignedValue<SP: SessionParameters> {
+pub struct SignedValue<SP: SessionParameters> {
     signature: SP::Signature,
     // TODO: could be a part of the metadata and thus signed too,
     // but I don't think we don't get any additional security from it.
@@ -44,7 +48,7 @@ pub(crate) struct SignedValue<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SignedValue<SP> {
-    pub fn new(
+    pub(crate) fn new(
         rng: &mut impl CryptoRngCore,
         signer: &SP::Signer,
         name: &FullName,
