@@ -19,13 +19,13 @@ struct TestProtocol;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message1<Id>(Id);
 
-fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError> {
+fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError<SP>> {
     Ok(Message1(args.my_id().clone()))
 }
 
 fn repackage_signed_values<SP: SessionParameters>(
     args: Args<SP>,
-) -> Result<BTreeMap<SP::Verifier, SignedValue<SP>>, ComputeError> {
+) -> Result<BTreeMap<SP::Verifier, SignedValue<SP>>, ComputeError<SP>> {
     let values = args.get_map::<SignedValue<SP>>("x_signed")?;
     let cloned = values
         .iter()
@@ -34,7 +34,7 @@ fn repackage_signed_values<SP: SessionParameters>(
     Ok(cloned)
 }
 
-fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), ComputeError> {
+fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), ComputeError<SP>> {
     let all_ids = args.get::<BTreeSet<SP::Verifier>>("all_ids")?;
 
     // The messages we received from all nodes
@@ -51,25 +51,46 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
 
     // Check that the messages are correctly signed and have correct metadata
     for (from, message) in echoed.iter() {
-        assert_eq!(from, message.source()); // provable error of `id`
-        assert_eq!(id, message.metadata().destination()); // provable error of `id`
+        if from != message.source() {
+            return Err(ComputeError::Data);
+        }
+        if id != message.metadata().destination() {
+            return Err(ComputeError::Data);
+        }
 
-        let ethalon = received.get(from).unwrap();
-        assert_eq!(ethalon.metadata().full_name(), message.metadata().full_name()); // provable error of `id`
+        let ethalon = received
+            .get(from)
+            .expect("we checked that the ID is present in the message map");
+        if ethalon.metadata().full_name() != message.metadata().full_name() {
+            return Err(ComputeError::Data);
+        }
 
-        assert!(message.verify().is_ok()); // provable error of `id`
+        if message.verify().is_err() {
+            return Err(ComputeError::Data);
+        }
     }
 
     // Check that the payload and metadata is the same (except for the `destination` part, which will differ)
     for (from, message) in echoed.iter() {
-        let ethalon = received.get(from).unwrap();
-        assert_eq!(ethalon.serialized_value(), message.serialized_value()); // provable error of `from`
+        let ethalon = received
+            .get(from)
+            .expect("we checked that the ID is present in the message map");
+
+        if ethalon.serialized_value() != message.serialized_value() {
+            let associated_data = (ethalon.clone(), message.clone());
+            // TODO: hide in a constructor ComputeError::third_party()?
+            let associated_data = SerializedValue::new(SP::WireFormat::serialize(&associated_data)?);
+            return Err(ComputeError::ThirdParty {
+                guilty_party: from.clone(),
+                associated_data,
+            });
+        }
     }
 
     Ok(())
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError> {
+fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError<SP>> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -104,12 +125,6 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
 
         let all_parties = build_data;
-
-        /*
-        -> S_i (j, x_i)
-        <- S_j (i, x_j)
-        <- S_j ({S_k (j, x_k)})
-        */
 
         let my_x = compute_scalar("my_x", make_scalar_value, &[])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;

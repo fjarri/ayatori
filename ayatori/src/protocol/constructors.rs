@@ -44,7 +44,7 @@ pub(crate) fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<
 
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError<SP>>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
     Ok(Node::new(
@@ -58,7 +58,7 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
 
 pub fn compute_scalar_private<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Ret, ComputeError<SP>>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
     Ok(Node::new(
@@ -72,7 +72,7 @@ pub fn compute_scalar_private<SP: SessionParameters, Ret: Erasable>(
 
 pub fn compute_array<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ComputeError<SP>>,
     group: &PartyGroup<SP::Verifier>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
@@ -88,7 +88,7 @@ pub fn compute_array<SP: SessionParameters, Ret: Erasable>(
 
 pub fn compute_array_private<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Ret, ComputeError<SP>>,
     group: &PartyGroup<SP::Verifier>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
@@ -104,7 +104,7 @@ pub fn compute_array_private<SP: SessionParameters, Ret: Erasable>(
 
 pub fn verify<SP: SessionParameters>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<(), ComputeError>,
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<(), ComputeError<SP>>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
     let groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
@@ -154,7 +154,7 @@ fn serialize<SP: SessionParameters>(
     arg_name: &str,
     message_name: &FullName,
     serde_adapter: &SerdeAdapter<SP::WireFormat>,
-) -> Result<Value, ComputeError> {
+) -> Result<Value, ComputeError<SP>> {
     let value = args.get_value(arg_name)?;
     let serialized_value = serde_adapter.serialize(value)?;
     let mut typed_rng = Rng(rng);
@@ -239,7 +239,7 @@ fn deserialize<SP: SessionParameters>(
     args: Args<SP>,
     arg_name: &str,
     message: &ProtocolMessage<SP>,
-) -> Result<Value, ComputeError> {
+) -> Result<Value, ComputeError<SP>> {
     let received = args.get::<SignedValue<SP>>(arg_name)?;
     message
         .serde_adapter()

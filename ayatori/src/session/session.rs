@@ -106,6 +106,12 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
+                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                        return Ok(TaskResult(TaskResultEnum::AttributableError {
+                            id: guilty_party,
+                            store_in,
+                        }));
+                    }
                 };
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
@@ -115,6 +121,12 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
+                    }
+                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                        return Ok(TaskResult(TaskResultEnum::AttributableError {
+                            id: guilty_party,
+                            store_in,
+                        }));
                     }
                 };
                 Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
@@ -150,6 +162,12 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                     Ok(result) => result,
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
+                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                        return Ok(TaskResult(TaskResultEnum::AttributableError {
+                            id: guilty_party,
+                            store_in,
+                        }));
+                    }
                 };
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
@@ -159,6 +177,12 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                     Err(ComputeError::Local(error)) => return Err(error),
                     Err(ComputeError::Data) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
+                    }
+                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                        return Ok(TaskResult(TaskResultEnum::AttributableError {
+                            id: guilty_party,
+                            store_in,
+                        }));
                     }
                 };
                 Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))

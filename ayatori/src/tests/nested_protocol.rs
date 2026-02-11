@@ -21,12 +21,12 @@ struct Protocol2SharedData<SP: SessionParameters> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Protocol2Message(u64);
 
-fn make_protocol2_value<SP: SessionParameters>(args: Args<SP>) -> Result<Protocol2Message, ComputeError> {
+fn make_protocol2_value<SP: SessionParameters>(args: Args<SP>) -> Result<Protocol2Message, ComputeError<SP>> {
     let p2 = args.get::<u64>("p2")?;
     Ok(Protocol2Message(*p2))
 }
 
-fn make_protocol2_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError> {
+fn make_protocol2_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError<SP>> {
     let xs = args.get_map::<Protocol2Message>("x")?;
     Ok(xs.values().map(|message| message.0).sum())
 }
@@ -82,12 +82,12 @@ struct Protocol1SharedData<SP: SessionParameters> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Protocol1Message(u64);
 
-fn make_protocol1_value<SP: SessionParameters>(args: Args<SP>) -> Result<Protocol1Message, ComputeError> {
+fn make_protocol1_value<SP: SessionParameters>(args: Args<SP>) -> Result<Protocol1Message, ComputeError<SP>> {
     let p1 = args.get::<u64>("p1")?;
     Ok(Protocol1Message(*p1))
 }
 
-fn make_protocol1_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError> {
+fn make_protocol1_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError<SP>> {
     let xs = args.get_map::<Protocol1Message>("x")?;
     Ok(xs.values().map(|message| message.0).sum())
 }
