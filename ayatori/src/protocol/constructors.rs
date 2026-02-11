@@ -14,7 +14,10 @@ use super::{
     traits::{ComposableProtocol, SessionParameters},
     value::{Erasable, SerdeAdapter, Value},
 };
-use crate::{error::LocalError, session::SignedValue};
+use crate::{
+    error::LocalError,
+    session::{SignedValue, VerifiedValue},
+};
 
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
@@ -36,7 +39,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
             Tag::computed(name),
             NodeKind::ComputeArray {
                 function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased("alias", move |_id, args| {
-                    args.get_value(arg_name).cloned().map_err(ComputeError::Local)
+                    args.get_value(arg_name).cloned().map_err(ComputeError::<SP>::local)
                 })),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
                 group: group.clone(),
@@ -47,7 +50,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
             Tag::computed(name),
             NodeKind::ComputeScalar {
                 function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased("alias", move |args| {
-                    args.get_value(arg_name).cloned().map_err(ComputeError::Local)
+                    args.get_value(arg_name).cloned().map_err(ComputeError::<SP>::local)
                 })),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
             },
@@ -253,11 +256,11 @@ fn deserialize<SP: SessionParameters>(
     arg_name: &str,
     message: &ProtocolMessage<SP>,
 ) -> Result<Value, ComputeError<SP>> {
-    let received = args.get::<SignedValue<SP>>(arg_name)?;
+    let received = args.get::<VerifiedValue<SP>>(arg_name)?;
     message
         .serde_adapter()
         .deserialize(received.serialized_value())
-        .map_err(|_err| ComputeError::Data)
+        .map_err(|_err| ComputeError::<SP>::sender())
 }
 
 pub fn receive_signed<SP: SessionParameters>(

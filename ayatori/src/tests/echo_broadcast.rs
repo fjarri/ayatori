@@ -13,14 +13,14 @@ use crate::{
     session::*,
 };
 
-fn repackage_signed_values<SP: SessionParameters>(
+fn prepare_echo_pack<SP: SessionParameters>(
     args: Args<SP>,
-) -> Result<BTreeMap<SP::Verifier, SignedValue<SP>>, ComputeError<SP>> {
-    let values = args.get_map::<SignedValue<SP>>("values_signed")?;
+) -> Result<BTreeMap<SP::Verifier, SignedHash<SP>>, ComputeError<SP>> {
+    let values = args.get_map::<VerifiedValue<SP>>("values_verified_map")?;
     let cloned = values
-        .into_iter()
-        .map(|(id, value)| (id.clone(), value.clone()))
-        .collect();
+        .iter()
+        .map(|(id, value)| value.to_signed_hash().map(|value| ((*id).clone(), value)))
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
     Ok(cloned)
 }
 
@@ -30,35 +30,35 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
     // The messages we received from all nodes
     // Their validity (correct metadata and contents) is checked elsewhere,
     // so here we assumed they are correct.
-    let received = args.get::<BTreeMap<SP::Verifier, SignedValue<SP>>>("received")?;
+    let received = args.get_map::<VerifiedValue<SP>>("received")?;
 
     // The echoed messages we received from `id`
-    let echoed = args.get::<BTreeMap<SP::Verifier, SignedValue<SP>>>("echoed")?;
+    let echoed = args.get::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echoed")?;
 
     // Check that all the parties are present in the `echos_map`
     let ids_received = echoed.keys().cloned().collect::<BTreeSet<_>>();
     if &ids_received != all_ids {
-        return Err(ComputeError::Data);
+        return Err(ComputeError::sender());
     }
 
     // Check that the messages are correctly signed and have correct metadata
     for (from, message) in echoed.iter() {
         if from != message.source() {
-            return Err(ComputeError::Data);
+            return Err(ComputeError::sender());
         }
         if id != message.metadata().destination() {
-            return Err(ComputeError::Data);
+            return Err(ComputeError::sender());
         }
 
         let ethalon = received
             .get(from)
             .expect("we checked that the ID is present in the message map");
         if ethalon.metadata().full_name() != message.metadata().full_name() {
-            return Err(ComputeError::Data);
+            return Err(ComputeError::sender());
         }
 
-        if message.verify().is_err() {
-            return Err(ComputeError::Data);
+        if !message.is_signature_correct() {
+            return Err(ComputeError::sender());
         }
     }
 
@@ -68,14 +68,9 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
             .get(from)
             .expect("we checked that the ID is present in the message map");
 
-        if ethalon.serialized_value() != message.serialized_value() {
-            let associated_data = (ethalon.clone(), message.clone());
-            // TODO: hide in a constructor ComputeError::third_party()?
-            let associated_data = SerializedValue::new(SP::WireFormat::serialize(&associated_data)?);
-            return Err(ComputeError::ThirdParty {
-                guilty_party: from.clone(),
-                associated_data,
-            });
+        if !ethalon.payload_hash_matches(message)? {
+            let associated_data = ((*ethalon).clone().unverify(), message);
+            return Err(ComputeError::third_party(from, associated_data)?);
         }
     }
 
@@ -101,17 +96,18 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let my_value = inputs.get("value")?;
 
         let value_broadcasted = broadcast(message, my_value, all_parties)?;
-        let values_signed = receive_signed(message, all_parties);
-        let values = deserialize_received(&values_signed)?;
+        let values_verified = receive_signed(message, all_parties);
+        let values = deserialize_received(&values_verified)?;
 
-        let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedValue<SP>>>("echo");
-        let my_echo_pack = compute_scalar(
-            "my_echo_pack",
-            repackage_signed_values,
-            &[("values_signed", &collect(&values_signed)?)],
+        let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echo");
+        let all_values_verified = collect(&values_verified)?;
+        let my_echo_pack_sendable = compute_scalar(
+            "my_echo_pack_signed",
+            prepare_echo_pack,
+            &[("values_verified_map", &all_values_verified)],
         )?;
 
-        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack, all_parties)?;
+        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties)?;
         let echo_pack = receive(&message_echo, all_parties)?;
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
@@ -120,7 +116,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
             verify_echos_correct,
             &[
                 ("all_ids", &all_ids),
-                ("received", &my_echo_pack),
+                ("received", &all_values_verified),
                 ("echoed", &echo_pack),
             ],
         )?;
@@ -197,7 +193,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 }
 
 #[test]
-fn run_protocol() {
+fn run_echo_protocol() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let party_group = PartyGroup::new(&ids);

@@ -4,28 +4,52 @@ use alloc::{
 };
 use core::fmt::{self, Debug, Display};
 
+use serde::Serialize;
 use signature::rand_core::CryptoRngCore;
 
 use super::{
     args::Args,
-    traits::SessionParameters,
+    traits::{SessionParameters, WireFormat},
     value::{Erasable, SerializedValue, Value},
 };
 use crate::error::LocalError;
 
 #[derive(Debug)]
-pub enum ComputeError<SP: SessionParameters> {
+pub struct ComputeError<SP: SessionParameters>(pub(crate) ComputeErrorEnum<SP>);
+
+#[derive(Debug)]
+pub(crate) enum ComputeErrorEnum<SP: SessionParameters> {
     Local(LocalError),
     Data,
     ThirdParty {
         guilty_party: SP::Verifier,
+        // TODO (#7): will be used for provable failures.
+        #[allow(dead_code)]
         associated_data: SerializedValue,
     },
 }
 
 impl<SP: SessionParameters> From<LocalError> for ComputeError<SP> {
     fn from(source: LocalError) -> Self {
-        Self::Local(source)
+        Self(ComputeErrorEnum::Local(source))
+    }
+}
+
+impl<SP: SessionParameters> ComputeError<SP> {
+    pub fn local(error: LocalError) -> Self {
+        Self(ComputeErrorEnum::Local(error))
+    }
+
+    pub fn sender() -> Self {
+        Self(ComputeErrorEnum::Data)
+    }
+
+    pub fn third_party<T: Serialize>(guilty_party: &SP::Verifier, associated_value: T) -> Result<Self, LocalError> {
+        let associated_data = SerializedValue::new(SP::WireFormat::serialize(associated_value)?);
+        Ok(Self(ComputeErrorEnum::ThirdParty {
+            guilty_party: guilty_party.clone(),
+            associated_data,
+        }))
     }
 }
 

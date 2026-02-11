@@ -9,8 +9,8 @@ mod value;
 
 pub(crate) use constructors::serialize_function;
 pub(crate) use function::{
-    ArrayFunction, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
-    WrappedScalarFunctionPrivate,
+    ArrayFunction, ComputeErrorEnum, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
+    WrappedScalarFunction, WrappedScalarFunctionPrivate,
 };
 pub(crate) use node::NodeKind;
 pub(crate) use tag::{FullName, Tag};

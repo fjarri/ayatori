@@ -32,7 +32,11 @@ fn verify_commitment<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) 
     let b = args.get::<u64>("b")?;
     let r = args.get::<u64>("r")?;
     let c = args.get::<u64>("c")?;
-    if b + r == *c { Ok(()) } else { Err(ComputeError::Data) }
+    if b + r == *c {
+        Ok(())
+    } else {
+        Err(ComputeError::sender())
+    }
 }
 
 fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError<SP>> {

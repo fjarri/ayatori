@@ -10,8 +10,8 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ArrayFunction, ComputeError, Erasable, ExecutableProtocol, PartyId, ScalarFunction, SessionParameters,
-        Tag, Value, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
+        Args, ArrayFunction, ComputeError, ComputeErrorEnum, Erasable, ExecutableProtocol, PartyId, ScalarFunction,
+        SessionParameters, Tag, Value, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
         WrappedScalarFunctionPrivate,
     },
 };
@@ -104,9 +104,11 @@ impl<SP: SessionParameters> ComputeTask<SP> {
             ComputeFunction::Scalar { function } => {
                 let result = match function.call(self.args) {
                     Ok(result) => result,
-                    Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
-                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
+                    Err(ComputeError(ComputeErrorEnum::Data)) => {
+                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
+                    }
+                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -118,11 +120,11 @@ impl<SP: SessionParameters> ComputeTask<SP> {
             ComputeFunction::Array { function, id } => {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => {
+                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
+                    Err(ComputeError(ComputeErrorEnum::Data)) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
                     }
-                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -160,9 +162,11 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
             ComputeWithRngFunction::Scalar { function } => {
                 let result = match function.call(rng, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in })),
-                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
+                    Err(ComputeError(ComputeErrorEnum::Data)) => {
+                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
+                    }
+                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -174,11 +178,11 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
             ComputeWithRngFunction::Array { function, id } => {
                 let result = match function.call(rng, &id, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError::Local(error)) => return Err(error),
-                    Err(ComputeError::Data) => {
+                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
+                    Err(ComputeError(ComputeErrorEnum::Data)) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
                     }
-                    Err(ComputeError::ThirdParty { guilty_party, .. }) => {
+                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -388,14 +392,14 @@ where
 
     pub fn add_message(&mut self, message: Message<SP>) -> Result<AddMessageResult, LocalError> {
         for value in message.values() {
-            match value.verify() {
-                Ok(()) => {}
+            let verified_value = match value.verify() {
+                Ok(verified_value) => verified_value,
                 Err(VerificationError::Local(error)) => return Err(error),
                 Err(VerificationError::SignatureMismatch) => return Ok(AddMessageResult::InvalidSignature),
-            }
-            let source = value.source().clone();
-            let tag = Tag::signed_remote_with_full_name(value.metadata().full_name());
-            self.storage.set_elem(&tag, &source, Value::new(value))?;
+            };
+            let source = verified_value.source().clone();
+            let tag = Tag::signed_remote_with_full_name(verified_value.metadata().full_name());
+            self.storage.set_elem(&tag, &source, Value::new(verified_value))?;
             self.ruleset.update_with_array_element_ready(&tag, &source);
         }
         Ok(AddMessageResult::Success)
