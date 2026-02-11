@@ -91,27 +91,40 @@ impl<SP: SessionParameters> Node<SP> {
         format!("{}", self.0.as_ref())
     }
 
+    /// Returns the list of nodes consisting of `self` and all its subtree
+    /// sorted in such a way that for every node all its dependencies preceed it.
+    ///
+    /// (In other words, walks the dependency tree depth-first).
     pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>) -> Vec<Self> {
         let mut nodes_to_process = vec![self.get_strong_ref()];
-        let mut nodes_seen = BTreeSet::new();
+        let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
         let terminate_at_ids = terminate_at
             .map(|nodes| nodes.iter().map(|node| node.id()).collect::<BTreeSet<_>>())
             .unwrap_or_default();
 
         while let Some(node) = nodes_to_process.pop() {
-            nodes_seen.insert(node.id());
-            flat_nodes.push(node.get_strong_ref());
-            nodes_to_process.extend(node.all_dependencies().filter_map(|dependency| {
-                let id = dependency.id();
-                if nodes_seen.contains(&id) || terminate_at_ids.contains(&id) {
-                    None
-                } else {
-                    Some(dependency.get_strong_ref())
-                }
-            }));
+            let unprocessed_dependencies = node
+                .all_dependencies()
+                .filter_map(|dependency| {
+                    let id = dependency.id();
+                    if nodes_processed.contains(&id) || terminate_at_ids.contains(&id) {
+                        None
+                    } else {
+                        Some(dependency.get_strong_ref())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if unprocessed_dependencies.is_empty() {
+                flat_nodes.push(node.get_strong_ref());
+                nodes_processed.insert(node.id());
+            } else {
+                nodes_to_process.push(node.get_strong_ref());
+                nodes_to_process.extend(unprocessed_dependencies.into_iter());
+            }
         }
-        flat_nodes.reverse();
+
         flat_nodes
     }
 
