@@ -16,10 +16,10 @@ use crate::{
 fn repackage_signed_values<SP: SessionParameters>(
     args: Args<SP>,
 ) -> Result<BTreeMap<SP::Verifier, SignedValue<SP>>, ComputeError<SP>> {
-    let values = args.get_map::<SignedValue<SP>>("x_signed")?;
+    let values = args.get_map::<SignedValue<SP>>("values_signed")?;
     let cloned = values
-        .iter()
-        .map(|(id, value): (&&SP::Verifier, &&SignedValue<SP>)| ((*id).clone(), (*value).clone()))
+        .into_iter()
+        .map(|(id, value)| (id.clone(), value.clone()))
         .collect();
     Ok(cloned)
 }
@@ -37,7 +37,9 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
 
     // Check that all the parties are present in the `echos_map`
     let ids_received = echoed.keys().cloned().collect::<BTreeSet<_>>();
-    assert_eq!(&ids_received, all_ids); // provable error of `id`
+    if &ids_received != all_ids {
+        return Err(ComputeError::Data);
+    }
 
     // Check that the messages are correctly signed and have correct metadata
     for (from, message) in echoed.iter() {
@@ -87,7 +89,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
     type BuildData = (ProtocolMessage<SP>, PartyGroup<SP::Verifier>);
 
     fn signature() -> ProtocolSignature {
-        ProtocolSignature::new().input("x")
+        ProtocolSignature::new().input("value")
     }
 
     fn build(
@@ -96,23 +98,21 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         inputs: ProtocolArgs<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let (message, all_parties) = build_data;
-        let my_x = inputs.get("x")?;
+        let my_value = inputs.get("value")?;
 
-        let x_broadcasted = broadcast(message, my_x, all_parties)?;
-        let x_signed = receive_signed(message, all_parties);
-        let x = deserialize_received(&x_signed)?;
+        let value_broadcasted = broadcast(message, my_value, all_parties)?;
+        let values_signed = receive_signed(message, all_parties);
+        let values = deserialize_received(&values_signed)?;
 
-        let all_x_signed = collect(&x_signed)?;
-
-        let message_echo_x = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedValue<SP>>>("echo");
-        let my_all_x_signed = compute_scalar(
-            "my_all_x_signed",
+        let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedValue<SP>>>("echo");
+        let my_echo_pack = compute_scalar(
+            "my_echo_pack",
             repackage_signed_values,
-            &[("x_signed", &all_x_signed)],
+            &[("values_signed", &collect(&values_signed)?)],
         )?;
 
-        let all_x_signed_broadcasted = broadcast(&message_echo_x, &my_all_x_signed, all_parties)?;
-        let all_x_signed = receive(&message_echo_x, all_parties)?;
+        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack, all_parties)?;
+        let echo_pack = receive(&message_echo, all_parties)?;
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
         let echos_correct = verify(
@@ -120,13 +120,16 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
             verify_echos_correct,
             &[
                 ("all_ids", &all_ids),
-                ("received", &my_all_x_signed),
-                ("echoed", &all_x_signed),
+                ("received", &my_echo_pack),
+                ("echoed", &echo_pack),
             ],
         )?;
         let all_echos_correct = collect(&echos_correct)?;
-        let output =
-            alias("output", &x).with_dependencies(&[&x_broadcasted, &all_echos_correct, &all_x_signed_broadcasted]);
+        let output = alias("output", &values).with_dependencies(&[
+            &value_broadcasted,
+            &all_echos_correct,
+            &echo_pack_broadcasted,
+        ]);
 
         Ok(output)
     }
@@ -184,7 +187,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             "echo_x",
             my_id,
             &(message_x, all_parties.clone()),
-            ProtocolArgs::new().input_node("x", &my_x),
+            ProtocolArgs::new().input_node("value", &my_x),
         )?;
 
         let all_x = collect(&x)?;
