@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::{
     digest::{
         generic_array::typenum,
@@ -29,10 +30,12 @@ impl TestVerifier {
 }
 
 /// A signature produced by [`TestSigner`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct TestSignature {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TestSignature<D: digest::Digest> {
     signed_by: u8,
     randomness: u64,
+    #[serde(with = "GenericArray014::<Hex>")]
+    signed_hash: digest::Output<D>,
 }
 
 impl TestSigner {
@@ -42,15 +45,16 @@ impl TestSigner {
     }
 }
 
-impl<D: digest::Digest> signature::RandomizedDigestSigner<D, TestSignature> for TestSigner {
+impl<D: digest::Digest> signature::RandomizedDigestSigner<D, TestSignature<D>> for TestSigner {
     fn try_sign_digest_with_rng(
         &self,
         rng: &mut impl CryptoRngCore,
-        _digest: D,
-    ) -> Result<TestSignature, signature::Error> {
+        digest: D,
+    ) -> Result<TestSignature<D>, signature::Error> {
         Ok(TestSignature {
             signed_by: self.0,
             randomness: rng.next_u64(),
+            signed_hash: digest.finalize(),
         })
     }
 }
@@ -63,9 +67,9 @@ impl signature::Keypair for TestSigner {
     }
 }
 
-impl<D: digest::Digest> signature::DigestVerifier<D, TestSignature> for TestVerifier {
-    fn verify_digest(&self, _digest: D, signature: &TestSignature) -> Result<(), signature::Error> {
-        if self.0 == signature.signed_by {
+impl<D: digest::Digest> signature::DigestVerifier<D, TestSignature<D>> for TestVerifier {
+    fn verify_digest(&self, digest: D, signature: &TestSignature<D>) -> Result<(), signature::Error> {
+        if self.0 == signature.signed_by && digest.finalize() == signature.signed_hash {
             Ok(())
         } else {
             Err(signature::Error::new())
@@ -110,7 +114,7 @@ pub struct TestSessionParams<F>(core::marker::PhantomData<F>);
 impl<F: WireFormat> SessionParameters for TestSessionParams<F> {
     type Signer = TestSigner;
     type Verifier = TestVerifier;
-    type Signature = TestSignature;
+    type Signature = TestSignature<Self::Digest>;
     type Digest = TestHasher;
     type WireFormat = F;
 }
