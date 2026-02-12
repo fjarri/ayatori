@@ -1,10 +1,5 @@
-use alloc::{
-    collections::BTreeMap,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
 
-use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
@@ -13,15 +8,18 @@ use super::{
         ArrayFunction, ComputeError, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
         WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
-    node::{Node, NodeKind, args_to_owned},
+    node::{Node, NodeKind, ProtocolMessage, args_to_owned},
     party::PartyGroup,
     tag::{FullName, Tag},
     traits::{ComposableProtocol, SessionParameters},
-    value::{Erasable, SerdeAdapter, SerializedValue, Value},
+    value::{Erasable, SerdeAdapter, Value},
 };
-use crate::{error::LocalError, session::SignedValue};
+use crate::{
+    error::LocalError,
+    session::{SignedValue, VerifiedValue},
+};
 
-pub(crate) fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
+pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
     Node::new(
         Tag::computed(name),
@@ -34,22 +32,35 @@ pub(crate) fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: 
     )
 }
 
-pub(crate) fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
+pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
-    Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeScalar {
-            function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased("alias", move |args| {
-                args.get_value(arg_name).cloned().map_err(ComputeError::Local)
-            })),
-            args: [(arg_name.into(), node.get_strong_ref())].into(),
-        },
-    )
+    if let Some(group) = node.group() {
+        Node::new(
+            Tag::computed(name),
+            NodeKind::ComputeArray {
+                function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased("alias", move |_id, args| {
+                    args.get_value(arg_name).cloned().map_err(ComputeError::<SP>::local)
+                })),
+                args: [(arg_name.into(), node.get_strong_ref())].into(),
+                group: group.clone(),
+            },
+        )
+    } else {
+        Node::new(
+            Tag::computed(name),
+            NodeKind::ComputeScalar {
+                function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased("alias", move |args| {
+                    args.get_value(arg_name).cloned().map_err(ComputeError::<SP>::local)
+                })),
+                args: [(arg_name.into(), node.get_strong_ref())].into(),
+            },
+        )
+    }
 }
 
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError<SP>>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
     Ok(Node::new(
@@ -63,7 +74,7 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
 
 pub fn compute_scalar_private<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Ret, ComputeError<SP>>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
     Ok(Node::new(
@@ -77,7 +88,7 @@ pub fn compute_scalar_private<SP: SessionParameters, Ret: Erasable>(
 
 pub fn compute_array<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ComputeError<SP>>,
     group: &PartyGroup<SP::Verifier>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
@@ -93,7 +104,7 @@ pub fn compute_array<SP: SessionParameters, Ret: Erasable>(
 
 pub fn compute_array_private<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Ret, ComputeError>,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Ret, ComputeError<SP>>,
     group: &PartyGroup<SP::Verifier>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
@@ -109,7 +120,7 @@ pub fn compute_array_private<SP: SessionParameters, Ret: Erasable>(
 
 pub fn verify<SP: SessionParameters>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<(), ComputeError>,
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<(), ComputeError<SP>>,
     args: &[(&str, &Node<SP>)],
 ) -> Result<Node<SP>, LocalError> {
     let groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
@@ -159,7 +170,7 @@ fn serialize<SP: SessionParameters>(
     arg_name: &str,
     message_name: &FullName,
     serde_adapter: &SerdeAdapter<SP::WireFormat>,
-) -> Result<Value, ComputeError> {
+) -> Result<Value, ComputeError<SP>> {
     let value = args.get_value(arg_name)?;
     let serialized_value = serde_adapter.serialize(value)?;
     let mut typed_rng = Rng(rng);
@@ -195,16 +206,16 @@ pub fn broadcast<SP: SessionParameters>(
     }
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(&message.name),
+        Tag::signed_local(message.name()),
         NodeKind::Serialize {
             data: scalar.get_strong_ref(),
             group: group.clone(),
-            adapter: message.serde_adapter.clone(),
+            adapter: message.serde_adapter().clone(),
         },
     );
 
     let send_node = Node::new(
-        Tag::sent(&message.name),
+        Tag::sent(message.name()),
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group: group.clone(),
@@ -221,16 +232,16 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
         .clone();
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(&message.name),
+        Tag::signed_local(message.name()),
         NodeKind::Serialize {
             data: array.get_strong_ref(),
             group: group.clone(),
-            adapter: message.serde_adapter.clone(),
+            adapter: message.serde_adapter().clone(),
         },
     );
 
     let send_node = Node::new(
-        Tag::sent(&message.name),
+        Tag::sent(message.name()),
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group,
@@ -244,34 +255,55 @@ fn deserialize<SP: SessionParameters>(
     args: Args<SP>,
     arg_name: &str,
     message: &ProtocolMessage<SP>,
-) -> Result<Value, ComputeError> {
-    let received = args.get::<SerializedValue>(arg_name)?;
+) -> Result<Value, ComputeError<SP>> {
+    let received = args.get::<VerifiedValue<SP>>(arg_name)?;
     message
-        .serde_adapter
-        .deserialize(received)
-        .map_err(|_err| ComputeError::Data)
+        .serde_adapter()
+        .deserialize(received.serialized_value())
+        .map_err(|_err| ComputeError::<SP>::sender())
 }
 
-pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>, group: &PartyGroup<SP::Verifier>) -> Node<SP> {
-    let received = Node::new(
-        Tag::signed_remote(&message.name),
-        NodeKind::Receive { group: group.clone() },
-    );
+pub fn receive_signed<SP: SessionParameters>(
+    message: &ProtocolMessage<SP>,
+    group: &PartyGroup<SP::Verifier>,
+) -> Node<SP> {
+    Node::new(
+        Tag::signed_remote(message.name()),
+        NodeKind::Receive {
+            group: group.clone(),
+            message: message.clone(),
+        },
+    )
+}
+
+pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
+    let (group, message) = match received.kind() {
+        NodeKind::Receive { group, message } => (group, message),
+        _ => return Err(LocalError::new("The given node must be a Receive node")),
+    };
 
     let cloned_message = message.clone();
     let arg_name = "_value".to_string();
 
-    Node::new(
-        Tag::received(&message.name),
+    Ok(Node::new(
+        Tag::received(message.name()),
         NodeKind::ComputeArray {
-            args: [(arg_name.clone(), received)].into(),
+            args: [(arg_name.clone(), received.get_strong_ref())].into(),
             function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
                 "deserialize",
                 move |_id: &SP::Verifier, args: Args<SP>| deserialize::<SP>(args, &arg_name, &cloned_message),
             )),
             group: group.clone(),
         },
-    )
+    ))
+}
+
+pub fn receive<SP: SessionParameters>(
+    message: &ProtocolMessage<SP>,
+    group: &PartyGroup<SP::Verifier>,
+) -> Result<Node<SP>, LocalError> {
+    let received = receive_signed(message, group);
+    deserialize_received(&received)
 }
 
 pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, LocalError> {
@@ -289,22 +321,6 @@ pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, Loc
     ))
 }
 
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
-pub struct ProtocolMessage<SP: SessionParameters> {
-    name: String,
-    serde_adapter: SerdeAdapter<SP::WireFormat>,
-}
-
-impl<SP: SessionParameters> ProtocolMessage<SP> {
-    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            serde_adapter: SerdeAdapter::new::<T>(),
-        }
-    }
-}
-
 // TODO: can we avoid passing `my_id` explicitly?
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     prefix: &str,
@@ -315,5 +331,6 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     let signature = P::signature();
     let (aliased_args, original_nodes) = args.with_aliases(signature)?;
     let output = P::build(my_id, build_data, aliased_args)?;
-    Ok(output.with_added_prefix(prefix, original_nodes))
+    let prefixed = output.with_added_prefix(prefix, original_nodes);
+    Ok(prefixed)
 }

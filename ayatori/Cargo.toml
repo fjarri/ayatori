@@ -15,10 +15,9 @@ derive-where = "1"
 itertools = "0.14"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 signature = { version = "2", default-features = false, features = ["digest", "rand_core"] }
-serde-encoded-bytes = { version = "0.2", default-features = false, features = ["hex"] }
+serde-encoded-bytes = { version = "0.2", default-features = false, features = ["hex", "generic-array-014"] }
 displaydoc = { version = "0.2", default-features = false }
 
-# TODO: to be moved to dev-dependencies after generalizing
 postcard = { version = "1", default-features = false, features = ["alloc"], optional = true }
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
 

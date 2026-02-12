@@ -30,6 +30,7 @@ impl<T: Any + Debug + Send + Sync + 'static> Erasable for T {}
 
 trait ErasableInternal: Erasable {
     fn my_type_id(&self) -> TypeId;
+    fn my_type_name(&self) -> String;
     fn as_any(&self) -> &dyn Any;
     fn debug(&self) -> String;
 }
@@ -40,6 +41,10 @@ where
 {
     fn my_type_id(&self) -> TypeId {
         TypeId::of::<T>()
+    }
+
+    fn my_type_name(&self) -> String {
+        type_name::<T>().into()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -74,7 +79,8 @@ impl Value {
 
         if self.0.as_ref().my_type_id() != TypeId::of::<T>() {
             return Err(LocalError::new(format!(
-                "Attempted to downcast {self:?} as {}",
+                "Attempted to downcast {} as {}",
+                self.0.as_ref().my_type_name(),
                 type_name::<T>()
             )));
         }
@@ -103,11 +109,13 @@ impl Value {
         // Note that `as_ref()` here is crucial, otherwise `as_any()`
         // is called on the `Arc` instead of the concrete type inside,
         // leading to `downcast_ref()` failing because of the type mismatch.
-        self.0
-            .as_ref()
-            .as_any()
-            .downcast_ref::<T>()
-            .ok_or_else(|| LocalError::new(format!("Attempted to downcast {self:?} as {}", type_name::<T>())))
+        self.0.as_ref().as_any().downcast_ref::<T>().ok_or_else(|| {
+            LocalError::new(format!(
+                "Attempted to downcast {} as {}",
+                self.0.as_ref().my_type_name(),
+                type_name::<T>()
+            ))
+        })
     }
 }
 
@@ -187,7 +195,7 @@ impl<F: WireFormat> Debug for SerdeAdapter<F> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct SerializedValue(
     // TODO: would be nice to store it as is if the serializer is human-readable
     #[serde(with = "SliceLike::<Hex>")] Box<[u8]>,

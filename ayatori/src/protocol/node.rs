@@ -11,13 +11,14 @@ use alloc::{
 use core::fmt::Debug;
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 use super::{
     function::{ArrayFunction, ScalarFunction},
     party::PartyGroup,
     tag::Tag,
     traits::SessionParameters,
-    value::SerdeAdapter,
+    value::{Erasable, SerdeAdapter},
 };
 use crate::error::LocalError;
 
@@ -90,27 +91,40 @@ impl<SP: SessionParameters> Node<SP> {
         format!("{}", self.0.as_ref())
     }
 
+    /// Returns the list of nodes consisting of `self` and all its subtree
+    /// sorted in such a way that for every node all its dependencies preceed it.
+    ///
+    /// (In other words, walks the dependency tree depth-first).
     pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>) -> Vec<Self> {
         let mut nodes_to_process = vec![self.get_strong_ref()];
-        let mut nodes_seen = BTreeSet::new();
+        let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
         let terminate_at_ids = terminate_at
             .map(|nodes| nodes.iter().map(|node| node.id()).collect::<BTreeSet<_>>())
             .unwrap_or_default();
 
         while let Some(node) = nodes_to_process.pop() {
-            nodes_seen.insert(node.id());
-            flat_nodes.push(node.get_strong_ref());
-            nodes_to_process.extend(node.all_dependencies().filter_map(|dependency| {
-                let id = dependency.id();
-                if nodes_seen.contains(&id) || terminate_at_ids.contains(&id) {
-                    None
-                } else {
-                    Some(dependency.get_strong_ref())
-                }
-            }));
+            let unprocessed_dependencies = node
+                .all_dependencies()
+                .filter_map(|dependency| {
+                    let id = dependency.id();
+                    if nodes_processed.contains(&id) || terminate_at_ids.contains(&id) {
+                        None
+                    } else {
+                        Some(dependency.get_strong_ref())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if unprocessed_dependencies.is_empty() {
+                flat_nodes.push(node.get_strong_ref());
+                nodes_processed.insert(node.id());
+            } else {
+                nodes_to_process.push(node.get_strong_ref());
+                nodes_to_process.extend(unprocessed_dependencies.into_iter());
+            }
         }
-        flat_nodes.reverse();
+
         flat_nodes
     }
 
@@ -234,6 +248,30 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 }
 
 #[derive(Debug)]
+#[derive_where::derive_where(Clone)]
+pub struct ProtocolMessage<SP: SessionParameters> {
+    name: String,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+}
+
+impl<SP: SessionParameters> ProtocolMessage<SP> {
+    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            serde_adapter: SerdeAdapter::new::<T>(),
+        }
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
+        &self.serde_adapter
+    }
+}
+
+#[derive(Debug)]
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
         function: ScalarFunction<SP>,
@@ -259,6 +297,7 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
     },
     Receive {
         group: PartyGroup<SP::Verifier>,
+        message: ProtocolMessage<SP>,
     },
 }
 
@@ -293,7 +332,10 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             Self::Collect { values, group: _group } => {
                 write!(f, "collect({})", values.store_in())
             }
-            Self::Receive { group: _group } => write!(f, "receive()"),
+            Self::Receive {
+                group: _group,
+                message: _message,
+            } => write!(f, "receive()"),
             Self::Serialize {
                 data,
                 group: _group,
@@ -333,7 +375,10 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 values: values.get_strong_ref(),
                 group: group.clone(),
             },
-            Self::Receive { group } => Self::Receive { group: group.clone() },
+            Self::Receive { group, message } => Self::Receive {
+                group: group.clone(),
+                message: message.clone(),
+            },
             Self::Serialize { data, group, adapter } => Self::Serialize {
                 data: data.get_strong_ref(),
                 group: group.clone(),

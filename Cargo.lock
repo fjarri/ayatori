@@ -200,6 +200,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "988156b15813ab36ef7527430ed5d055d826f0d5fae2d17514a943360db27200"
 dependencies = [
+ "generic-array",
  "hex",
  "serde",
 ]
