@@ -284,7 +284,7 @@ where
         })
     }
 
-    pub fn id(&self) -> SP::Verifier {
+    pub fn verifier(&self) -> SP::Verifier {
         self.signer.verifying_key()
     }
 
@@ -332,7 +332,7 @@ where
                         .iter()
                         .map(|(name, tag)| self.storage.get(tag).map(|value| (name.clone(), value)))
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id, &self.id(), arg_values)?;
+                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {
@@ -365,7 +365,7 @@ where
                             }
                         })
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id, &self.id(), arg_values)?;
+                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {
