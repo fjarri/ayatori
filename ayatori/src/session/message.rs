@@ -29,6 +29,10 @@ impl<SP: SessionParameters> ValueMetadata<SP> {
     pub fn destination(&self) -> &SP::Verifier {
         &self.destination
     }
+
+    pub fn session_id(&self) -> &SessionId<SP> {
+        &self.session_id
+    }
 }
 
 #[derive(Debug, Clone)]

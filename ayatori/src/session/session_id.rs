@@ -10,8 +10,8 @@ use signature::rand_core::CryptoRngCore;
 use crate::protocol::SessionParameters;
 
 /// A session identifier shared between the parties.
-#[derive(Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[derive_where::derive_where(Clone)]
+#[derive(Serialize, Deserialize, PartialOrd, Ord, Hash)]
+#[derive_where::derive_where(Clone, PartialEq, Eq)]
 pub struct SessionId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
 
 /// A session ID.

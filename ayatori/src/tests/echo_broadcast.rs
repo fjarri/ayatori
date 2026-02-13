@@ -53,7 +53,12 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
         let ethalon = received
             .get(from)
             .expect("we checked that the ID is present in the message map");
+
         if ethalon.metadata().full_name() != message.metadata().full_name() {
+            return Err(ComputeError::sender());
+        }
+
+        if ethalon.metadata().session_id() != message.metadata().session_id() {
             return Err(ComputeError::sender());
         }
 
