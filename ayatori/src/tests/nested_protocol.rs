@@ -144,10 +144,14 @@ fn run_protocol() {
     };
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
+    let session_id = SessionId::random(&mut rng);
 
     let sessions = signers
         .into_iter()
-        .map(|signer| Session::<TestSessionParams<BinaryFormat>, Protocol1>::new(signer, &shared_data).unwrap())
+        .map(|signer| {
+            Session::<TestSessionParams<BinaryFormat>, Protocol1>::new(session_id.clone(), signer, &shared_data)
+                .unwrap()
+        })
         .collect::<Vec<_>>();
     let _results = run_sessions_sync(&mut rng, sessions).unwrap();
 }

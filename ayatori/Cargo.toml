@@ -11,12 +11,13 @@ categories = ["cryptography", "no-std"]
 rust-version = "1.90"
 
 [dependencies]
-derive-where = "1"
+derive-where = { version = "1.5", default-features = false, features = ["serde"] }
 itertools = "0.14"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 signature = { version = "2", default-features = false, features = ["digest", "rand_core"] }
 serde-encoded-bytes = { version = "0.2", default-features = false, features = ["hex", "generic-array-014"] }
 displaydoc = { version = "0.2", default-features = false }
+hex = { version = "0.4", default-features = false }
 
 postcard = { version = "1", default-features = false, features = ["alloc"], optional = true }
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }

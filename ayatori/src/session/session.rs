@@ -6,6 +6,7 @@ use signature::{Keypair, rand_core::CryptoRngCore};
 use super::{
     message::{Message, SignedValue, VerificationError},
     ruleset::{Action, Arg, Ruleset},
+    session_id::SessionId,
 };
 use crate::{
     error::LocalError,
@@ -255,6 +256,7 @@ pub enum AddMessageResult {
 // TODO: do we need to be generic over P here?
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    id: SessionId<SP>,
     signer: Arc<SP::Signer>,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
@@ -266,7 +268,7 @@ where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
 {
-    pub fn new(signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
+    pub fn new(id: SessionId<SP>, signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
         let inputs = P::make_inputs(shared_data);
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
@@ -274,6 +276,7 @@ where
         let storage = Storage::new();
         let signer = Arc::new(signer);
         Ok(Self {
+            id,
             signer,
             ruleset,
             storage,
@@ -329,7 +332,7 @@ where
                         .iter()
                         .map(|(name, tag)| self.storage.get(tag).map(|value| (name.clone(), value)))
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
+                    let args = Args::new(&self.signer, &self.id, &self.id(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {
@@ -362,7 +365,7 @@ where
                             }
                         })
                         .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
+                    let args = Args::new(&self.signer, &self.id, &self.id(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::Compute(ComputeTask {

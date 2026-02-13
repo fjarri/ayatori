@@ -14,11 +14,12 @@ use super::{
     traits::SessionParameters,
     value::{Erasable, Value},
 };
-use crate::error::LocalError;
+use crate::{error::LocalError, session::SessionId};
 
 #[derive(Debug)]
 pub struct Args<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
+    session_id: SessionId<SP>,
     my_id: SP::Verifier,
     values: BTreeMap<String, Value>,
 }
@@ -26,12 +27,14 @@ pub struct Args<SP: SessionParameters> {
 impl<SP: SessionParameters> Args<SP> {
     pub(crate) fn new(
         signer: &Arc<SP::Signer>,
+        session_id: &SessionId<SP>,
         my_id: &SP::Verifier,
         values: BTreeMap<String, Value>,
     ) -> Result<Self, LocalError> {
         Ok(Self {
-            my_id: my_id.clone(),
             signer: signer.clone(),
+            session_id: session_id.clone(),
+            my_id: my_id.clone(),
             values,
         })
     }
@@ -42,6 +45,10 @@ impl<SP: SessionParameters> Args<SP> {
 
     pub fn my_id(&self) -> &SP::Verifier {
         &self.my_id
+    }
+
+    pub fn session_id(&self) -> &SessionId<SP> {
+        &self.session_id
     }
 
     pub(crate) fn get_value(&self, name: &str) -> Result<&Value, LocalError> {

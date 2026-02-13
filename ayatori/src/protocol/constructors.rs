@@ -174,7 +174,14 @@ fn serialize<SP: SessionParameters>(
     let value = args.get_value(arg_name)?;
     let serialized_value = serde_adapter.serialize(value)?;
     let mut typed_rng = Rng(rng);
-    let signed_value = SignedValue::<SP>::new(&mut typed_rng, args.signer(), message_name, id, serialized_value)?;
+    let signed_value = SignedValue::<SP>::new(
+        &mut typed_rng,
+        args.signer(),
+        args.session_id(),
+        message_name,
+        id,
+        serialized_value,
+    )?;
     Ok(Value::new(signed_value))
 }
 

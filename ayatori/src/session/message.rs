@@ -8,23 +8,25 @@ use signature::{
     rand_core::CryptoRngCore,
 };
 
+use super::session_id::SessionId;
 use crate::{
     error::LocalError,
     protocol::{FullName, SerializedValue, SessionParameters, WireFormat},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValueMetadata<Id> {
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueMetadata<SP: SessionParameters> {
     name: FullName,
-    destination: Id,
+    destination: SP::Verifier,
+    session_id: SessionId<SP>,
 }
 
-impl<Id> ValueMetadata<Id> {
+impl<SP: SessionParameters> ValueMetadata<SP> {
     pub fn full_name(&self) -> &FullName {
         &self.name
     }
 
-    pub fn destination(&self) -> &Id {
+    pub fn destination(&self) -> &SP::Verifier {
         &self.destination
     }
 }
@@ -52,7 +54,7 @@ fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::O
 
 fn hash_value_hash_and_metadata<SP: SessionParameters>(
     value_hash: &digest::Output<SP::Digest>,
-    metadata: &ValueMetadata<SP::Verifier>,
+    metadata: &ValueMetadata<SP>,
 ) -> Result<SP::Digest, LocalError> {
     Ok(SP::Digest::new_with_prefix(b"SignedValueDigest")
         .chain_update(<SP::WireFormat as WireFormat>::serialize(metadata)?)
@@ -61,20 +63,19 @@ fn hash_value_hash_and_metadata<SP: SessionParameters>(
 
 fn hash_value_and_metadata<SP: SessionParameters>(
     value: &SerializedValue,
-    metadata: &ValueMetadata<SP::Verifier>,
+    metadata: &ValueMetadata<SP>,
 ) -> Result<SP::Digest, LocalError> {
     let value_hash = hash_serialized_value::<SP::Digest>(value)?;
     hash_value_hash_and_metadata::<SP>(&value_hash, metadata)
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedValue<SP: SessionParameters> {
     signature: SP::Signature,
     // TODO: could be a part of the metadata and thus signed too,
     // but I don't think we get any additional security from it.
     source: SP::Verifier,
-    metadata: ValueMetadata<SP::Verifier>,
+    metadata: ValueMetadata<SP>,
     value: SerializedValue,
 }
 
@@ -82,13 +83,15 @@ impl<SP: SessionParameters> SignedValue<SP> {
     pub(crate) fn new(
         rng: &mut impl CryptoRngCore,
         signer: &SP::Signer,
+        session_id: &SessionId<SP>,
         name: &FullName,
         destination: &SP::Verifier,
         value: SerializedValue,
     ) -> Result<Self, LocalError> {
-        let metadata = ValueMetadata::<SP::Verifier> {
+        let metadata = ValueMetadata {
             name: name.clone(),
             destination: destination.clone(),
+            session_id: session_id.clone(),
         };
         let digest = hash_value_and_metadata::<SP>(&value, &metadata)?;
         let signature = signer
@@ -127,17 +130,16 @@ impl<SP: SessionParameters> SignedValue<SP> {
         })
     }
 
-    pub fn metadata(&self) -> &ValueMetadata<SP::Verifier> {
+    pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedHash<SP: SessionParameters> {
     signature: SP::Signature,
     source: SP::Verifier,
-    metadata: ValueMetadata<SP::Verifier>,
+    metadata: ValueMetadata<SP>,
     #[serde(with = "GenericArray014::<Hex>")]
     hash: digest::Output<SP::Digest>,
 }
@@ -147,7 +149,7 @@ impl<SP: SessionParameters> SignedHash<SP> {
         &self.source
     }
 
-    pub fn metadata(&self) -> &ValueMetadata<SP::Verifier> {
+    pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
 
@@ -167,7 +169,7 @@ impl<SP: SessionParameters> SignedHash<SP> {
 pub struct VerifiedValue<SP: SessionParameters> {
     signature: SP::Signature,
     source: SP::Verifier,
-    metadata: ValueMetadata<SP::Verifier>,
+    metadata: ValueMetadata<SP>,
     value: SerializedValue,
 }
 
@@ -176,7 +178,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         &self.source
     }
 
-    pub fn metadata(&self) -> &ValueMetadata<SP::Verifier> {
+    pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
 

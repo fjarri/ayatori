@@ -98,10 +98,14 @@ fn run_protocol() {
     let party_group = PartyGroup::new(&ids);
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
+    let session_id = SessionId::random(&mut rng);
 
     let sessions = signers
         .into_iter()
-        .map(|signer| Session::<TestSessionParams<BinaryFormat>, DistributedRNG>::new(signer, &party_group).unwrap())
+        .map(|signer| {
+            Session::<TestSessionParams<BinaryFormat>, DistributedRNG>::new(session_id.clone(), signer, &party_group)
+                .unwrap()
+        })
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
