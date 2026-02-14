@@ -1,5 +1,6 @@
-use alloc::{collections::BTreeMap, format};
+use alloc::{collections::BTreeMap, format, string::String};
 
+use super::ruleset::Arg;
 use crate::{
     error::LocalError,
     protocol::{PartyId, Tag, Value},
@@ -65,5 +66,24 @@ impl<Id: PartyId> Storage<Id> {
                 "{tag}[{id:?}] already has an associated value"
             ))),
         }
+    }
+
+    pub fn get_scalar_args(&self, tags: BTreeMap<String, Tag>) -> Result<BTreeMap<String, Value>, LocalError> {
+        tags.into_iter()
+            .map(|(name, tag)| self.get(&tag).map(|value| (name, value)))
+            .collect::<Result<BTreeMap<_, _>, LocalError>>()
+    }
+
+    pub fn get_scalar_or_array_args(
+        &self,
+        index: &Id,
+        tags: BTreeMap<String, Arg>,
+    ) -> Result<BTreeMap<String, Value>, LocalError> {
+        tags.into_iter()
+            .map(|(name, arg)| match arg {
+                Arg::Scalar(tag) => self.get(&tag).map(|value| (name.clone(), value)),
+                Arg::ArrayElem(tag) => self.get_elem(&tag, index).map(|value| (name.clone(), value)),
+            })
+            .collect::<Result<BTreeMap<_, _>, LocalError>>()
     }
 }
