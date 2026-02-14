@@ -230,7 +230,30 @@ impl<SP: SessionParameters> Message<SP> {
         &self.destination
     }
 
-    pub(crate) fn values(self) -> impl Iterator<Item = SignedValue<SP>> {
+    pub fn verify(self) -> Result<VerifiedMessage<SP>, VerificationError> {
+        Ok(VerifiedMessage {
+            destination: self.destination,
+            values: self
+                .values
+                .into_iter()
+                .map(|value| value.verify())
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VerifiedMessage<SP: SessionParameters> {
+    destination: SP::Verifier,
+    values: Vec<VerifiedValue<SP>>,
+}
+
+impl<SP: SessionParameters> VerifiedMessage<SP> {
+    pub fn destination(&self) -> &SP::Verifier {
+        &self.destination
+    }
+
+    pub(crate) fn values(self) -> impl Iterator<Item = VerifiedValue<SP>> {
         self.values.into_iter()
     }
 }

@@ -244,9 +244,3 @@ pub(crate) enum TaskResultEnum<Id> {
     UnattributableError { store_in: Tag },
     AttributableError { store_in: Tag, id: Id },
 }
-
-#[derive(Debug, Clone, Copy)]
-pub enum AddMessageResult {
-    Success,
-    InvalidSignature,
-}

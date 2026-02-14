@@ -4,11 +4,11 @@ use core::{fmt::Debug, marker::PhantomData};
 use signature::Keypair;
 
 use super::{
-    message::{Message, VerificationError},
+    message::VerifiedMessage,
     ruleset::{Action, Ruleset},
     session_id::SessionId,
     storage::Storage,
-    task::{AddMessageResult, Task, TaskResult, TaskResultEnum},
+    task::{Task, TaskResult, TaskResultEnum},
 };
 use crate::{
     error::LocalError,
@@ -122,19 +122,14 @@ where
         Ok(None)
     }
 
-    pub fn add_message(&mut self, message: Message<SP>) -> Result<AddMessageResult, LocalError> {
+    pub fn add_message(&mut self, message: VerifiedMessage<SP>) -> Result<(), LocalError> {
         for value in message.values() {
-            let verified_value = match value.verify() {
-                Ok(verified_value) => verified_value,
-                Err(VerificationError::Local(error)) => return Err(error),
-                Err(VerificationError::SignatureMismatch) => return Ok(AddMessageResult::InvalidSignature),
-            };
-            let source = verified_value.source().clone();
-            let tag = Tag::signed_remote_with_full_name(verified_value.metadata().full_name());
-            self.storage.set_elem(&tag, &source, Value::new(verified_value))?;
+            let source = value.source().clone();
+            let tag = Tag::signed_remote_with_full_name(value.metadata().full_name());
+            self.storage.set_elem(&tag, &source, Value::new(value))?;
             self.ruleset.update_with_array_element_ready(&tag, &source);
         }
-        Ok(AddMessageResult::Success)
+        Ok(())
     }
 
     pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {
