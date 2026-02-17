@@ -230,30 +230,33 @@ impl<SP: SessionParameters> Message<SP> {
         &self.destination
     }
 
-    pub fn verify(self) -> Result<VerifiedMessage<SP>, VerificationError> {
-        Ok(VerifiedMessage {
-            destination: self.destination,
-            values: self
-                .values
-                .into_iter()
-                .map(|value| value.verify())
-                .collect::<Result<Vec<_>, _>>()?,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct VerifiedMessage<SP: SessionParameters> {
-    destination: SP::Verifier,
-    values: Vec<VerifiedValue<SP>>,
-}
-
-impl<SP: SessionParameters> VerifiedMessage<SP> {
-    pub fn destination(&self) -> &SP::Verifier {
-        &self.destination
+    pub(crate) fn sources(&self) -> impl Iterator<Item = &SP::Verifier> {
+        self.values.iter().map(|value| value.source())
     }
 
-    pub(crate) fn values(self) -> impl Iterator<Item = VerifiedValue<SP>> {
+    pub(crate) fn values(self) -> impl Iterator<Item = SignedValue<SP>> {
         self.values.into_iter()
     }
 }
+
+pub type MessageId = u64;
+
+/*
+Received message lifecycle:
+
+[unattr] Check the signature correctness
+[de facto unattr] Check that the sender is one of the paricipants
+[unattr] Check that the destination is one of those managed by the session
+
+[attr] Check session_id
+[attr] Check that the name is expected
+[attr] Check that the sender is in expected senders for the name
+[attr]   (and the destination is in expected receivers for the name)
+Check that the value with that name has not been received from that sender yet
+[attr] ... it's a different value
+[unattr] ... it's the same value
+[attr] Check that the value can be deserialized
+
+
+
+*/

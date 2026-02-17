@@ -7,7 +7,7 @@ mod session_id;
 mod storage;
 mod task;
 
-pub use message::{Message, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedMessage, VerifiedValue};
+pub use message::{Message, SignedHash, SignedValue, ValueMetadata, VerifiedValue};
 pub use session::Session;
 pub use session_id::SessionId;
 pub use task::Task;

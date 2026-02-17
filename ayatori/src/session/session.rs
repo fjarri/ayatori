@@ -1,18 +1,18 @@
-use alloc::{format, sync::Arc};
+use alloc::{collections::BTreeSet, format, sync::Arc};
 use core::{fmt::Debug, marker::PhantomData};
 
 use signature::Keypair;
 
 use super::{
-    message::VerifiedMessage,
+    message::{Message, MessageId},
     ruleset::{Action, Ruleset},
     session_id::SessionId,
     storage::Storage,
-    task::{Task, TaskResult, TaskResultEnum},
+    task::{PreprocessResult, PreprocessResultEnum, PreprocessTask, Task, TaskResult, TaskResultEnum},
 };
 use crate::{
     error::LocalError,
-    protocol::{Args, ArrayFunction, ExecutableProtocol, ScalarFunction, SessionParameters, Tag, Value},
+    protocol::{Args, ArrayFunction, ExecutableProtocol, ScalarFunction, SessionParameters, Value},
 };
 
 // TODO: do we need to be generic over P here?
@@ -22,6 +22,9 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     signer: Arc<SP::Signer>,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
+    participants: Arc<BTreeSet<SP::Verifier>>,
+    local_participants: Arc<BTreeSet<SP::Verifier>>,
+    message_id_counter: MessageId,
     phantom: PhantomData<P>,
 }
 
@@ -31,6 +34,8 @@ where
     P: ExecutableProtocol<SP>,
 {
     pub fn new(id: SessionId<SP>, signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
+        let participants = Arc::new(P::all_participants(shared_data));
+        let local_participants = Arc::new(BTreeSet::from([signer.verifying_key()]));
         let inputs = P::make_inputs(shared_data);
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
@@ -42,6 +47,9 @@ where
             signer,
             ruleset,
             storage,
+            participants,
+            local_participants,
+            message_id_counter: 0,
             phantom: PhantomData,
         })
     }
@@ -122,14 +130,25 @@ where
         Ok(None)
     }
 
-    pub fn add_message(&mut self, message: VerifiedMessage<SP>) -> Result<(), LocalError> {
-        for value in message.values() {
-            let source = value.source().clone();
-            let tag = Tag::signed_remote_with_full_name(value.metadata().full_name());
-            self.storage.set_elem(&tag, &source, Value::new(value))?;
-            self.ruleset.update_with_array_element_ready(&tag, &source);
+    pub fn preprocess_message(&mut self, message: Message<SP>) -> PreprocessTask<SP> {
+        let message_id = self.message_id_counter;
+        self.message_id_counter += 1;
+        PreprocessTask::new(message_id, message, &self.participants, &self.local_participants)
+    }
+
+    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP::Verifier>) -> Result<(), LocalError> {
+        match result.into_enum() {
+            PreprocessResultEnum::Success { to_store } => {
+                for (tag, id, value) in to_store {
+                    self.storage.set_elem(&tag, &id, value)?;
+                    self.ruleset.update_with_array_element_ready(&tag, &id);
+                }
+                Ok(())
+            }
+            PreprocessResultEnum::MessageError { .. } => {
+                todo!()
+            }
         }
-        Ok(())
     }
 
     pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {

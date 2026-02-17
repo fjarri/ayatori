@@ -164,6 +164,9 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
         shared_data.clone()
     }
+    fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
+        shared_data.ids().cloned().collect()
+    }
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {

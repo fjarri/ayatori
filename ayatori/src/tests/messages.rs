@@ -3,7 +3,7 @@ use crate::{
     protocol::*,
     session::*,
 };
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, vec::Vec};
 
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
@@ -69,6 +69,9 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     }
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
         shared_data.clone()
+    }
+    fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
+        shared_data.ids().cloned().collect()
     }
 }
 

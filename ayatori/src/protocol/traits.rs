@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, collections::BTreeSet};
 use core::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
@@ -60,6 +60,7 @@ pub trait ExecutableProtocol<SP: SessionParameters>: Debug + ComposableProtocol<
 
     fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP>;
     fn make_build_data(shared_data: &Self::SharedData) -> <Self as ComposableProtocol<SP>>::BuildData;
+    fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier>;
 }
 
 pub trait ComposableProtocol<SP: SessionParameters>: Debug {

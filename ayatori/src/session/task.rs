@@ -1,9 +1,9 @@
-use alloc::vec;
+use alloc::{collections::BTreeSet, format, string::String, sync::Arc, vec, vec::Vec};
 use core::fmt::Debug;
 
 use signature::rand_core::CryptoRngCore;
 
-use super::message::{Message, SignedValue};
+use super::message::{Message, MessageId, SignedValue, VerificationError};
 use crate::{
     error::LocalError,
     protocol::{
@@ -243,4 +243,87 @@ pub(crate) enum TaskResultEnum<Id> {
     ComputeArray { store_in: Tag, id: Id, result: Value },
     UnattributableError { store_in: Tag },
     AttributableError { store_in: Tag, id: Id },
+}
+
+#[derive(Debug)]
+pub struct PreprocessTask<SP: SessionParameters> {
+    message_id: MessageId,
+    message: Message<SP>,
+    participants: Arc<BTreeSet<SP::Verifier>>,
+    local_participants: Arc<BTreeSet<SP::Verifier>>,
+}
+
+impl<SP: SessionParameters> PreprocessTask<SP> {
+    pub(crate) fn new(
+        message_id: MessageId,
+        message: Message<SP>,
+        participants: &Arc<BTreeSet<SP::Verifier>>,
+        local_participants: &Arc<BTreeSet<SP::Verifier>>,
+    ) -> Self {
+        Self {
+            message_id,
+            message,
+            participants: participants.clone(),
+            local_participants: local_participants.clone(),
+        }
+    }
+
+    pub fn execute(self) -> Result<PreprocessResult<SP::Verifier>, LocalError> {
+        for source in self.message.sources() {
+            if !self.participants.contains(source) {
+                return Ok(PreprocessResult(PreprocessResultEnum::MessageError {
+                    message_id: self.message_id,
+                    description: format!("A sender {source:?} is not one of the participants"),
+                }));
+            }
+        }
+
+        if !self.local_participants.contains(self.message.destination()) {
+            return Ok(PreprocessResult(PreprocessResultEnum::MessageError {
+                message_id: self.message_id,
+                description: format!(
+                    "A destination {:?} is not one of the local participants",
+                    self.message.destination()
+                ),
+            }));
+        }
+
+        let mut verified_values = Vec::new();
+
+        for value in self.message.values() {
+            let source = value.source().clone();
+            let verified_value = match value.verify() {
+                Ok(value) => value,
+                Err(VerificationError::Local(error)) => return Err(error),
+                Err(VerificationError::SignatureMismatch) => {
+                    return Ok(PreprocessResult(PreprocessResultEnum::MessageError {
+                        message_id: self.message_id,
+                        description: format!("Verification error for a message from {source:?}"),
+                    }));
+                }
+            };
+
+            let tag = Tag::signed_remote_with_full_name(verified_value.metadata().full_name());
+            verified_values.push((tag, source, Value::new(verified_value)));
+        }
+
+        Ok(PreprocessResult(PreprocessResultEnum::Success {
+            to_store: verified_values,
+        }))
+    }
+}
+
+#[derive(Debug)]
+pub struct PreprocessResult<Id>(PreprocessResultEnum<Id>);
+
+impl<Id> PreprocessResult<Id> {
+    pub(crate) fn into_enum(self) -> PreprocessResultEnum<Id> {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum PreprocessResultEnum<Id> {
+    Success { to_store: Vec<(Tag, Id, Value)> },
+    MessageError { message_id: MessageId, description: String },
 }
