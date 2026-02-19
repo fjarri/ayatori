@@ -125,13 +125,14 @@ impl<SP: SessionParameters> SignedValue<SP> {
         self.verify_inner().is_ok()
     }
 
-    pub fn verify(self) -> Result<VerifiedValue<SP>, VerificationError> {
+    pub fn verify(self, message_id: &MessageId<SP>) -> Result<VerifiedValue<SP>, VerificationError> {
         self.verify_inner()?;
         Ok(VerifiedValue {
             signature: self.signature,
             source: self.source,
             metadata: self.metadata,
             value: self.value,
+            message_id: message_id.clone(),
         })
     }
 
@@ -176,6 +177,7 @@ pub struct VerifiedValue<SP: SessionParameters> {
     source: SP::Verifier,
     metadata: ValueMetadata<SP>,
     value: SerializedValue,
+    message_id: MessageId<SP>,
 }
 
 impl<SP: SessionParameters> VerifiedValue<SP> {

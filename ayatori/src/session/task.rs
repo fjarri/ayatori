@@ -291,7 +291,7 @@ impl<SP: SessionParameters> PreprocessTask<SP> {
 
         for value in self.message.values() {
             let source = value.source().clone();
-            let verified_value = match value.verify() {
+            let verified_value = match value.verify(&message_id) {
                 Ok(value) => value,
                 Err(VerificationError::Local(error)) => return Err(error),
                 Err(VerificationError::SignatureMismatch) => {
