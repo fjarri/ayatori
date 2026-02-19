@@ -32,7 +32,8 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
                 .drain(..)
             {
-                let task = session.preprocess_message(message);
+                let message_with_id = message.attach_id(rng);
+                let task = session.preprocess_message(message_with_id);
                 let result = task.execute()?;
                 session.add_preprocess_result(result)?;
             }

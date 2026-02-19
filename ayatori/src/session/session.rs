@@ -4,7 +4,7 @@ use core::{fmt::Debug, marker::PhantomData};
 use signature::Keypair;
 
 use super::{
-    message::{Message, MessageId},
+    message::MessageWithId,
     ruleset::{Action, Ruleset},
     session_id::SessionId,
     storage::Storage,
@@ -24,7 +24,6 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     storage: Storage<SP::Verifier>,
     participants: Arc<BTreeSet<SP::Verifier>>,
     local_participants: Arc<BTreeSet<SP::Verifier>>,
-    message_id_counter: MessageId,
     phantom: PhantomData<P>,
 }
 
@@ -49,7 +48,6 @@ where
             storage,
             participants,
             local_participants,
-            message_id_counter: 0,
             phantom: PhantomData,
         })
     }
@@ -130,13 +128,11 @@ where
         Ok(None)
     }
 
-    pub fn preprocess_message(&mut self, message: Message<SP>) -> PreprocessTask<SP> {
-        let message_id = self.message_id_counter;
-        self.message_id_counter += 1;
-        PreprocessTask::new(message_id, message, &self.participants, &self.local_participants)
+    pub fn preprocess_message(&mut self, message: MessageWithId<SP>) -> PreprocessTask<SP> {
+        PreprocessTask::new(message, &self.participants, &self.local_participants)
     }
 
-    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP::Verifier>) -> Result<(), LocalError> {
+    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP>) -> Result<(), LocalError> {
         match result.into_enum() {
             PreprocessResultEnum::Success { to_store } => {
                 for (tag, id, value) in to_store {
