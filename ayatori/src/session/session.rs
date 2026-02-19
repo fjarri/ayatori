@@ -132,7 +132,7 @@ where
         PreprocessTask::new(message, &self.participants, &self.local_participants)
     }
 
-    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP>) -> Result<(), SessionError<SP>> {
+    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP>) -> Result<(), PreprocessingError<SP>> {
         match result.into_enum() {
             PreprocessResultEnum::Success { to_store } => {
                 for (tag, id, value) in to_store.iter() {
@@ -149,7 +149,7 @@ where
                             || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
                         {
                             // TODO (#7): to be packed into an evidence.
-                            return Err(SessionError::ConflictingMessages(
+                            return Err(PreprocessingError::ConflictingMessages(
                                 ConflictingMessagesError {
                                     guilty_party: id.clone(),
                                     first: typed_existing_value.clone().unverify(),
@@ -163,7 +163,7 @@ where
                         // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
                         // For now we can only report both message IDs that delivered these values,
                         // and let the user deal with it, if possible.
-                        return Err(SessionError::DuplicateMessages(DuplicateMessagesError {
+                        return Err(PreprocessingError::DuplicateMessages(DuplicateMessagesError {
                             first: typed_existing_value.message_id().clone(),
                             second: typed_existing_value.message_id().clone(),
                         }));
@@ -178,7 +178,7 @@ where
             PreprocessResultEnum::MessageError {
                 message_id,
                 description,
-            } => Err(SessionError::InvalidMessage(InvalidMessageError {
+            } => Err(PreprocessingError::InvalidMessage(InvalidMessageError {
                 message_id,
                 description,
             })),
@@ -217,7 +217,7 @@ where
 }
 
 #[derive(Debug)]
-pub enum SessionError<SP: SessionParameters> {
+pub enum PreprocessingError<SP: SessionParameters> {
     Local(LocalError),
     InvalidMessage(InvalidMessageError<SP>),
     ConflictingMessages(Box<ConflictingMessagesError<SP>>),
@@ -230,13 +230,13 @@ pub struct InvalidMessageError<SP: SessionParameters> {
     pub description: String,
 }
 
-impl<SP: SessionParameters> From<LocalError> for SessionError<SP> {
+impl<SP: SessionParameters> From<LocalError> for PreprocessingError<SP> {
     fn from(source: LocalError) -> Self {
         Self::Local(source)
     }
 }
 
-impl<SP: SessionParameters> From<InvalidMessageError<SP>> for SessionError<SP> {
+impl<SP: SessionParameters> From<InvalidMessageError<SP>> for PreprocessingError<SP> {
     fn from(source: InvalidMessageError<SP>) -> Self {
         Self::InvalidMessage(source)
     }
