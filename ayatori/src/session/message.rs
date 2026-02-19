@@ -15,7 +15,7 @@ use crate::{
     protocol::{FullName, SerializedValue, SessionParameters, WireFormat},
 };
 
-#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValueMetadata<SP: SessionParameters> {
     name: FullName,
     destination: SP::Verifier,
@@ -187,6 +187,10 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
 
     pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
+    }
+
+    pub(crate) fn message_id(&self) -> &MessageId<SP> {
+        &self.message_id
     }
 
     pub(crate) fn serialized_value(&self) -> &SerializedValue {

@@ -5,7 +5,7 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     error::LocalError,
     protocol::{ExecutableProtocol, SessionParameters},
-    session::{Message, Session, Task},
+    session::{Message, Session, SessionError, Task},
 };
 
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
@@ -35,7 +35,20 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 let message_with_id = message.attach_id(rng);
                 let task = session.preprocess_message(message_with_id);
                 let result = task.execute()?;
-                session.add_preprocess_result(result)?;
+                match session.add_preprocess_result(result) {
+                    Ok(()) => {}
+                    Err(SessionError::Local(error)) => return Err(error),
+                    // TODO (#40): record this for the final report instead of terminating straight away
+                    Err(SessionError::InvalidMessage(error)) => {
+                        return Err(LocalError::new(format!("Invalid message: {error:?}")));
+                    }
+                    Err(SessionError::ConflictingMessages(error)) => {
+                        return Err(LocalError::new(format!("Conflicting messages: {error:?}",)));
+                    }
+                    Err(SessionError::DuplicateMessages(error)) => {
+                        return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
+                    }
+                };
             }
 
             if let Some(task) = session.make_task()? {

@@ -264,10 +264,17 @@ fn deserialize<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
 ) -> Result<Value, ComputeError<SP>> {
     let received = args.get::<VerifiedValue<SP>>(arg_name)?;
-    message
+
+    if received.metadata().session_id() != args.session_id() {
+        return Err(ComputeError::sender());
+    }
+
+    let value = message
         .serde_adapter()
         .deserialize(received.serialized_value())
-        .map_err(|_err| ComputeError::<SP>::sender())
+        .map_err(|_err| ComputeError::<SP>::sender())?;
+
+    Ok(value)
 }
 
 pub fn receive_signed<SP: SessionParameters>(

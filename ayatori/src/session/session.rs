@@ -1,10 +1,10 @@
-use alloc::{collections::BTreeSet, format, sync::Arc};
+use alloc::{boxed::Box, collections::BTreeSet, format, string::String, sync::Arc};
 use core::{fmt::Debug, marker::PhantomData};
 
 use signature::Keypair;
 
 use super::{
-    message::MessageWithId,
+    message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
     ruleset::{Action, Ruleset},
     session_id::SessionId,
     storage::Storage,
@@ -132,18 +132,56 @@ where
         PreprocessTask::new(message, &self.participants, &self.local_participants)
     }
 
-    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP>) -> Result<(), LocalError> {
+    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP>) -> Result<(), SessionError<SP>> {
         match result.into_enum() {
             PreprocessResultEnum::Success { to_store } => {
+                for (tag, id, value) in to_store.iter() {
+                    if let Ok(existing_value) = self.storage.get_elem(tag, id) {
+                        let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
+                        let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+
+                        // Both values are signed, contain the same named value, but are different.
+                        // This is a provable failure.
+                        // Note that the payload or metadata of either value may still be invalid
+                        // (it is possible that it has not been checked yet at this point),
+                        // but it does not matter since we already got our evidence.
+                        if typed_existing_value.metadata() != typed_received_value.metadata()
+                            || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
+                        {
+                            // TODO (#7): to be packed into an evidence.
+                            return Err(SessionError::ConflictingMessages(
+                                ConflictingMessagesError {
+                                    guilty_party: id.clone(),
+                                    first: typed_existing_value.clone().unverify(),
+                                    second: typed_received_value.clone().unverify(),
+                                }
+                                .into(),
+                            ));
+                        }
+
+                        // The message is a duplicate, we cannot do anything at this point.
+                        // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
+                        // For now we can only report both message IDs that delivered these values,
+                        // and let the user deal with it, if possible.
+                        return Err(SessionError::DuplicateMessages(DuplicateMessagesError {
+                            first: typed_existing_value.message_id().clone(),
+                            second: typed_existing_value.message_id().clone(),
+                        }));
+                    }
+                }
                 for (tag, id, value) in to_store {
                     self.storage.set_elem(&tag, &id, value)?;
                     self.ruleset.update_with_array_element_ready(&tag, &id);
                 }
                 Ok(())
             }
-            PreprocessResultEnum::MessageError { .. } => {
-                todo!()
-            }
+            PreprocessResultEnum::MessageError {
+                message_id,
+                description,
+            } => Err(SessionError::InvalidMessage(InvalidMessageError {
+                message_id,
+                description,
+            })),
         }
     }
 
@@ -176,4 +214,43 @@ where
         }
         Ok(())
     }
+}
+
+#[derive(Debug)]
+pub enum SessionError<SP: SessionParameters> {
+    Local(LocalError),
+    InvalidMessage(InvalidMessageError<SP>),
+    ConflictingMessages(Box<ConflictingMessagesError<SP>>),
+    DuplicateMessages(DuplicateMessagesError<SP>),
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct InvalidMessageError<SP: SessionParameters> {
+    pub message_id: MessageId<SP>,
+    pub description: String,
+}
+
+impl<SP: SessionParameters> From<LocalError> for SessionError<SP> {
+    fn from(source: LocalError) -> Self {
+        Self::Local(source)
+    }
+}
+
+impl<SP: SessionParameters> From<InvalidMessageError<SP>> for SessionError<SP> {
+    fn from(source: InvalidMessageError<SP>) -> Self {
+        Self::InvalidMessage(source)
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct ConflictingMessagesError<SP: SessionParameters> {
+    pub guilty_party: SP::Verifier,
+    pub first: SignedValue<SP>,
+    pub second: SignedValue<SP>,
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct DuplicateMessagesError<SP: SessionParameters> {
+    pub first: MessageId<SP>,
+    pub second: MessageId<SP>,
 }

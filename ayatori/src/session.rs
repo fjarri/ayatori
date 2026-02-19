@@ -8,6 +8,6 @@ mod storage;
 mod task;
 
 pub use message::{Message, SignedHash, SignedValue, ValueMetadata, VerifiedValue};
-pub use session::Session;
+pub use session::{Session, SessionError};
 pub use session_id::SessionId;
 pub use task::Task;
