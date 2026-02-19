@@ -8,7 +8,7 @@ use super::{
     ruleset::{Action, Ruleset},
     session_id::SessionId,
     storage::Storage,
-    task::{PreprocessResult, PreprocessResultEnum, PreprocessTask, Task, TaskResult, TaskResultEnum},
+    task::{PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
 use crate::{
     error::LocalError,
@@ -128,13 +128,13 @@ where
         Ok(None)
     }
 
-    pub fn preprocess_message(&mut self, message: MessageWithId<SP>) -> PreprocessTask<SP> {
-        PreprocessTask::new(message, &self.participants, &self.local_participants)
+    pub fn preprocess_message(&mut self, message: MessageWithId<SP>) -> PreprocessingTask<SP> {
+        PreprocessingTask::new(message, &self.participants, &self.local_participants)
     }
 
-    pub fn add_preprocess_result(&mut self, result: PreprocessResult<SP>) -> Result<(), PreprocessingError<SP>> {
+    pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
         match result.into_enum() {
-            PreprocessResultEnum::Success { to_store } => {
+            PreprocessingResultEnum::Success { to_store } => {
                 for (tag, id, value) in to_store.iter() {
                     if let Ok(existing_value) = self.storage.get_elem(tag, id) {
                         let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
@@ -175,7 +175,7 @@ where
                 }
                 Ok(())
             }
-            PreprocessResultEnum::MessageError {
+            PreprocessingResultEnum::MessageError {
                 message_id,
                 description,
             } => Err(PreprocessingError::InvalidMessage(InvalidMessageError {

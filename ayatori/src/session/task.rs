@@ -246,13 +246,13 @@ pub(crate) enum TaskResultEnum<Id> {
 }
 
 #[derive(Debug)]
-pub struct PreprocessTask<SP: SessionParameters> {
+pub struct PreprocessingTask<SP: SessionParameters> {
     message: MessageWithId<SP>,
     participants: Arc<BTreeSet<SP::Verifier>>,
     local_participants: Arc<BTreeSet<SP::Verifier>>,
 }
 
-impl<SP: SessionParameters> PreprocessTask<SP> {
+impl<SP: SessionParameters> PreprocessingTask<SP> {
     pub(crate) fn new(
         message: MessageWithId<SP>,
         participants: &Arc<BTreeSet<SP::Verifier>>,
@@ -265,12 +265,12 @@ impl<SP: SessionParameters> PreprocessTask<SP> {
         }
     }
 
-    pub fn execute(self) -> Result<PreprocessResult<SP>, LocalError> {
+    pub fn execute(self) -> Result<PreprocessingResult<SP>, LocalError> {
         let message_id = self.message.id().clone();
 
         for source in self.message.sources() {
             if !self.participants.contains(source) {
-                return Ok(PreprocessResult(PreprocessResultEnum::MessageError {
+                return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
                     message_id,
                     description: format!("A sender {source:?} is not one of the participants"),
                 }));
@@ -278,7 +278,7 @@ impl<SP: SessionParameters> PreprocessTask<SP> {
         }
 
         if !self.local_participants.contains(self.message.destination()) {
-            return Ok(PreprocessResult(PreprocessResultEnum::MessageError {
+            return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
                 message_id,
                 description: format!(
                     "A destination {:?} is not one of the local participants",
@@ -295,7 +295,7 @@ impl<SP: SessionParameters> PreprocessTask<SP> {
                 Ok(value) => value,
                 Err(VerificationError::Local(error)) => return Err(error),
                 Err(VerificationError::SignatureMismatch) => {
-                    return Ok(PreprocessResult(PreprocessResultEnum::MessageError {
+                    return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
                         message_id: message_id.clone(),
                         description: format!("Verification error for a message from {source:?}"),
                     }));
@@ -306,23 +306,23 @@ impl<SP: SessionParameters> PreprocessTask<SP> {
             verified_values.push((tag, source, Value::new(verified_value)));
         }
 
-        Ok(PreprocessResult(PreprocessResultEnum::Success {
+        Ok(PreprocessingResult(PreprocessingResultEnum::Success {
             to_store: verified_values,
         }))
     }
 }
 
 #[derive(Debug)]
-pub struct PreprocessResult<SP: SessionParameters>(PreprocessResultEnum<SP>);
+pub struct PreprocessingResult<SP: SessionParameters>(PreprocessingResultEnum<SP>);
 
-impl<SP: SessionParameters> PreprocessResult<SP> {
-    pub(crate) fn into_enum(self) -> PreprocessResultEnum<SP> {
+impl<SP: SessionParameters> PreprocessingResult<SP> {
+    pub(crate) fn into_enum(self) -> PreprocessingResultEnum<SP> {
         self.0
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum PreprocessResultEnum<SP: SessionParameters> {
+pub(crate) enum PreprocessingResultEnum<SP: SessionParameters> {
     Success {
         to_store: Vec<(Tag, SP::Verifier, Value)>,
     },
