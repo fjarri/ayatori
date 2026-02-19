@@ -5,7 +5,7 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     error::LocalError,
     protocol::{ExecutableProtocol, SessionParameters},
-    session::{AddMessageResult, Message, Session, Task},
+    session::{Message, PreprocessingError, Session, Task},
 };
 
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
@@ -14,7 +14,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 ) -> Result<BTreeMap<SP::Verifier, P::Output>, LocalError> {
     let mut sessions = sessions
         .into_iter()
-        .map(|session| (session.id().clone(), session))
+        .map(|session| (session.verifier(), session))
         .collect::<BTreeMap<_, _>>();
     let mut messages = sessions
         .keys()
@@ -32,12 +32,21 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
                 .drain(..)
             {
-                match session.add_message(message)? {
-                    AddMessageResult::Success => {}
-                    AddMessageResult::InvalidSignature => {
-                        return Err(LocalError::new(format!(
-                            "A message from {id:?} had an invalid signature"
-                        )));
+                let message_with_id = message.attach_id(rng);
+                let task = session.preprocess_message(message_with_id);
+                let result = task.execute()?;
+                match session.add_preprocess_result(result) {
+                    Ok(()) => {}
+                    Err(PreprocessingError::Local(error)) => return Err(error),
+                    // TODO (#40): record this for the final report instead of terminating straight away
+                    Err(PreprocessingError::InvalidMessage(error)) => {
+                        return Err(LocalError::new(format!("Invalid message: {error:?}")));
+                    }
+                    Err(PreprocessingError::ConflictingMessages(error)) => {
+                        return Err(LocalError::new(format!("Conflicting messages: {error:?}",)));
+                    }
+                    Err(PreprocessingError::DuplicateMessages(error)) => {
+                        return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
                     }
                 };
             }

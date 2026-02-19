@@ -1,4 +1,5 @@
 use alloc::{format, vec::Vec};
+use core::fmt::{self, Debug};
 
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{GenericArray014, Hex};
@@ -8,24 +9,30 @@ use signature::{
     rand_core::CryptoRngCore,
 };
 
+use super::session_id::SessionId;
 use crate::{
     error::LocalError,
     protocol::{FullName, SerializedValue, SessionParameters, WireFormat},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValueMetadata<Id> {
+#[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValueMetadata<SP: SessionParameters> {
     name: FullName,
-    destination: Id,
+    destination: SP::Verifier,
+    session_id: SessionId<SP>,
 }
 
-impl<Id> ValueMetadata<Id> {
+impl<SP: SessionParameters> ValueMetadata<SP> {
     pub fn full_name(&self) -> &FullName {
         &self.name
     }
 
-    pub fn destination(&self) -> &Id {
+    pub fn destination(&self) -> &SP::Verifier {
         &self.destination
+    }
+
+    pub fn session_id(&self) -> &SessionId<SP> {
+        &self.session_id
     }
 }
 
@@ -52,7 +59,7 @@ fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::O
 
 fn hash_value_hash_and_metadata<SP: SessionParameters>(
     value_hash: &digest::Output<SP::Digest>,
-    metadata: &ValueMetadata<SP::Verifier>,
+    metadata: &ValueMetadata<SP>,
 ) -> Result<SP::Digest, LocalError> {
     Ok(SP::Digest::new_with_prefix(b"SignedValueDigest")
         .chain_update(<SP::WireFormat as WireFormat>::serialize(metadata)?)
@@ -61,20 +68,19 @@ fn hash_value_hash_and_metadata<SP: SessionParameters>(
 
 fn hash_value_and_metadata<SP: SessionParameters>(
     value: &SerializedValue,
-    metadata: &ValueMetadata<SP::Verifier>,
+    metadata: &ValueMetadata<SP>,
 ) -> Result<SP::Digest, LocalError> {
     let value_hash = hash_serialized_value::<SP::Digest>(value)?;
     hash_value_hash_and_metadata::<SP>(&value_hash, metadata)
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedValue<SP: SessionParameters> {
     signature: SP::Signature,
     // TODO: could be a part of the metadata and thus signed too,
     // but I don't think we get any additional security from it.
     source: SP::Verifier,
-    metadata: ValueMetadata<SP::Verifier>,
+    metadata: ValueMetadata<SP>,
     value: SerializedValue,
 }
 
@@ -82,13 +88,15 @@ impl<SP: SessionParameters> SignedValue<SP> {
     pub(crate) fn new(
         rng: &mut impl CryptoRngCore,
         signer: &SP::Signer,
+        session_id: &SessionId<SP>,
         name: &FullName,
         destination: &SP::Verifier,
         value: SerializedValue,
     ) -> Result<Self, LocalError> {
-        let metadata = ValueMetadata::<SP::Verifier> {
+        let metadata = ValueMetadata {
             name: name.clone(),
             destination: destination.clone(),
+            session_id: session_id.clone(),
         };
         let digest = hash_value_and_metadata::<SP>(&value, &metadata)?;
         let signature = signer
@@ -117,27 +125,27 @@ impl<SP: SessionParameters> SignedValue<SP> {
         self.verify_inner().is_ok()
     }
 
-    pub fn verify(self) -> Result<VerifiedValue<SP>, VerificationError> {
+    pub fn verify(self, message_id: &MessageId<SP>) -> Result<VerifiedValue<SP>, VerificationError> {
         self.verify_inner()?;
         Ok(VerifiedValue {
             signature: self.signature,
             source: self.source,
             metadata: self.metadata,
             value: self.value,
+            message_id: message_id.clone(),
         })
     }
 
-    pub fn metadata(&self) -> &ValueMetadata<SP::Verifier> {
+    pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedHash<SP: SessionParameters> {
     signature: SP::Signature,
     source: SP::Verifier,
-    metadata: ValueMetadata<SP::Verifier>,
+    metadata: ValueMetadata<SP>,
     #[serde(with = "GenericArray014::<Hex>")]
     hash: digest::Output<SP::Digest>,
 }
@@ -147,7 +155,7 @@ impl<SP: SessionParameters> SignedHash<SP> {
         &self.source
     }
 
-    pub fn metadata(&self) -> &ValueMetadata<SP::Verifier> {
+    pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
 
@@ -167,8 +175,9 @@ impl<SP: SessionParameters> SignedHash<SP> {
 pub struct VerifiedValue<SP: SessionParameters> {
     signature: SP::Signature,
     source: SP::Verifier,
-    metadata: ValueMetadata<SP::Verifier>,
+    metadata: ValueMetadata<SP>,
     value: SerializedValue,
+    message_id: MessageId<SP>,
 }
 
 impl<SP: SessionParameters> VerifiedValue<SP> {
@@ -176,8 +185,12 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         &self.source
     }
 
-    pub fn metadata(&self) -> &ValueMetadata<SP::Verifier> {
+    pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
+    }
+
+    pub(crate) fn message_id(&self) -> &MessageId<SP> {
+        &self.message_id
     }
 
     pub(crate) fn serialized_value(&self) -> &SerializedValue {
@@ -224,7 +237,82 @@ impl<SP: SessionParameters> Message<SP> {
         &self.destination
     }
 
+    /// Associates a random ID with the message.
+    ///
+    /// The user is expected to store the ID in association with the message source
+    /// (the nature of which will depend on the transport channel used).
+    /// If there is a problem with the message that cannot be associated with the specific verifier,
+    /// the returned error will contain the ID of the message the information came from.
+    /// Then, the user can use whatever measures necessary towards the associated source.
+    pub fn attach_id(self, rng: &mut impl CryptoRngCore) -> MessageWithId<SP> {
+        let message_id = MessageId::random(rng);
+        MessageWithId {
+            id: message_id,
+            destination: self.destination,
+            values: self.values,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageWithId<SP: SessionParameters> {
+    id: MessageId<SP>,
+    destination: SP::Verifier,
+    values: Vec<SignedValue<SP>>,
+}
+
+impl<SP: SessionParameters> MessageWithId<SP> {
+    pub fn id(&self) -> &MessageId<SP> {
+        &self.id
+    }
+
+    pub(crate) fn sources(&self) -> impl Iterator<Item = &SP::Verifier> {
+        self.values.iter().map(|value| value.source())
+    }
+
     pub(crate) fn values(self) -> impl Iterator<Item = SignedValue<SP>> {
         self.values.into_iter()
     }
+
+    pub fn destination(&self) -> &SP::Verifier {
+        &self.destination
+    }
 }
+
+#[derive(Serialize, Deserialize, PartialOrd, Ord, Hash)]
+#[derive_where::derive_where(Clone, PartialEq, Eq)]
+pub struct MessageId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
+
+impl<SP: SessionParameters> MessageId<SP> {
+    fn random(rng: &mut impl CryptoRngCore) -> Self {
+        let mut buffer = digest::Output::<SP::Digest>::default();
+        rng.fill_bytes(&mut buffer);
+        Self(buffer)
+    }
+}
+
+impl<SP: SessionParameters> Debug for MessageId<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "MessageId({})", hex::encode(self.0.as_ref()))
+    }
+}
+
+/*
+Received message lifecycle:
+
+[unattr] Check the signature correctness
+[de facto unattr] Check that the sender is one of the paricipants
+[unattr] Check that the destination is one of those managed by the session
+
+[attr] Check session_id
+[attr] Check that the name is expected
+[attr] Check that the sender is in expected senders for the name
+[attr]   (and the destination is in expected receivers for the name)
+Check that the value with that name has not been received from that sender yet
+[attr] ... it's a different value
+[unattr] ... it's the same value
+[attr] Check that the value can be deserialized
+
+
+
+*/

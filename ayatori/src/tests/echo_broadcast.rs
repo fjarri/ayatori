@@ -53,7 +53,12 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
         let ethalon = received
             .get(from)
             .expect("we checked that the ID is present in the message map");
+
         if ethalon.metadata().full_name() != message.metadata().full_name() {
+            return Err(ComputeError::sender());
+        }
+
+        if ethalon.metadata().session_id() != message.metadata().session_id() {
             return Err(ComputeError::sender());
         }
 
@@ -159,6 +164,9 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
         shared_data.clone()
     }
+    fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
+        shared_data.ids().cloned().collect()
+    }
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
@@ -199,10 +207,14 @@ fn run_echo_protocol() {
     let party_group = PartyGroup::new(&ids);
 
     let mut rng = ChaCha8Rng::seed_from_u64(123);
+    let session_id = SessionId::random(&mut rng);
 
     let sessions = signers
         .into_iter()
-        .map(|signer| Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(signer, &party_group).unwrap())
+        .map(|signer| {
+            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(session_id.clone(), signer, &party_group)
+                .unwrap()
+        })
         .collect::<Vec<_>>();
     let _results = run_sessions_sync(&mut rng, sessions).unwrap();
 }

@@ -1,263 +1,29 @@
-use alloc::{collections::BTreeMap, format, sync::Arc, vec};
+use alloc::{boxed::Box, collections::BTreeSet, format, string::String, sync::Arc};
 use core::{fmt::Debug, marker::PhantomData};
 
-use signature::{Keypair, rand_core::CryptoRngCore};
+use signature::Keypair;
 
 use super::{
-    message::{Message, SignedValue, VerificationError},
-    ruleset::{Action, Arg, Ruleset},
+    message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
+    ruleset::{Action, Ruleset},
+    session_id::SessionId,
+    storage::Storage,
+    task::{PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
 use crate::{
     error::LocalError,
-    protocol::{
-        Args, ArrayFunction, ComputeError, ComputeErrorEnum, Erasable, ExecutableProtocol, PartyId, ScalarFunction,
-        SessionParameters, Tag, Value, WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction,
-        WrappedScalarFunctionPrivate,
-    },
+    protocol::{Args, ArrayFunction, ExecutableProtocol, ScalarFunction, SessionParameters, Value},
 };
-
-#[derive(Debug)]
-struct Storage<Id> {
-    scalars: BTreeMap<Tag, Value>,
-    mappings: BTreeMap<Tag, BTreeMap<Id, Value>>,
-}
-
-impl<Id: PartyId> Storage<Id> {
-    fn new() -> Self {
-        Self {
-            scalars: BTreeMap::new(),
-            mappings: BTreeMap::new(),
-        }
-    }
-
-    fn contains(&self, tag: &Tag) -> bool {
-        self.scalars.contains_key(tag)
-    }
-
-    fn get(&self, tag: &Tag) -> Result<Value, LocalError> {
-        Ok(self
-            .scalars
-            .get(tag)
-            .ok_or_else(|| LocalError::new(format!("Scalar {tag} not found in storage")))?
-            .clone())
-    }
-
-    fn set(&mut self, tag: &Tag, value: Value) -> Result<(), LocalError> {
-        match self.scalars.insert(tag.clone(), value) {
-            None => Ok(()),
-            Some(_) => Err(LocalError::new(format!("Scalar {tag} already has an associated value"))),
-        }
-    }
-
-    fn get_dict(&self, tag: &Tag) -> Result<&BTreeMap<Id, Value>, LocalError> {
-        self.mappings
-            .get(tag)
-            .ok_or_else(|| LocalError::new(format!("Array {tag} not found in storage")))
-    }
-
-    fn get_dict_as_value(&self, tag: &Tag) -> Result<Value, LocalError> {
-        let dict = self.get_dict(tag)?.clone();
-        Ok(Value::new(dict))
-    }
-
-    fn get_elem(&self, tag: &Tag, id: &Id) -> Result<Value, LocalError> {
-        Ok(self
-            .get_dict(tag)?
-            .get(id)
-            .ok_or_else(|| LocalError::new(format!("{tag}[{id:?}] not found in storage")))?
-            .clone())
-    }
-
-    fn set_elem(&mut self, tag: &Tag, id: &Id, value: Value) -> Result<(), LocalError> {
-        let mapping = self.mappings.entry(tag.clone()).or_default();
-        match mapping.insert(id.clone(), value) {
-            None => Ok(()),
-            Some(_) => Err(LocalError::new(format!(
-                "{tag}[{id:?}] already has an associated value"
-            ))),
-        }
-    }
-}
-
-#[derive(Debug)]
-enum ComputeFunction<SP: SessionParameters> {
-    Scalar {
-        function: WrappedScalarFunction<SP>,
-    },
-    Array {
-        function: WrappedArrayFunction<SP>,
-        id: SP::Verifier,
-    },
-}
-
-#[derive(Debug)]
-pub struct ComputeTask<SP: SessionParameters> {
-    store_in: Tag,
-    function: ComputeFunction<SP>,
-    args: Args<SP>,
-}
-
-impl<SP: SessionParameters> ComputeTask<SP> {
-    pub fn compute(self) -> Result<TaskResult<SP::Verifier>, LocalError> {
-        let store_in = self.store_in.clone();
-        match self.function {
-            ComputeFunction::Scalar { function } => {
-                let result = match function.call(self.args) {
-                    Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
-                };
-                Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
-            }
-            ComputeFunction::Array { function, id } => {
-                let result = match function.call(&id, self.args) {
-                    Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
-                };
-                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum ComputeWithRngFunction<SP: SessionParameters> {
-    Scalar {
-        function: WrappedScalarFunctionPrivate<SP>,
-    },
-    Array {
-        function: WrappedArrayFunctionPrivate<SP>,
-        id: SP::Verifier,
-    },
-}
-
-#[derive(Debug)]
-pub struct ComputeWithRngTask<SP: SessionParameters> {
-    store_in: Tag,
-    function: ComputeWithRngFunction<SP>,
-    args: Args<SP>,
-}
-
-impl<SP: SessionParameters> ComputeWithRngTask<SP> {
-    pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP::Verifier>, LocalError> {
-        let store_in = self.store_in.clone();
-        match self.function {
-            ComputeWithRngFunction::Scalar { function } => {
-                let result = match function.call(rng, self.args) {
-                    Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
-                };
-                Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
-            }
-            ComputeWithRngFunction::Array { function, id } => {
-                let result = match function.call(rng, &id, self.args) {
-                    Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
-                };
-                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct SendTask<SP: SessionParameters> {
-    store_in: Tag,
-    destination: SP::Verifier,
-    signed_value: Value,
-}
-
-impl<SP: SessionParameters> SendTask<SP> {
-    pub fn compute(self) -> Result<(Message<SP>, TaskResult<SP::Verifier>), LocalError> {
-        let signed_value = self.signed_value.downcast::<SignedValue<SP>>()?;
-        let signed_values = vec![signed_value];
-        let message = Message::new(self.destination.clone(), signed_values);
-        let result = TaskResult(TaskResultEnum::Send {
-            store_in: self.store_in.clone(),
-            destination: self.destination.clone(),
-        });
-        Ok((message, result))
-    }
-}
-
-#[derive(Debug)]
-pub struct FinalizeTask {
-    outcome: Value,
-}
-
-impl FinalizeTask {
-    pub fn value<T: Clone + Erasable>(self) -> Result<T, LocalError> {
-        self.outcome.downcast::<T>()
-    }
-}
-
-#[derive(Debug)]
-pub enum Task<SP: SessionParameters> {
-    Send(SendTask<SP>),
-    Compute(ComputeTask<SP>),
-    ComputeWithRng(ComputeWithRngTask<SP>),
-    Finalize(FinalizeTask),
-}
-
-#[derive(Debug)]
-pub struct TaskResult<Id>(TaskResultEnum<Id>);
-
-#[derive(Debug)]
-enum TaskResultEnum<Id> {
-    Send { store_in: Tag, destination: Id },
-    Compute { store_in: Tag, result: Value },
-    ComputeArray { store_in: Tag, id: Id, result: Value },
-    UnattributableError { store_in: Tag },
-    AttributableError { store_in: Tag, id: Id },
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum AddMessageResult {
-    Success,
-    InvalidSignature,
-}
 
 // TODO: do we need to be generic over P here?
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    id: SessionId<SP>,
     signer: Arc<SP::Signer>,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
+    participants: Arc<BTreeSet<SP::Verifier>>,
+    local_participants: Arc<BTreeSet<SP::Verifier>>,
     phantom: PhantomData<P>,
 }
 
@@ -266,7 +32,9 @@ where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
 {
-    pub fn new(signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
+    pub fn new(id: SessionId<SP>, signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
+        let participants = Arc::new(P::all_participants(shared_data));
+        let local_participants = Arc::new(BTreeSet::from([signer.verifying_key()]));
         let inputs = P::make_inputs(shared_data);
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
@@ -274,22 +42,23 @@ where
         let storage = Storage::new();
         let signer = Arc::new(signer);
         Ok(Self {
+            id,
             signer,
             ruleset,
             storage,
+            participants,
+            local_participants,
             phantom: PhantomData,
         })
     }
 
-    pub fn id(&self) -> SP::Verifier {
+    pub fn verifier(&self) -> SP::Verifier {
         self.signer.verifying_key()
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
         if self.storage.contains(self.ruleset.output_tag()) {
-            return Ok(Some(Task::Finalize(FinalizeTask {
-                outcome: self.storage.get(self.ruleset.output_tag())?,
-            })));
+            return Ok(Some(Task::finalize(self.storage.get(self.ruleset.output_tag())?)));
         }
 
         if self.ruleset.is_empty() {
@@ -314,36 +83,21 @@ where
                         self.storage.get(&to_send)
                     }?;
 
-                    return Ok(Some(Task::Send(SendTask {
-                        store_in,
-                        destination: destination.clone(),
-                        signed_value,
-                    })));
+                    return Ok(Some(Task::send(store_in, destination, signed_value)));
                 }
                 Action::ComputeScalar {
                     store_in,
                     function,
                     args,
                 } => {
-                    let arg_values = args
-                        .iter()
-                        .map(|(name, tag)| self.storage.get(tag).map(|value| (name.clone(), value)))
-                        .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
+                    let arg_values = self.storage.get_scalar_args(args)?;
+                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
-                            return Ok(Some(Task::Compute(ComputeTask {
-                                store_in,
-                                function: ComputeFunction::Scalar { function },
-                                args,
-                            })));
+                            return Ok(Some(Task::compute_scalar(store_in, function, args)));
                         }
                         ScalarFunction::Private(function) => {
-                            return Ok(Some(Task::ComputeWithRng(ComputeWithRngTask {
-                                store_in,
-                                function: ComputeWithRngFunction::Scalar { function },
-                                args,
-                            })));
+                            return Ok(Some(Task::compute_scalar_with_rng(store_in, function, args)));
                         }
                     }
                 }
@@ -353,30 +107,14 @@ where
                     index,
                     args,
                 } => {
-                    let arg_values = args
-                        .iter()
-                        .map(|(name, arg)| match arg {
-                            Arg::Scalar(tag) => self.storage.get(tag).map(|value| (name.clone(), value)),
-                            Arg::ArrayElem(tag) => {
-                                self.storage.get_elem(tag, &index).map(|value| (name.clone(), value))
-                            }
-                        })
-                        .collect::<Result<BTreeMap<_, _>, LocalError>>()?;
-                    let args = Args::new(&self.signer, &self.id(), arg_values)?;
+                    let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
+                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
-                            return Ok(Some(Task::Compute(ComputeTask {
-                                store_in,
-                                function: ComputeFunction::Array { function, id: index },
-                                args,
-                            })));
+                            return Ok(Some(Task::compute_array_elem(store_in, index, function, args)));
                         }
                         ArrayFunction::Private(function) => {
-                            return Ok(Some(Task::ComputeWithRng(ComputeWithRngTask {
-                                store_in,
-                                function: ComputeWithRngFunction::Array { function, id: index },
-                                args,
-                            })));
+                            return Ok(Some(Task::compute_array_elem_with_rng(store_in, index, function, args)));
                         }
                     }
                 }
@@ -390,23 +128,65 @@ where
         Ok(None)
     }
 
-    pub fn add_message(&mut self, message: Message<SP>) -> Result<AddMessageResult, LocalError> {
-        for value in message.values() {
-            let verified_value = match value.verify() {
-                Ok(verified_value) => verified_value,
-                Err(VerificationError::Local(error)) => return Err(error),
-                Err(VerificationError::SignatureMismatch) => return Ok(AddMessageResult::InvalidSignature),
-            };
-            let source = verified_value.source().clone();
-            let tag = Tag::signed_remote_with_full_name(verified_value.metadata().full_name());
-            self.storage.set_elem(&tag, &source, Value::new(verified_value))?;
-            self.ruleset.update_with_array_element_ready(&tag, &source);
+    pub fn preprocess_message(&mut self, message: MessageWithId<SP>) -> PreprocessingTask<SP> {
+        PreprocessingTask::new(message, &self.participants, &self.local_participants)
+    }
+
+    pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
+        match result.into_enum() {
+            PreprocessingResultEnum::Success { to_store } => {
+                for (tag, id, value) in to_store.iter() {
+                    if let Ok(existing_value) = self.storage.get_elem(tag, id) {
+                        let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
+                        let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+
+                        // Both values are signed, contain the same named value, but are different.
+                        // This is a provable failure.
+                        // Note that the payload or metadata of either value may still be invalid
+                        // (it is possible that it has not been checked yet at this point),
+                        // but it does not matter since we already got our evidence.
+                        if typed_existing_value.metadata() != typed_received_value.metadata()
+                            || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
+                        {
+                            // TODO (#7): to be packed into an evidence.
+                            return Err(PreprocessingError::ConflictingMessages(
+                                ConflictingMessagesError {
+                                    guilty_party: id.clone(),
+                                    first: typed_existing_value.clone().unverify(),
+                                    second: typed_received_value.clone().unverify(),
+                                }
+                                .into(),
+                            ));
+                        }
+
+                        // The message is a duplicate, we cannot do anything at this point.
+                        // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
+                        // For now we can only report both message IDs that delivered these values,
+                        // and let the user deal with it, if possible.
+                        return Err(PreprocessingError::DuplicateMessages(DuplicateMessagesError {
+                            first: typed_existing_value.message_id().clone(),
+                            second: typed_existing_value.message_id().clone(),
+                        }));
+                    }
+                }
+                for (tag, id, value) in to_store {
+                    self.storage.set_elem(&tag, &id, value)?;
+                    self.ruleset.update_with_array_element_ready(&tag, &id);
+                }
+                Ok(())
+            }
+            PreprocessingResultEnum::MessageError {
+                message_id,
+                description,
+            } => Err(PreprocessingError::InvalidMessage(InvalidMessageError {
+                message_id,
+                description,
+            })),
         }
-        Ok(AddMessageResult::Success)
     }
 
     pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {
-        match result.0 {
+        match result.into_enum() {
             TaskResultEnum::Send { store_in, destination } => {
                 self.storage.set_elem(&store_in, &destination, Value::new(()))?;
                 self.ruleset.update_with_array_element_ready(&store_in, &destination);
@@ -434,4 +214,43 @@ where
         }
         Ok(())
     }
+}
+
+#[derive(Debug)]
+pub enum PreprocessingError<SP: SessionParameters> {
+    Local(LocalError),
+    InvalidMessage(InvalidMessageError<SP>),
+    ConflictingMessages(Box<ConflictingMessagesError<SP>>),
+    DuplicateMessages(DuplicateMessagesError<SP>),
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct InvalidMessageError<SP: SessionParameters> {
+    pub message_id: MessageId<SP>,
+    pub description: String,
+}
+
+impl<SP: SessionParameters> From<LocalError> for PreprocessingError<SP> {
+    fn from(source: LocalError) -> Self {
+        Self::Local(source)
+    }
+}
+
+impl<SP: SessionParameters> From<InvalidMessageError<SP>> for PreprocessingError<SP> {
+    fn from(source: InvalidMessageError<SP>) -> Self {
+        Self::InvalidMessage(source)
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct ConflictingMessagesError<SP: SessionParameters> {
+    pub guilty_party: SP::Verifier,
+    pub first: SignedValue<SP>,
+    pub second: SignedValue<SP>,
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct DuplicateMessagesError<SP: SessionParameters> {
+    pub first: MessageId<SP>,
+    pub second: MessageId<SP>,
 }
