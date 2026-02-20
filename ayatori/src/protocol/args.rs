@@ -71,10 +71,6 @@ impl<SP: SessionParameters> Args<SP> {
             .map(|(id, value)| value.downcast_ref::<T>().map(|value_ref| (id, value_ref)))
             .collect()
     }
-
-    pub fn get_shared_data<T: Erasable>(&self) -> Result<&T, LocalError> {
-        self.get_value("shared_data")?.downcast_ref::<T>()
-    }
 }
 
 #[derive(Debug, Default)]
