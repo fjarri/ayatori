@@ -10,9 +10,9 @@ use super::{
     },
     node::{Node, NodeKind, ProtocolMessage, args_to_owned},
     party::PartyGroup,
-    tag::{FullName, Tag},
+    tag::Tag,
     traits::{ComposableProtocol, SessionParameters},
-    value::{Erasable, SerdeAdapter, Value},
+    value::{Erasable, Value},
 };
 use crate::{
     error::LocalError,
@@ -168,17 +168,16 @@ fn serialize<SP: SessionParameters>(
     id: &SP::Verifier,
     args: Args<SP>,
     arg_name: &str,
-    message_name: &FullName,
-    serde_adapter: &SerdeAdapter<SP::WireFormat>,
+    message: &ProtocolMessage<SP>,
 ) -> Result<Value, ComputeError<SP>> {
     let value = args.get_value(arg_name)?;
-    let serialized_value = serde_adapter.serialize(value)?;
+    let serialized_value = message.serde_adapter().serialize(value)?;
     let mut typed_rng = Rng(rng);
     let signed_value = SignedValue::<SP>::new(
         &mut typed_rng,
         args.signer(),
         args.session_id(),
-        message_name,
+        message.full_name(),
         id,
         serialized_value,
     )?;
@@ -187,16 +186,14 @@ fn serialize<SP: SessionParameters>(
 
 pub(crate) fn serialize_function<SP: SessionParameters>(
     arg_name: &str,
-    store_in: &Tag,
-    adapter: &SerdeAdapter<SP::WireFormat>,
+    message: &ProtocolMessage<SP>,
 ) -> ArrayFunction<SP> {
-    let adapter = adapter.clone();
+    let message = message.clone();
     let arg_name = arg_name.to_string();
-    let message_name = store_in.full_name().clone();
     ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
         "serialize",
         move |rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>| {
-            serialize::<SP>(rng, id, args, &arg_name, &message_name, &adapter)
+            serialize::<SP>(rng, id, args, &arg_name, &message)
         },
     ))
 }
@@ -213,16 +210,16 @@ pub fn broadcast<SP: SessionParameters>(
     }
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(message.name()),
+        Tag::signed_local(message.full_name()),
         NodeKind::Serialize {
             data: scalar.get_strong_ref(),
             group: group.clone(),
-            adapter: message.serde_adapter().clone(),
+            message: message.clone(),
         },
     );
 
     let send_node = Node::new(
-        Tag::sent(message.name()),
+        Tag::sent(message.full_name()),
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group: group.clone(),
@@ -239,16 +236,16 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
         .clone();
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(message.name()),
+        Tag::signed_local(message.full_name()),
         NodeKind::Serialize {
             data: array.get_strong_ref(),
             group: group.clone(),
-            adapter: message.serde_adapter().clone(),
+            message: message.clone(),
         },
     );
 
     let send_node = Node::new(
-        Tag::sent(message.name()),
+        Tag::sent(message.full_name()),
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group,
@@ -282,7 +279,7 @@ pub fn receive_signed<SP: SessionParameters>(
     group: &PartyGroup<SP::Verifier>,
 ) -> Node<SP> {
     Node::new(
-        Tag::signed_remote(message.name()),
+        Tag::signed_remote(message.full_name()),
         NodeKind::Receive {
             group: group.clone(),
             message: message.clone(),
@@ -300,7 +297,7 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
     let arg_name = "_value".to_string();
 
     Ok(Node::new(
-        Tag::received(message.name()),
+        Tag::received(message.full_name()),
         NodeKind::ComputeArray {
             args: [(arg_name.clone(), received.get_strong_ref())].into(),
             function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(

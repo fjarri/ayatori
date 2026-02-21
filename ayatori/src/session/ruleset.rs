@@ -143,7 +143,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         ));
                     }
                 }
-                NodeKind::Serialize { data, group, adapter } => {
+                NodeKind::Serialize { data, group, message } => {
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         if data.group().is_some() {
@@ -158,7 +158,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         }
 
                         let arg_name = "_value";
-                        let function = serialize_function(arg_name, node.store_in(), adapter);
+                        let function = serialize_function(arg_name, message);
                         let data_tag = data.store_in().clone();
                         let arg = if data.group().is_some() {
                             Arg::ArrayElem(data_tag)

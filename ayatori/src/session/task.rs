@@ -302,7 +302,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
                 }
             };
 
-            let tag = Tag::signed_remote_with_full_name(verified_value.metadata().full_name());
+            let tag = Tag::signed_remote(verified_value.metadata().full_name());
             verified_values.push((tag, source, Value::new(verified_value)));
         }
 

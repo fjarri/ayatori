@@ -79,10 +79,6 @@ pub(crate) struct Tag {
 }
 
 impl Tag {
-    pub fn full_name(&self) -> &FullName {
-        &self.full_name
-    }
-
     pub fn with_name(self, name: &str) -> Self {
         Self {
             full_name: self.full_name.with_name(name),
@@ -107,23 +103,15 @@ impl Tag {
         }
     }
 
-    pub fn sent(name: &str) -> Self {
+    pub fn sent(full_name: &FullName) -> Self {
         Self {
-            full_name: FullName::new(name),
+            full_name: full_name.clone(),
             kind: TagKind::Sent,
             collected: false,
         }
     }
 
-    pub fn signed_remote(name: &str) -> Self {
-        Self {
-            full_name: FullName::new(name),
-            kind: TagKind::SignedRemote,
-            collected: false,
-        }
-    }
-
-    pub fn signed_remote_with_full_name(full_name: &FullName) -> Self {
+    pub fn signed_remote(full_name: &FullName) -> Self {
         Self {
             full_name: full_name.clone(),
             kind: TagKind::SignedRemote,
@@ -131,17 +119,17 @@ impl Tag {
         }
     }
 
-    pub fn received(name: &str) -> Self {
+    pub fn received(full_name: &FullName) -> Self {
         Self {
-            full_name: FullName::new(name),
+            full_name: full_name.clone(),
             kind: TagKind::Received,
             collected: false,
         }
     }
 
-    pub fn signed_local(name: &str) -> Self {
+    pub fn signed_local(full_name: &FullName) -> Self {
         Self {
-            full_name: FullName::new(name),
+            full_name: full_name.clone(),
             kind: TagKind::SignedLocal,
             collected: false,
         }
