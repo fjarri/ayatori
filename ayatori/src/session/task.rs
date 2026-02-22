@@ -1,9 +1,9 @@
-use alloc::{format, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec};
 use core::fmt::Debug;
 
 use signature::rand_core::CryptoRngCore;
 
-use super::message::{Message, MessageId, MessageWithId, SignedValue, VerificationError};
+use super::message::{Message, MessageId, SignedValue, VerificationError};
 use super::session::SessionData;
 use crate::{
     error::LocalError,
@@ -248,86 +248,85 @@ pub(crate) enum TaskResultEnum<Id> {
 
 #[derive(Debug)]
 pub struct PreprocessingTask<SP: SessionParameters> {
-    message: MessageWithId<SP>,
     session_data: Arc<SessionData<SP>>,
+    message_id: MessageId<SP>,
+    signed_value: SignedValue<SP>,
 }
 
 impl<SP: SessionParameters> PreprocessingTask<SP> {
-    pub(crate) fn new(message: MessageWithId<SP>, session_data: &Arc<SessionData<SP>>) -> Self {
+    pub(crate) fn new(
+        session_data: &Arc<SessionData<SP>>,
+        message_id: MessageId<SP>,
+        signed_value: SignedValue<SP>,
+    ) -> Self {
         Self {
-            message,
             session_data: session_data.clone(),
+            message_id,
+            signed_value,
         }
     }
 
     pub fn execute(self) -> Result<PreprocessingResult<SP>, LocalError> {
-        // Before storing the message in the database, we check for the failures that are unattributable at this level.
+        // Before storing the value in the database, we check for the failures that are unattributable at this level.
         // In case of a failure all we can do is report the message ID and let the user deal with it
         // if their transport protocol allows it.
 
-        let message_id = self.message.id().clone();
+        let source = self.signed_value.source().clone();
 
-        // Check if all the messages are from the session participants.
-        // If they are not, even if we detect something provably wrong with them,
+        // Check that the value is from one of the session participants.
+        // If it isnot, even if we detect something provably wrong with it,
         // the proof will be useless.
-        for source in self.message.sources() {
-            if !self.session_data.participants.contains(source) {
-                return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
-                    message_id,
-                    description: format!("A sender {source:?} is not one of the participants"),
-                }));
-            }
+        if !self.session_data.participants.contains(self.signed_value.source()) {
+            return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
+                message_id: self.message_id,
+                description: format!("A sender {source:?} is not one of the participants"),
+            }));
         }
 
-        // Check that the messages are sent to correct destinations (the ones this node manages).
-        // If they are not, it may be a replay attack.
+        // Check that the message is addressed to a correct destination (one that this node manages).
+        // If it is not, it may be a replay attack.
         if !self
             .session_data
             .local_participants
-            .contains(self.message.destination())
+            .contains(self.signed_value.metadata().destination())
         {
             return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
-                message_id,
+                message_id: self.message_id,
                 description: format!(
                     "A destination {:?} is not one of the local participants",
-                    self.message.destination()
+                    self.signed_value.metadata().destination()
                 ),
             }));
         }
 
-        // Check that the messages belong to the this session.
-        // If they are not, it may be a replay attack.
-        for value in self.message.values() {
-            if value.metadata().session_id() != &self.session_data.id {
+        // Check that the value belongs to the this session.
+        // If it does not, it may be a replay attack.
+        if self.signed_value.metadata().session_id() != &self.session_data.id {
+            return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
+                message_id: self.message_id,
+                description: "Invalid session ID".into(),
+            }));
+        }
+
+        // Verify the value signature.
+        let verified_value = match self.signed_value.verify(&self.message_id) {
+            Ok(value) => value,
+            Err(VerificationError::Local(error)) => return Err(error),
+            Err(VerificationError::SignatureMismatch) => {
                 return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
-                    message_id,
-                    description: "Invalid session ID".into(),
+                    message_id: self.message_id.clone(),
+                    description: format!("Verification error for a message from {source:?}"),
                 }));
             }
-        }
+        };
 
-        let mut verified_values = Vec::new();
-
-        // Verify the value signatures.
-        for value in self.message.into_values() {
-            let source = value.source().clone();
-            let verified_value = match value.verify(&message_id) {
-                Ok(value) => value,
-                Err(VerificationError::Local(error)) => return Err(error),
-                Err(VerificationError::SignatureMismatch) => {
-                    return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
-                        message_id: message_id.clone(),
-                        description: format!("Verification error for a message from {source:?}"),
-                    }));
-                }
-            };
-
-            let tag = Tag::signed_remote(verified_value.metadata().full_name());
-            verified_values.push((tag, source, Value::new(verified_value)));
-        }
+        let store_in = Tag::signed_remote(verified_value.metadata().full_name());
+        let value = Value::new(verified_value);
 
         Ok(PreprocessingResult(PreprocessingResultEnum::Success {
-            to_store: verified_values,
+            store_in,
+            id: source,
+            value,
         }))
     }
 }
@@ -344,7 +343,9 @@ impl<SP: SessionParameters> PreprocessingResult<SP> {
 #[derive(Debug)]
 pub(crate) enum PreprocessingResultEnum<SP: SessionParameters> {
     Success {
-        to_store: Vec<(Tag, SP::Verifier, Value)>,
+        store_in: Tag,
+        id: SP::Verifier,
+        value: Value,
     },
     MessageError {
         message_id: MessageId<SP>,

@@ -266,20 +266,8 @@ impl<SP: SessionParameters> MessageWithId<SP> {
         &self.id
     }
 
-    pub(crate) fn sources(&self) -> impl Iterator<Item = &SP::Verifier> {
-        self.values.iter().map(|value| value.source())
-    }
-
-    pub(crate) fn values(&self) -> impl Iterator<Item = &SignedValue<SP>> {
-        self.values.iter()
-    }
-
     pub(crate) fn into_values(self) -> impl Iterator<Item = SignedValue<SP>> {
         self.values.into_iter()
-    }
-
-    pub fn destination(&self) -> &SP::Verifier {
-        &self.destination
     }
 }
 

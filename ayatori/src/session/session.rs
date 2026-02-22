@@ -144,51 +144,52 @@ where
         Ok(None)
     }
 
-    pub fn preprocess_message(&mut self, message: MessageWithId<SP>) -> PreprocessingTask<SP> {
-        PreprocessingTask::new(message, &self.data)
+    pub fn preprocess_message(&self, message: MessageWithId<SP>) -> impl Iterator<Item = PreprocessingTask<SP>> {
+        let message_id = message.id().clone();
+        message
+            .into_values()
+            .map(move |value| PreprocessingTask::new(&self.data, message_id.clone(), value))
     }
 
     pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
         match result.into_enum() {
-            PreprocessingResultEnum::Success { to_store } => {
-                for (tag, id, value) in to_store.iter() {
-                    if let Ok(existing_value) = self.storage.get_elem(tag, id) {
-                        let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
-                        let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+            PreprocessingResultEnum::Success { store_in, id, value } => {
+                if let Ok(existing_value) = self.storage.get_elem(&store_in, &id) {
+                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
+                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
 
-                        // Both values are signed, contain the same named value, but are different.
-                        // This is a provable failure.
-                        // Note that the payload or metadata of either value may still be invalid
-                        // (it is possible that it has not been checked yet at this point),
-                        // but it does not matter since we already got our evidence.
-                        if typed_existing_value.metadata() != typed_received_value.metadata()
-                            || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
-                        {
-                            // TODO (#7): to be packed into an evidence.
-                            return Err(PreprocessingError::ConflictingMessages(
-                                ConflictingMessagesError {
-                                    guilty_party: id.clone(),
-                                    first: typed_existing_value.clone().unverify(),
-                                    second: typed_received_value.clone().unverify(),
-                                }
-                                .into(),
-                            ));
-                        }
-
-                        // The message is a duplicate, we cannot do anything at this point.
-                        // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
-                        // For now we can only report both message IDs that delivered these values,
-                        // and let the user deal with it, if possible.
-                        return Err(PreprocessingError::DuplicateMessages(DuplicateMessagesError {
-                            first: typed_existing_value.message_id().clone(),
-                            second: typed_existing_value.message_id().clone(),
-                        }));
+                    // Both values are signed, contain the same named value, but are different.
+                    // This is a provable failure.
+                    // Note that the payload or metadata of either value may still be invalid
+                    // (it is possible that it has not been checked yet at this point),
+                    // but it does not matter since we already got our evidence.
+                    if typed_existing_value.metadata() != typed_received_value.metadata()
+                        || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
+                    {
+                        // TODO (#7): to be packed into an evidence.
+                        return Err(PreprocessingError::ConflictingMessages(
+                            ConflictingMessagesError {
+                                guilty_party: id.clone(),
+                                first: typed_existing_value.clone().unverify(),
+                                second: typed_received_value.clone().unverify(),
+                            }
+                            .into(),
+                        ));
                     }
+
+                    // The message is a duplicate, we cannot do anything at this point.
+                    // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
+                    // For now we can only report both message IDs that delivered these values,
+                    // and let the user deal with it, if possible.
+                    return Err(PreprocessingError::DuplicateMessages(DuplicateMessagesError {
+                        first: typed_existing_value.message_id().clone(),
+                        second: typed_existing_value.message_id().clone(),
+                    }));
                 }
-                for (tag, id, value) in to_store {
-                    self.storage.set_elem(&tag, &id, value)?;
-                    self.ruleset.update_with_array_element_ready(&tag, &id);
-                }
+
+                self.storage.set_elem(&store_in, &id, value)?;
+                self.ruleset.update_with_array_element_ready(&store_in, &id);
+
                 Ok(())
             }
             PreprocessingResultEnum::MessageError {

@@ -33,22 +33,25 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 .drain(..)
             {
                 let message_with_id = message.attach_id(rng);
-                let task = session.preprocess_message(message_with_id);
-                let result = task.execute()?;
-                match session.add_preprocess_result(result) {
-                    Ok(()) => {}
-                    Err(PreprocessingError::Local(error)) => return Err(error),
-                    // TODO (#40): record this for the final report instead of terminating straight away
-                    Err(PreprocessingError::InvalidMessage(error)) => {
-                        return Err(LocalError::new(format!("Invalid message: {error:?}")));
-                    }
-                    Err(PreprocessingError::ConflictingMessages(error)) => {
-                        return Err(LocalError::new(format!("Conflicting messages: {error:?}",)));
-                    }
-                    Err(PreprocessingError::DuplicateMessages(error)) => {
-                        return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
-                    }
-                };
+                let tasks = session.preprocess_message(message_with_id).collect::<Vec<_>>();
+
+                for task in tasks {
+                    let result = task.execute()?;
+                    match session.add_preprocess_result(result) {
+                        Ok(()) => {}
+                        Err(PreprocessingError::Local(error)) => return Err(error),
+                        // TODO (#40): record this for the final report instead of terminating straight away
+                        Err(PreprocessingError::InvalidMessage(error)) => {
+                            return Err(LocalError::new(format!("Invalid message: {error:?}")));
+                        }
+                        Err(PreprocessingError::ConflictingMessages(error)) => {
+                            return Err(LocalError::new(format!("Conflicting messages: {error:?}",)));
+                        }
+                        Err(PreprocessingError::DuplicateMessages(error)) => {
+                            return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
+                        }
+                    };
+                }
             }
 
             if let Some(task) = session.make_task()? {
