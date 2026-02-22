@@ -7,7 +7,7 @@ mod tag;
 mod traits;
 mod value;
 
-pub(crate) use constructors::serialize_function;
+pub(crate) use constructors::{deserialize_function, serialize_function};
 pub(crate) use function::{
     ArrayFunction, ComputeErrorEnum, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
     WrappedScalarFunction, WrappedScalarFunctionPrivate,

@@ -1,4 +1,10 @@
-use alloc::{boxed::Box, collections::BTreeSet, format, string::String, sync::Arc};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+    sync::Arc,
+};
 use core::{fmt::Debug, marker::PhantomData};
 
 use signature::Keypair;
@@ -12,18 +18,24 @@ use super::{
 };
 use crate::{
     error::LocalError,
-    protocol::{Args, ArrayFunction, ExecutableProtocol, ScalarFunction, SessionParameters, Value},
+    protocol::{Args, ArrayFunction, ExecutableProtocol, FullName, ScalarFunction, SessionParameters, Value},
 };
+
+#[derive(Debug)]
+pub(crate) struct SessionData<SP: SessionParameters> {
+    pub(crate) id: SessionId<SP>,
+    pub(crate) signer: SP::Signer,
+    pub(crate) participants: BTreeSet<SP::Verifier>,
+    pub(crate) local_participants: BTreeSet<SP::Verifier>,
+    pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
+}
 
 // TODO: do we need to be generic over P here?
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    id: SessionId<SP>,
-    signer: Arc<SP::Signer>,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
-    participants: Arc<BTreeSet<SP::Verifier>>,
-    local_participants: Arc<BTreeSet<SP::Verifier>>,
+    data: Arc<SessionData<SP>>,
     phantom: PhantomData<P>,
 }
 
@@ -33,27 +45,31 @@ where
     P: ExecutableProtocol<SP>,
 {
     pub fn new(id: SessionId<SP>, signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
-        let participants = Arc::new(P::all_participants(shared_data));
-        let local_participants = Arc::new(BTreeSet::from([signer.verifying_key()]));
+        let participants = P::all_participants(shared_data);
+        let local_participants = BTreeSet::from([signer.verifying_key()]);
         let inputs = P::make_inputs(shared_data);
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
         let ruleset = Ruleset::new(output_node)?;
+        let expected_messages = ruleset.expected_messages().clone();
         let storage = Storage::new();
-        let signer = Arc::new(signer);
-        Ok(Self {
+        let data = Arc::new(SessionData {
             id,
             signer,
-            ruleset,
-            storage,
             participants,
             local_participants,
+            expected_messages,
+        });
+        Ok(Self {
+            ruleset,
+            storage,
+            data,
             phantom: PhantomData,
         })
     }
 
     pub fn verifier(&self) -> SP::Verifier {
-        self.signer.verifying_key()
+        self.data.signer.verifying_key()
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
@@ -91,7 +107,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
-                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::compute_scalar(store_in, function, args)));
@@ -108,7 +124,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
-                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::compute_array_elem(store_in, index, function, args)));
@@ -128,51 +144,52 @@ where
         Ok(None)
     }
 
-    pub fn preprocess_message(&mut self, message: MessageWithId<SP>) -> PreprocessingTask<SP> {
-        PreprocessingTask::new(message, &self.participants, &self.local_participants)
+    pub fn preprocess_message(&self, message: MessageWithId<SP>) -> impl Iterator<Item = PreprocessingTask<SP>> {
+        let message_id = message.id().clone();
+        message
+            .into_values()
+            .map(move |value| PreprocessingTask::new(&self.data, message_id.clone(), value))
     }
 
     pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
         match result.into_enum() {
-            PreprocessingResultEnum::Success { to_store } => {
-                for (tag, id, value) in to_store.iter() {
-                    if let Ok(existing_value) = self.storage.get_elem(tag, id) {
-                        let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
-                        let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+            PreprocessingResultEnum::Success { store_in, id, value } => {
+                if let Ok(existing_value) = self.storage.get_elem(&store_in, &id) {
+                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
+                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
 
-                        // Both values are signed, contain the same named value, but are different.
-                        // This is a provable failure.
-                        // Note that the payload or metadata of either value may still be invalid
-                        // (it is possible that it has not been checked yet at this point),
-                        // but it does not matter since we already got our evidence.
-                        if typed_existing_value.metadata() != typed_received_value.metadata()
-                            || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
-                        {
-                            // TODO (#7): to be packed into an evidence.
-                            return Err(PreprocessingError::ConflictingMessages(
-                                ConflictingMessagesError {
-                                    guilty_party: id.clone(),
-                                    first: typed_existing_value.clone().unverify(),
-                                    second: typed_received_value.clone().unverify(),
-                                }
-                                .into(),
-                            ));
-                        }
-
-                        // The message is a duplicate, we cannot do anything at this point.
-                        // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
-                        // For now we can only report both message IDs that delivered these values,
-                        // and let the user deal with it, if possible.
-                        return Err(PreprocessingError::DuplicateMessages(DuplicateMessagesError {
-                            first: typed_existing_value.message_id().clone(),
-                            second: typed_existing_value.message_id().clone(),
-                        }));
+                    // Both values are signed, contain the same named value, but are different.
+                    // This is a provable failure.
+                    // Note that the payload or metadata of either value may still be invalid
+                    // (it is possible that it has not been checked yet at this point),
+                    // but it does not matter since we already got our evidence.
+                    if typed_existing_value.metadata() != typed_received_value.metadata()
+                        || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
+                    {
+                        // TODO (#7): to be packed into an evidence.
+                        return Err(PreprocessingError::ConflictingMessages(
+                            ConflictingMessagesError {
+                                guilty_party: id.clone(),
+                                first: typed_existing_value.clone().unverify(),
+                                second: typed_received_value.clone().unverify(),
+                            }
+                            .into(),
+                        ));
                     }
+
+                    // The message is a duplicate, we cannot do anything at this point.
+                    // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
+                    // For now we can only report both message IDs that delivered these values,
+                    // and let the user deal with it, if possible.
+                    return Err(PreprocessingError::DuplicateMessages(DuplicateMessagesError {
+                        first: typed_existing_value.message_id().clone(),
+                        second: typed_existing_value.message_id().clone(),
+                    }));
                 }
-                for (tag, id, value) in to_store {
-                    self.storage.set_elem(&tag, &id, value)?;
-                    self.ruleset.update_with_array_element_ready(&tag, &id);
-                }
+
+                self.storage.set_elem(&store_in, &id, value)?;
+                self.ruleset.update_with_array_element_ready(&store_in, &id);
+
                 Ok(())
             }
             PreprocessingResultEnum::MessageError {

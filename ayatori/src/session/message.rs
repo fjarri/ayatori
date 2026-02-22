@@ -266,16 +266,8 @@ impl<SP: SessionParameters> MessageWithId<SP> {
         &self.id
     }
 
-    pub(crate) fn sources(&self) -> impl Iterator<Item = &SP::Verifier> {
-        self.values.iter().map(|value| value.source())
-    }
-
-    pub(crate) fn values(self) -> impl Iterator<Item = SignedValue<SP>> {
+    pub(crate) fn into_values(self) -> impl Iterator<Item = SignedValue<SP>> {
         self.values.into_iter()
-    }
-
-    pub fn destination(&self) -> &SP::Verifier {
-        &self.destination
     }
 }
 
@@ -296,23 +288,3 @@ impl<SP: SessionParameters> Debug for MessageId<SP> {
         write!(f, "MessageId({})", hex::encode(self.0.as_ref()))
     }
 }
-
-/*
-Received message lifecycle:
-
-[unattr] Check the signature correctness
-[de facto unattr] Check that the sender is one of the paricipants
-[unattr] Check that the destination is one of those managed by the session
-
-[attr] Check session_id
-[attr] Check that the name is expected
-[attr] Check that the sender is in expected senders for the name
-[attr]   (and the destination is in expected receivers for the name)
-Check that the value with that name has not been received from that sender yet
-[attr] ... it's a different value
-[unattr] ... it's the same value
-[attr] Check that the value can be deserialized
-
-
-
-*/
