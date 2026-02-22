@@ -54,6 +54,47 @@ struct Rule<SP: SessionParameters> {
     action: Action<SP>,
 }
 
+fn make_compute_array_action<SP: SessionParameters>(
+    store_in: &Tag,
+    id: &SP::Verifier,
+    function: &ArrayFunction<SP>,
+    args: &BTreeMap<String, Node<SP>>,
+) -> (Action<SP>, Condition<SP::Verifier>) {
+    let mut specific_condition = Condition::empty();
+    for arg in args.values() {
+        if arg.group().is_some() {
+            specific_condition.and(LeafCondition::ArrayElement {
+                tag: arg.store_in().clone(),
+                id: id.clone(),
+            });
+        } else {
+            specific_condition.and(LeafCondition::Value {
+                tag: arg.store_in().clone(),
+            });
+        }
+    }
+
+    let action = Action::ComputeArrayElement {
+        store_in: store_in.clone(),
+        function: function.clone(),
+        index: id.clone(),
+        args: args
+            .iter()
+            .map(|(name, arg)| {
+                let tag = arg.store_in().clone();
+                let arg = if arg.group().is_some() {
+                    Arg::ArrayElem(tag)
+                } else {
+                    Arg::Scalar(tag)
+                };
+                (name.clone(), arg)
+            })
+            .collect(),
+    };
+
+    (action, specific_condition)
+}
+
 #[derive(Debug)]
 pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: Tag,
@@ -108,108 +149,23 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 }
                 NodeKind::ComputeArray { function, args, group } => {
                     for id in group.ids() {
-                        let mut specific_condition = Condition::empty();
-                        for arg in args.values() {
-                            if arg.group().is_some() {
-                                specific_condition.and(LeafCondition::ArrayElement {
-                                    tag: arg.store_in().clone(),
-                                    id: id.clone(),
-                                });
-                            } else {
-                                specific_condition.and(LeafCondition::Value {
-                                    tag: arg.store_in().clone(),
-                                });
-                            }
-                        }
-
-                        actions.push((
-                            Action::ComputeArrayElement {
-                                store_in: node.store_in().clone(),
-                                function: function.clone(),
-                                index: id.clone(),
-                                args: args
-                                    .iter()
-                                    .map(|(name, arg)| {
-                                        let tag = arg.store_in().clone();
-                                        let arg = if arg.group().is_some() {
-                                            Arg::ArrayElem(tag)
-                                        } else {
-                                            Arg::Scalar(tag)
-                                        };
-                                        (name.clone(), arg)
-                                    })
-                                    .collect(),
-                            },
-                            specific_condition,
-                        ));
+                        actions.push(make_compute_array_action(node.store_in(), id, function, args));
                     }
                 }
                 NodeKind::Serialize { data, group, message } => {
                     for id in group.ids() {
-                        let mut specific_condition = Condition::empty();
-                        if data.group().is_some() {
-                            specific_condition.and(LeafCondition::ArrayElement {
-                                tag: data.store_in().clone(),
-                                id: id.clone(),
-                            });
-                        } else {
-                            specific_condition.and(LeafCondition::Value {
-                                tag: data.store_in().clone(),
-                            });
-                        }
-
                         let arg_name = "_value";
                         let function = serialize_function(arg_name, message);
-                        let data_tag = data.store_in().clone();
-                        let arg = if data.group().is_some() {
-                            Arg::ArrayElem(data_tag)
-                        } else {
-                            Arg::Scalar(data_tag)
-                        };
-
-                        actions.push((
-                            Action::ComputeArrayElement {
-                                store_in: node.store_in().clone(),
-                                function,
-                                index: id.clone(),
-                                args: [(arg_name.into(), arg)].into(),
-                            },
-                            specific_condition,
-                        ));
+                        let args = BTreeMap::from([(arg_name.into(), data.get_strong_ref())]);
+                        actions.push(make_compute_array_action(node.store_in(), id, &function, &args));
                     }
                 }
                 NodeKind::Deserialize { data, group, message } => {
                     for id in group.ids() {
-                        let mut specific_condition = Condition::empty();
-                        if data.group().is_some() {
-                            specific_condition.and(LeafCondition::ArrayElement {
-                                tag: data.store_in().clone(),
-                                id: id.clone(),
-                            });
-                        } else {
-                            specific_condition.and(LeafCondition::Value {
-                                tag: data.store_in().clone(),
-                            });
-                        }
-
                         let arg_name = "_value";
                         let function = deserialize_function(arg_name, message);
-                        let data_tag = data.store_in().clone();
-                        let arg = if data.group().is_some() {
-                            Arg::ArrayElem(data_tag)
-                        } else {
-                            Arg::Scalar(data_tag)
-                        };
-
-                        actions.push((
-                            Action::ComputeArrayElement {
-                                store_in: node.store_in().clone(),
-                                function,
-                                index: id.clone(),
-                                args: [(arg_name.into(), arg)].into(),
-                            },
-                            specific_condition,
-                        ));
+                        let args = BTreeMap::from([(arg_name.into(), data.get_strong_ref())]);
+                        actions.push(make_compute_array_action(node.store_in(), id, &function, &args));
                     }
                 }
                 NodeKind::DirectMessage { data, group } => {
