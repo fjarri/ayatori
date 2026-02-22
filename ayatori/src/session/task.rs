@@ -1,9 +1,10 @@
-use alloc::{collections::BTreeSet, format, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec, vec::Vec};
 use core::fmt::Debug;
 
 use signature::rand_core::CryptoRngCore;
 
 use super::message::{Message, MessageId, MessageWithId, SignedValue, VerificationError};
+use super::session::SessionData;
 use crate::{
     error::LocalError,
     protocol::{
@@ -248,28 +249,29 @@ pub(crate) enum TaskResultEnum<Id> {
 #[derive(Debug)]
 pub struct PreprocessingTask<SP: SessionParameters> {
     message: MessageWithId<SP>,
-    participants: Arc<BTreeSet<SP::Verifier>>,
-    local_participants: Arc<BTreeSet<SP::Verifier>>,
+    session_data: Arc<SessionData<SP>>,
 }
 
 impl<SP: SessionParameters> PreprocessingTask<SP> {
-    pub(crate) fn new(
-        message: MessageWithId<SP>,
-        participants: &Arc<BTreeSet<SP::Verifier>>,
-        local_participants: &Arc<BTreeSet<SP::Verifier>>,
-    ) -> Self {
+    pub(crate) fn new(message: MessageWithId<SP>, session_data: &Arc<SessionData<SP>>) -> Self {
         Self {
             message,
-            participants: participants.clone(),
-            local_participants: local_participants.clone(),
+            session_data: session_data.clone(),
         }
     }
 
     pub fn execute(self) -> Result<PreprocessingResult<SP>, LocalError> {
+        // Before storing the message in the database, we check for the failures that are unattributable at this level.
+        // In case of a failure all we can do is report the message ID and let the user deal with it
+        // if their transport protocol allows it.
+
         let message_id = self.message.id().clone();
 
+        // Check if all the messages are from the session participants.
+        // If they are not, even if we detect something provably wrong with them,
+        // the proof will be useless.
         for source in self.message.sources() {
-            if !self.participants.contains(source) {
+            if !self.session_data.participants.contains(source) {
                 return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
                     message_id,
                     description: format!("A sender {source:?} is not one of the participants"),
@@ -277,7 +279,13 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             }
         }
 
-        if !self.local_participants.contains(self.message.destination()) {
+        // Check that the messages are sent to correct destinations (the ones this node manages).
+        // If they are not, it may be a replay attack.
+        if !self
+            .session_data
+            .local_participants
+            .contains(self.message.destination())
+        {
             return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
                 message_id,
                 description: format!(
@@ -287,9 +295,21 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             }));
         }
 
+        // Check that the messages belong to the this session.
+        // If they are not, it may be a replay attack.
+        for value in self.message.values() {
+            if value.metadata().session_id() != &self.session_data.id {
+                return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
+                    message_id,
+                    description: "Invalid session ID".into(),
+                }));
+            }
+        }
+
         let mut verified_values = Vec::new();
 
-        for value in self.message.values() {
+        // Verify the value signatures.
+        for value in self.message.into_values() {
             let source = value.source().clone();
             let verified_value = match value.verify(&message_id) {
                 Ok(value) => value,

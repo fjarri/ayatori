@@ -256,14 +256,21 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
 }
 
 fn deserialize<SP: SessionParameters>(
+    id: &SP::Verifier,
     args: Args<SP>,
     arg_name: &str,
     message: &ProtocolMessage<SP>,
 ) -> Result<Value, ComputeError<SP>> {
     let received = args.get::<VerifiedValue<SP>>(arg_name)?;
 
-    if received.metadata().session_id() != args.session_id() {
-        return Err(ComputeError::sender());
+    let expected_senders = args
+        .session_data()
+        .expected_messages
+        .get(message.full_name())
+        .ok_or_else(|| ComputeError::<SP>::sender())?;
+
+    if !expected_senders.contains(id) {
+        return Err(ComputeError::<SP>::sender());
     }
 
     let value = message
@@ -272,6 +279,18 @@ fn deserialize<SP: SessionParameters>(
         .map_err(|_err| ComputeError::<SP>::sender())?;
 
     Ok(value)
+}
+
+pub(crate) fn deserialize_function<SP: SessionParameters>(
+    arg_name: &str,
+    message: &ProtocolMessage<SP>,
+) -> ArrayFunction<SP> {
+    let message = message.clone();
+    let arg_name = arg_name.to_string();
+    ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
+        "deserialize",
+        move |id: &SP::Verifier, args: Args<SP>| deserialize::<SP>(id, args, &arg_name, &message),
+    ))
 }
 
 pub fn receive_signed<SP: SessionParameters>(
@@ -293,18 +312,12 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
         _ => return Err(LocalError::new("The given node must be a Receive node")),
     };
 
-    let cloned_message = message.clone();
-    let arg_name = "_value".to_string();
-
     Ok(Node::new(
         Tag::received(message.full_name()),
-        NodeKind::ComputeArray {
-            args: [(arg_name.clone(), received.get_strong_ref())].into(),
-            function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
-                "deserialize",
-                move |_id: &SP::Verifier, args: Args<SP>| deserialize::<SP>(args, &arg_name, &cloned_message),
-            )),
+        NodeKind::Deserialize {
+            data: received.get_strong_ref(),
             group: group.clone(),
+            message: message.clone(),
         },
     ))
 }

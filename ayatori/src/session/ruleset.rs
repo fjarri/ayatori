@@ -11,7 +11,10 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{ArrayFunction, Node, NodeKind, ScalarFunction, SessionParameters, Tag, serialize_function},
+    protocol::{
+        ArrayFunction, FullName, Node, NodeKind, ScalarFunction, SessionParameters, Tag, deserialize_function,
+        serialize_function,
+    },
 };
 
 #[derive(Debug)]
@@ -55,6 +58,7 @@ struct Rule<SP: SessionParameters> {
 pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: Tag,
     rules: Vec<Rule<SP>>,
+    expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
@@ -62,12 +66,9 @@ impl<SP: SessionParameters> Ruleset<SP> {
         let output_tag = output_node.store_in().clone();
 
         let mut rules = Vec::new();
+        let mut expected_messages = BTreeMap::new();
 
         for node in output_node.flattened(None) {
-            if let NodeKind::Receive { .. } = node.kind() {
-                continue;
-            }
-
             let mut shared_condition = Condition::empty();
 
             for dependency in node.dependencies() {
@@ -177,6 +178,40 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         ));
                     }
                 }
+                NodeKind::Deserialize { data, group, message } => {
+                    for id in group.ids() {
+                        let mut specific_condition = Condition::empty();
+                        if data.group().is_some() {
+                            specific_condition.and(LeafCondition::ArrayElement {
+                                tag: data.store_in().clone(),
+                                id: id.clone(),
+                            });
+                        } else {
+                            specific_condition.and(LeafCondition::Value {
+                                tag: data.store_in().clone(),
+                            });
+                        }
+
+                        let arg_name = "_value";
+                        let function = deserialize_function(arg_name, message);
+                        let data_tag = data.store_in().clone();
+                        let arg = if data.group().is_some() {
+                            Arg::ArrayElem(data_tag)
+                        } else {
+                            Arg::Scalar(data_tag)
+                        };
+
+                        actions.push((
+                            Action::ComputeArrayElement {
+                                store_in: node.store_in().clone(),
+                                function,
+                                index: id.clone(),
+                                args: [(arg_name.into(), arg)].into(),
+                            },
+                            specific_condition,
+                        ));
+                    }
+                }
                 NodeKind::DirectMessage { data, group } => {
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
@@ -211,7 +246,9 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         specific_condition,
                     ));
                 }
-                NodeKind::Receive { .. } => {}
+                NodeKind::Receive { group, message } => {
+                    expected_messages.insert(message.full_name().clone(), group.ids().cloned().collect());
+                }
             }
 
             for (action, specific_condition) in actions {
@@ -221,7 +258,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
         }
 
-        Ok(Self { output_tag, rules })
+        Ok(Self {
+            output_tag,
+            rules,
+            expected_messages,
+        })
     }
 
     pub fn update_with_value_ready(&mut self, tag: &Tag) {
@@ -264,6 +305,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     pub fn output_tag(&self) -> &Tag {
         &self.output_tag
+    }
+
+    pub fn expected_messages(&self) -> &BTreeMap<FullName, BTreeSet<SP::Verifier>> {
+        &self.expected_messages
     }
 }
 

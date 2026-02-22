@@ -295,6 +295,11 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         group: PartyGroup<SP::Verifier>,
         message: ProtocolMessage<SP>,
     },
+    Deserialize {
+        data: Node<SP>,
+        group: PartyGroup<SP::Verifier>,
+        message: ProtocolMessage<SP>,
+    },
     DirectMessage {
         data: Node<SP>,
         group: PartyGroup<SP::Verifier>,
@@ -348,7 +353,12 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                 data,
                 group: _group,
                 message: _message,
-            } => write!(f, "serialize({})", data.store_in()),
+            } => write!(f, "serialize[]({})", data.store_in()),
+            Self::Deserialize {
+                data,
+                group: _group,
+                message: _message,
+            } => write!(f, "deserialize[]({})", data.store_in()),
         }
     }
 }
@@ -359,7 +369,8 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeArray { group, .. }
             | Self::DirectMessage { group, .. }
             | Self::Receive { group, .. }
-            | Self::Serialize { group, .. } => Some(group),
+            | Self::Serialize { group, .. }
+            | Self::Deserialize { group, .. } => Some(group),
             Self::Collect { .. } | Self::ComputeScalar { .. } => None,
         }
     }
@@ -392,6 +403,11 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 group: group.clone(),
                 message: message.clone(),
             },
+            Self::Deserialize { data, group, message } => Self::Deserialize {
+                data: data.get_strong_ref(),
+                group: group.clone(),
+                message: message.clone(),
+            },
         }
     }
 
@@ -400,6 +416,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeScalar { args, .. } | Self::ComputeArray { args, .. } => Box::new(args.values()),
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
             Self::Serialize { data, .. } => Box::new(core::iter::once(data)),
+            Self::Deserialize { data, .. } => Box::new(core::iter::once(data)),
             Self::DirectMessage { data, .. } => Box::new(core::iter::once(data)),
             Self::Receive { .. } => Box::new(core::iter::empty()),
         }
@@ -411,6 +428,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeArray { args, .. } => maybe_replace_map(args, replacements),
             Self::Collect { values, .. } => maybe_replace(values, replacements),
             Self::Serialize { data, .. } => maybe_replace(data, replacements),
+            Self::Deserialize { data, .. } => maybe_replace(data, replacements),
             Self::DirectMessage { data, .. } => maybe_replace(data, replacements),
             Self::Receive { .. } => {}
         }
@@ -423,6 +441,11 @@ impl<SP: SessionParameters> NodeKind<SP> {
             | Self::Collect { .. }
             | Self::DirectMessage { .. } => self,
             Self::Serialize { data, group, message } => Self::Serialize {
+                data,
+                group,
+                message: message.with_prefix(prefix),
+            },
+            Self::Deserialize { data, group, message } => Self::Deserialize {
                 data,
                 group,
                 message: message.with_prefix(prefix),

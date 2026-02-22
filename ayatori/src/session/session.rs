@@ -1,4 +1,10 @@
-use alloc::{boxed::Box, collections::BTreeSet, format, string::String, sync::Arc};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+    sync::Arc,
+};
 use core::{fmt::Debug, marker::PhantomData};
 
 use signature::Keypair;
@@ -12,18 +18,24 @@ use super::{
 };
 use crate::{
     error::LocalError,
-    protocol::{Args, ArrayFunction, ExecutableProtocol, ScalarFunction, SessionParameters, Value},
+    protocol::{Args, ArrayFunction, ExecutableProtocol, FullName, ScalarFunction, SessionParameters, Value},
 };
+
+#[derive(Debug)]
+pub(crate) struct SessionData<SP: SessionParameters> {
+    pub(crate) id: SessionId<SP>,
+    pub(crate) signer: SP::Signer,
+    pub(crate) participants: BTreeSet<SP::Verifier>,
+    pub(crate) local_participants: BTreeSet<SP::Verifier>,
+    pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
+}
 
 // TODO: do we need to be generic over P here?
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    id: SessionId<SP>,
-    signer: Arc<SP::Signer>,
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
-    participants: Arc<BTreeSet<SP::Verifier>>,
-    local_participants: Arc<BTreeSet<SP::Verifier>>,
+    data: Arc<SessionData<SP>>,
     phantom: PhantomData<P>,
 }
 
@@ -33,27 +45,31 @@ where
     P: ExecutableProtocol<SP>,
 {
     pub fn new(id: SessionId<SP>, signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
-        let participants = Arc::new(P::all_participants(shared_data));
-        let local_participants = Arc::new(BTreeSet::from([signer.verifying_key()]));
+        let participants = P::all_participants(shared_data);
+        let local_participants = BTreeSet::from([signer.verifying_key()]);
         let inputs = P::make_inputs(shared_data);
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
         let ruleset = Ruleset::new(output_node)?;
+        let expected_messages = ruleset.expected_messages().clone();
         let storage = Storage::new();
-        let signer = Arc::new(signer);
-        Ok(Self {
+        let data = Arc::new(SessionData {
             id,
             signer,
-            ruleset,
-            storage,
             participants,
             local_participants,
+            expected_messages,
+        });
+        Ok(Self {
+            ruleset,
+            storage,
+            data,
             phantom: PhantomData,
         })
     }
 
     pub fn verifier(&self) -> SP::Verifier {
-        self.signer.verifying_key()
+        self.data.signer.verifying_key()
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
@@ -91,7 +107,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
-                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::compute_scalar(store_in, function, args)));
@@ -108,7 +124,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
-                    let args = Args::new(&self.signer, &self.id, &self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::compute_array_elem(store_in, index, function, args)));
@@ -129,7 +145,7 @@ where
     }
 
     pub fn preprocess_message(&mut self, message: MessageWithId<SP>) -> PreprocessingTask<SP> {
-        PreprocessingTask::new(message, &self.participants, &self.local_participants)
+        PreprocessingTask::new(message, &self.data)
     }
 
     pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
