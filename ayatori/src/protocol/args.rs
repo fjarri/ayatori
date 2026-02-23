@@ -114,6 +114,17 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
         }
         Ok((Self(new_nodes), self.0.into_values().collect()))
     }
+
+    pub(crate) fn merged_with(self, other: Self) -> Result<Self, LocalError> {
+        let mut args = self.0;
+        for (name, arg) in other.0.into_iter() {
+            if args.contains_key(&name) {
+                return Err(LocalError::new(format!("Duplicate argument name: {name}")));
+            }
+            args.insert(name, arg);
+        }
+        Ok(Self(args))
+    }
 }
 
 #[derive(Debug, Default)]

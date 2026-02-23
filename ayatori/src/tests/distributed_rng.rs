@@ -45,10 +45,15 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError
 }
 
 impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
+    type PrivateData = ();
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = u64;
 
-    fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> ProtocolArgs<SP> {
+        ProtocolArgs::new()
+    }
+
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
         ProtocolArgs::new()
     }
 
@@ -107,8 +112,13 @@ fn run_protocol() {
     let sessions = signers
         .into_iter()
         .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, DistributedRNG>::new(session_id.clone(), signer, &party_group)
-                .unwrap()
+            Session::<TestSessionParams<BinaryFormat>, DistributedRNG>::new(
+                session_id.clone(),
+                signer,
+                &(),
+                &party_group,
+            )
+            .unwrap()
         })
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();

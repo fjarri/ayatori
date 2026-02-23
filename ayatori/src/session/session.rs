@@ -44,10 +44,17 @@ where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
 {
-    pub fn new(id: SessionId<SP>, signer: SP::Signer, shared_data: &P::SharedData) -> Result<Self, LocalError> {
+    pub fn new(
+        id: SessionId<SP>,
+        signer: SP::Signer,
+        private_data: &P::PrivateData,
+        shared_data: &P::SharedData,
+    ) -> Result<Self, LocalError> {
         let participants = P::all_participants(shared_data);
         let local_participants = BTreeSet::from([signer.verifying_key()]);
-        let inputs = P::make_inputs(shared_data);
+        let public_inputs = P::make_public_inputs(shared_data);
+        let private_inputs = P::make_private_inputs(private_data);
+        let inputs = public_inputs.merged_with(private_inputs)?;
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
         let ruleset = Ruleset::new(output_node)?;

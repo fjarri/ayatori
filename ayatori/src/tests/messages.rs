@@ -62,14 +62,22 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError<
 }
 
 impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
+    type PrivateData = ();
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
-    fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
+
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> ProtocolArgs<SP> {
         ProtocolArgs::new()
     }
+
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
+        ProtocolArgs::new()
+    }
+
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
         shared_data.clone()
     }
+
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
         shared_data.ids().cloned().collect()
     }
@@ -124,7 +132,7 @@ fn run_messages_protocol() {
     let sessions = signers
         .into_iter()
         .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(session_id.clone(), signer, &party_group)
+            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(session_id.clone(), signer, &(), &party_group)
                 .unwrap()
         })
         .collect::<Vec<_>>();

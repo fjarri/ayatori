@@ -55,10 +55,12 @@ pub trait SessionParameters: 'static {
 
 pub trait ExecutableProtocol<SP: SessionParameters>: Debug + ComposableProtocol<SP> {
     type SharedData;
+    type PrivateData;
     // TODO: we may not need `Clone` here
     type Output: Clone + Erasable;
 
-    fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP>;
+    fn make_public_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP>;
+    fn make_private_inputs(private_data: &Self::PrivateData) -> ProtocolArgs<SP>;
     fn make_build_data(shared_data: &Self::SharedData) -> <Self as ComposableProtocol<SP>>::BuildData;
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier>;
 }
