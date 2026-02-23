@@ -49,12 +49,12 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = u64;
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new()
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+        PrivateInputs::new()
     }
 
-    fn make_public_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new()
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs<SP> {
+        PublicInputs::new()
     }
 
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {

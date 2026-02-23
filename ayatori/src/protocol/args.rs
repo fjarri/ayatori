@@ -78,9 +78,9 @@ impl<SP: SessionParameters> Args<SP> {
 }
 
 #[derive(Debug, Default)]
-pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+pub struct PrivateInputs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
 
-impl<SP: SessionParameters> ProtocolArgs<SP> {
+impl<SP: SessionParameters> PrivateInputs<SP> {
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
@@ -90,8 +90,32 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
         args.insert(name.to_string(), constant(name, value));
         Self(args)
     }
+}
 
-    pub fn input_node(self, name: &str, value: &Node<SP>) -> Self {
+#[derive(Debug, Default)]
+pub struct PublicInputs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+
+impl<SP: SessionParameters> PublicInputs<SP> {
+    pub fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
+        let mut args = self.0;
+        args.insert(name.to_string(), constant(name, value));
+        Self(args)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+
+impl<SP: SessionParameters> ProtocolArgs<SP> {
+    pub fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub fn input(self, name: &str, value: &Node<SP>) -> Self {
         let mut args = self.0;
         args.insert(name.to_string(), value.get_strong_ref());
         Self(args)
@@ -115,9 +139,12 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
         Ok((Self(new_nodes), self.0.into_values().collect()))
     }
 
-    pub(crate) fn merged_with(self, other: Self) -> Result<Self, LocalError> {
-        let mut args = self.0;
-        for (name, arg) in other.0.into_iter() {
+    pub(crate) fn new_from_inputs(
+        private_inputs: PrivateInputs<SP>,
+        public_inputs: PublicInputs<SP>,
+    ) -> Result<Self, LocalError> {
+        let mut args = private_inputs.0;
+        for (name, arg) in public_inputs.0.into_iter() {
             if args.contains_key(&name) {
                 return Err(LocalError::new(format!("Duplicate argument name: {name}")));
             }

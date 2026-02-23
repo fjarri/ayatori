@@ -66,12 +66,12 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new()
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+        PrivateInputs::new()
     }
 
-    fn make_public_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new()
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs<SP> {
+        PublicInputs::new()
     }
 
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {

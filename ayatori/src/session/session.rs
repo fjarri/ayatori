@@ -18,7 +18,9 @@ use super::{
 };
 use crate::{
     error::LocalError,
-    protocol::{Args, ArrayFunction, ExecutableProtocol, FullName, ScalarFunction, SessionParameters, Value},
+    protocol::{
+        Args, ArrayFunction, ExecutableProtocol, FullName, ProtocolArgs, ScalarFunction, SessionParameters, Value,
+    },
 };
 
 #[derive(Debug)]
@@ -54,9 +56,9 @@ where
         let local_participants = BTreeSet::from([signer.verifying_key()]);
         let public_inputs = P::make_public_inputs(shared_data);
         let private_inputs = P::make_private_inputs(private_data);
-        let inputs = public_inputs.merged_with(private_inputs)?;
+        let protocol_args = ProtocolArgs::new_from_inputs(private_inputs, public_inputs)?;
         let build_data = P::make_build_data(shared_data);
-        let output_node = P::build(&signer.verifying_key(), &build_data, inputs)?;
+        let output_node = P::build(&signer.verifying_key(), &build_data, protocol_args)?;
         let ruleset = Ruleset::new(output_node)?;
         let expected_messages = ruleset.expected_messages().clone();
         let storage = Storage::new();

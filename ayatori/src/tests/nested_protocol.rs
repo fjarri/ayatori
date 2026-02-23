@@ -78,12 +78,12 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol1 {
     type SharedData = Protocol1SharedData<SP>;
     type Output = u64;
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new()
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+        PrivateInputs::new()
     }
 
-    fn make_public_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new().input("p1", shared_data.p1)
+    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs<SP> {
+        PublicInputs::new().input("p1", shared_data.p1)
     }
 
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
@@ -119,7 +119,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
 
         let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", &all_x)])?;
 
-        let args = ProtocolArgs::new().input_node("p2", &p1_sum);
+        let args = ProtocolArgs::new().input("p2", &p1_sum);
         call_protocol::<SP, Protocol2>("protocol2", my_id, build_data, args)
     }
 }
