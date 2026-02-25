@@ -1,7 +1,7 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
-    fmt::{self, Display},
+    fmt::{self, Display, Write},
     format,
     string::{String, ToString},
     sync::Arc,
@@ -87,8 +87,12 @@ impl<SP: SessionParameters> Node<SP> {
         Self::new_typed(self.unwrap_or_shallow_clone().with_added_prefix(prefix))
     }
 
-    pub fn shallow_display(&self) -> String {
-        format!("{}", self.0.as_ref())
+    pub fn display_tree(&self) -> String {
+        let mut s = String::new();
+        for node in self.flattened(None) {
+            writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
+        }
+        s
     }
 
     /// Returns the list of nodes consisting of `self` and all its subtree
@@ -149,10 +153,7 @@ impl<SP: SessionParameters> Node<SP> {
 
 impl<SP: SessionParameters> Display for Node<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        for node in self.flattened(None) {
-            writeln!(f, "{}", node.shallow_display())?;
-        }
-        Ok(())
+        write!(f, "{}", self.0.as_ref())
     }
 }
 

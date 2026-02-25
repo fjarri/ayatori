@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest};
 
 use super::{
-    args::{ProtocolArgs, ProtocolSignature},
+    args::{PrivateInputs, ProtocolArgs, ProtocolSignature, PublicInputs},
     node::Node,
     value::Erasable,
 };
@@ -55,10 +55,12 @@ pub trait SessionParameters: 'static {
 
 pub trait ExecutableProtocol<SP: SessionParameters>: Debug + ComposableProtocol<SP> {
     type SharedData;
+    type PrivateData;
     // TODO: we may not need `Clone` here
     type Output: Clone + Erasable;
 
-    fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP>;
+    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs<SP>;
+    fn make_private_inputs(private_data: &Self::PrivateData) -> PrivateInputs<SP>;
     fn make_build_data(shared_data: &Self::SharedData) -> <Self as ComposableProtocol<SP>>::BuildData;
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier>;
 }

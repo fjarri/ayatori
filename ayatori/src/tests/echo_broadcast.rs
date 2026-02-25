@@ -156,14 +156,22 @@ fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError<
 }
 
 impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
+    type PrivateData = ();
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
-    fn make_inputs(_shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new()
+
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+        PrivateInputs::new()
     }
+
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs<SP> {
+        PublicInputs::new()
+    }
+
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
         shared_data.clone()
     }
+
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
         shared_data.ids().cloned().collect()
     }
@@ -191,7 +199,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             "echo_x",
             my_id,
             &(message_x, all_parties.clone()),
-            ProtocolArgs::new().input_node("value", &my_x),
+            ProtocolArgs::new().input("value", &my_x),
         )?;
 
         let all_x = collect(&x)?;
@@ -212,7 +220,7 @@ fn run_echo_protocol() {
     let sessions = signers
         .into_iter()
         .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(session_id.clone(), signer, &party_group)
+            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(session_id.clone(), signer, &(), &party_group)
                 .unwrap()
         })
         .collect::<Vec<_>>();

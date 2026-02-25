@@ -12,12 +12,6 @@ use signature::{Keypair, rand_core::SeedableRng};
 #[derive(Debug)]
 struct Protocol2;
 
-#[derive(Debug, Clone)]
-struct Protocol2SharedData<SP: SessionParameters> {
-    p1: u64,
-    party_group: PartyGroup<SP::Verifier>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Protocol2Message(u64);
 
@@ -29,23 +23,6 @@ fn make_protocol2_value<SP: SessionParameters>(args: Args<SP>) -> Result<Protoco
 fn make_protocol2_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError<SP>> {
     let xs = args.get_map::<Protocol2Message>("x")?;
     Ok(xs.values().map(|message| message.0).sum())
-}
-
-impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol2 {
-    type SharedData = Protocol2SharedData<SP>;
-    type Output = u64;
-
-    fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new().input("p2", shared_data.p1)
-    }
-
-    fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
-        shared_data.party_group.clone()
-    }
-
-    fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.party_group.ids().cloned().collect()
-    }
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
@@ -97,11 +74,16 @@ fn make_protocol1_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, C
 }
 
 impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol1 {
+    type PrivateData = ();
     type SharedData = Protocol1SharedData<SP>;
     type Output = u64;
 
-    fn make_inputs(shared_data: &Self::SharedData) -> ProtocolArgs<SP> {
-        ProtocolArgs::new().input("p1", shared_data.p1)
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+        PrivateInputs::new()
+    }
+
+    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs<SP> {
+        PublicInputs::new().input("p1", shared_data.p1)
     }
 
     fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
@@ -137,7 +119,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
 
         let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", &all_x)])?;
 
-        let args = ProtocolArgs::new().input_node("p2", &p1_sum);
+        let args = ProtocolArgs::new().input("p2", &p1_sum);
         call_protocol::<SP, Protocol2>("protocol2", my_id, build_data, args)
     }
 }
@@ -157,7 +139,7 @@ fn run_protocol() {
     let sessions = signers
         .into_iter()
         .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, Protocol1>::new(session_id.clone(), signer, &shared_data)
+            Session::<TestSessionParams<BinaryFormat>, Protocol1>::new(session_id.clone(), signer, &(), &shared_data)
                 .unwrap()
         })
         .collect::<Vec<_>>();
