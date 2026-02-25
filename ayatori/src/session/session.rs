@@ -116,7 +116,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
-                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
+                    let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
                     match function {
                         ScalarFunction::Public(function) => {
                             return Ok(Some(Task::compute_scalar(store_in, function, args)));
@@ -133,7 +133,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
-                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
+                    let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
                     match function {
                         ArrayFunction::Public(function) => {
                             return Ok(Some(Task::compute_array_elem(store_in, index, function, args)));

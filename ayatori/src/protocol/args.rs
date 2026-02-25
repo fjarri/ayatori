@@ -11,6 +11,7 @@ use itertools::Itertools;
 use super::{
     constructors::{alias, constant},
     node::Node,
+    tag::FullName,
     traits::SessionParameters,
     value::{Erasable, Value},
 };
@@ -21,6 +22,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Args<SP: SessionParameters> {
+    store_in_name: FullName,
     session_data: Arc<SessionData<SP>>,
     my_id: SP::Verifier,
     values: BTreeMap<String, Value>,
@@ -28,15 +30,21 @@ pub struct Args<SP: SessionParameters> {
 
 impl<SP: SessionParameters> Args<SP> {
     pub(crate) fn new(
+        store_in_name: &FullName,
         session_data: &Arc<SessionData<SP>>,
         my_id: &SP::Verifier,
         values: BTreeMap<String, Value>,
     ) -> Result<Self, LocalError> {
         Ok(Self {
+            store_in_name: store_in_name.clone(),
             session_data: session_data.clone(),
             my_id: my_id.clone(),
             values,
         })
+    }
+
+    pub(crate) fn store_in_name(&self) -> &FullName {
+        &self.store_in_name
     }
 
     pub(crate) fn session_data(&self) -> &SessionData<SP> {

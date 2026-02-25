@@ -11,10 +11,7 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{
-        ArrayFunction, FullName, Node, NodeKind, ScalarFunction, SessionParameters, Tag, deserialize_function,
-        serialize_function,
-    },
+    protocol::{ArrayFunction, FullName, Node, NodeKind, ScalarFunction, SessionParameters, Tag},
 };
 
 #[derive(Debug)]
@@ -150,22 +147,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 NodeKind::ComputeArray { function, args, group } => {
                     for id in group.ids() {
                         actions.push(make_compute_array_action(node.store_in(), id, function, args));
-                    }
-                }
-                NodeKind::Serialize { data, group, message } => {
-                    for id in group.ids() {
-                        let arg_name = "_value";
-                        let function = serialize_function(arg_name, message);
-                        let args = BTreeMap::from([(arg_name.into(), data.get_strong_ref())]);
-                        actions.push(make_compute_array_action(node.store_in(), id, &function, &args));
-                    }
-                }
-                NodeKind::Deserialize { data, group, message } => {
-                    for id in group.ids() {
-                        let arg_name = "_value";
-                        let function = deserialize_function(arg_name, message);
-                        let args = BTreeMap::from([(arg_name.into(), data.get_strong_ref())]);
-                        actions.push(make_compute_array_action(node.store_in(), id, &function, &args));
                     }
                 }
                 NodeKind::DirectMessage { data, group } => {

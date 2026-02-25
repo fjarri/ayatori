@@ -79,6 +79,10 @@ pub(crate) struct Tag {
 }
 
 impl Tag {
+    pub fn full_name(&self) -> &FullName {
+        &self.full_name
+    }
+
     pub fn with_name(self, name: &str) -> Self {
         Self {
             full_name: self.full_name.with_name(name),
