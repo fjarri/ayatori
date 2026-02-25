@@ -106,11 +106,15 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
 
         let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echo");
         let all_values_verified = collect(&values_verified)?;
+        let all_values_deserialized = collect(&values)?;
+
         let my_echo_pack_sendable = compute_scalar(
             "my_echo_pack_signed",
             prepare_echo_pack,
             &[("values_verified_map", &all_values_verified)],
-        )?;
+        )?
+        // We don't want to send out values that proved to be incorrect during deserialization checks.
+        .with_dependencies(&[&all_values_deserialized]);
 
         let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties)?;
         let echo_pack = receive(&message_echo, all_parties)?;
