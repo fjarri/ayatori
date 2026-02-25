@@ -6,6 +6,8 @@ use core::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::LocalError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TagKind {
     /// A locally computed value coming from an explicit computation/verification node
@@ -107,34 +109,48 @@ impl Tag {
         }
     }
 
-    pub fn sent(full_name: &FullName) -> Self {
+    pub fn signed_remote(name: &str) -> Self {
         Self {
-            full_name: full_name.clone(),
-            kind: TagKind::Sent,
-            collected: false,
-        }
-    }
-
-    pub fn signed_remote(full_name: &FullName) -> Self {
-        Self {
-            full_name: full_name.clone(),
+            full_name: FullName::new(name),
             kind: TagKind::SignedRemote,
             collected: false,
         }
     }
 
-    pub fn received(full_name: &FullName) -> Self {
+    pub fn signed_local(name: &str) -> Self {
         Self {
-            full_name: full_name.clone(),
-            kind: TagKind::Received,
+            full_name: FullName::new(name),
+            kind: TagKind::SignedLocal,
             collected: false,
         }
     }
 
-    pub fn signed_local(full_name: &FullName) -> Self {
+    pub fn to_received(&self) -> Result<Self, LocalError> {
+        if self.kind != TagKind::SignedRemote {
+            return Err(LocalError::new("Only SignedRemote tags can be converted to Received"));
+        }
+        Ok(Self {
+            full_name: self.full_name.clone(),
+            kind: TagKind::Received,
+            collected: false,
+        })
+    }
+
+    pub fn to_sent(&self) -> Result<Self, LocalError> {
+        if self.kind != TagKind::SignedLocal {
+            return Err(LocalError::new("Only SignedLocal tags can be converted to Sent"));
+        }
+        Ok(Self {
+            full_name: self.full_name.clone(),
+            kind: TagKind::Sent,
+            collected: false,
+        })
+    }
+
+    pub fn signed_remote_with_full_name(full_name: &FullName) -> Self {
         Self {
             full_name: full_name.clone(),
-            kind: TagKind::SignedLocal,
+            kind: TagKind::SignedRemote,
             collected: false,
         }
     }

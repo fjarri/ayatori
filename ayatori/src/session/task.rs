@@ -320,7 +320,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             }
         };
 
-        let store_in = Tag::signed_remote(verified_value.metadata().full_name());
+        let store_in = Tag::signed_remote_with_full_name(verified_value.metadata().full_name());
         let value = Value::new(verified_value);
 
         Ok(PreprocessingResult(PreprocessingResultEnum::Success {

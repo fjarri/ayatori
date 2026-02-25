@@ -11,14 +11,13 @@ use alloc::{
 use core::fmt::Debug;
 
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 
 use super::{
     function::{ArrayFunction, ScalarFunction},
     party::PartyGroup,
     tag::{FullName, Tag},
     traits::SessionParameters,
-    value::{Erasable, SerdeAdapter},
+    value::SerdeAdapter,
 };
 use crate::error::LocalError;
 
@@ -250,37 +249,6 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 }
 
 #[derive(Debug)]
-#[derive_where::derive_where(Clone)]
-pub struct ProtocolMessage<SP: SessionParameters> {
-    name: FullName,
-    serde_adapter: SerdeAdapter<SP::WireFormat>,
-}
-
-impl<SP: SessionParameters> ProtocolMessage<SP> {
-    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
-        Self {
-            name: FullName::new(name),
-            serde_adapter: SerdeAdapter::new::<T>(),
-        }
-    }
-
-    pub(crate) fn full_name(&self) -> &FullName {
-        &self.name
-    }
-
-    pub(crate) fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
-        &self.serde_adapter
-    }
-
-    pub(crate) fn with_prefix(self, prefix: &str) -> Self {
-        Self {
-            name: self.name.with_added_prefix(prefix),
-            serde_adapter: self.serde_adapter,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
         function: ScalarFunction<SP>,
@@ -301,7 +269,8 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
     },
     Receive {
         group: PartyGroup<SP::Verifier>,
-        message: ProtocolMessage<SP>,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
 }
 
@@ -338,7 +307,8 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             }
             Self::Receive {
                 group: _group,
-                message: _message,
+                message_name: _message_name,
+                serde_adapter: _serde_adapter,
             } => write!(f, "receive()"),
         }
     }
@@ -373,9 +343,14 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 values: values.get_strong_ref(),
                 group: group.clone(),
             },
-            Self::Receive { group, message } => Self::Receive {
+            Self::Receive {
+                group,
+                message_name,
+                serde_adapter,
+            } => Self::Receive {
                 group: group.clone(),
-                message: message.clone(),
+                message_name: message_name.clone(),
+                serde_adapter: serde_adapter.clone(),
             },
         }
     }
@@ -405,9 +380,14 @@ impl<SP: SessionParameters> NodeKind<SP> {
             | Self::ComputeArray { .. }
             | Self::Collect { .. }
             | Self::DirectMessage { .. } => self,
-            Self::Receive { message, group } => Self::Receive {
-                message: message.with_prefix(prefix),
+            Self::Receive {
                 group,
+                message_name,
+                serde_adapter,
+            } => Self::Receive {
+                message_name: message_name.with_added_prefix(prefix),
+                group,
+                serde_adapter,
             },
         }
     }

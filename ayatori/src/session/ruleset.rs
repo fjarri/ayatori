@@ -183,8 +183,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         specific_condition,
                     ));
                 }
-                NodeKind::Receive { group, message } => {
-                    expected_messages.insert(message.full_name().clone(), group.ids().cloned().collect());
+                NodeKind::Receive {
+                    group,
+                    message_name,
+                    serde_adapter: _serde_adapter,
+                } => {
+                    expected_messages.insert(message_name.clone(), group.ids().cloned().collect());
                 }
             }
 

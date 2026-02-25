@@ -1,5 +1,10 @@
-use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    vec::Vec,
+};
 
+use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
@@ -8,9 +13,9 @@ use super::{
         ArrayFunction, ComputeError, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
         WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
-    node::{Node, NodeKind, ProtocolMessage, args_to_owned},
+    node::{Node, NodeKind, args_to_owned},
     party::PartyGroup,
-    tag::Tag,
+    tag::{FullName, Tag},
     traits::{ComposableProtocol, SessionParameters},
     value::{Erasable, SerdeAdapter, Value},
 };
@@ -18,6 +23,30 @@ use crate::{
     error::LocalError,
     session::{SignedValue, VerifiedValue},
 };
+
+#[derive(Debug)]
+#[derive_where::derive_where(Clone)]
+pub struct ProtocolMessage<SP: SessionParameters> {
+    name: String,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+}
+
+impl<SP: SessionParameters> ProtocolMessage<SP> {
+    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            serde_adapter: SerdeAdapter::new::<T>(),
+        }
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
+        &self.serde_adapter
+    }
+}
 
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
@@ -198,9 +227,10 @@ pub fn broadcast<SP: SessionParameters>(
     let arg_name = "_value".to_string();
     let serde_adapter = message.serde_adapter().clone();
     let args = [(arg_name.clone(), scalar.get_strong_ref())].into();
+    let tag = Tag::signed_local(message.name());
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(message.full_name()),
+        tag.clone(),
         NodeKind::ComputeArray {
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
@@ -212,7 +242,7 @@ pub fn broadcast<SP: SessionParameters>(
     );
 
     let send_node = Node::new(
-        Tag::sent(message.full_name()),
+        tag.to_sent()?,
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group: group.clone(),
@@ -231,9 +261,10 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
     let arg_name = "_value".to_string();
     let serde_adapter = message.serde_adapter().clone();
     let args = [(arg_name.clone(), array.get_strong_ref())].into();
+    let tag = Tag::signed_local(message.name());
 
     let serialize_and_sign = Node::new(
-        Tag::signed_local(message.full_name()),
+        tag.clone(),
         NodeKind::ComputeArray {
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
@@ -245,7 +276,7 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
     );
 
     let send_node = Node::new(
-        Tag::sent(message.full_name()),
+        tag.to_sent()?,
         NodeKind::DirectMessage {
             data: serialize_and_sign,
             group,
@@ -285,26 +316,29 @@ pub fn receive_signed<SP: SessionParameters>(
     group: &PartyGroup<SP::Verifier>,
 ) -> Node<SP> {
     Node::new(
-        Tag::signed_remote(message.full_name()),
+        Tag::signed_remote(message.name()),
         NodeKind::Receive {
             group: group.clone(),
-            message: message.clone(),
+            message_name: FullName::new(message.name()),
+            serde_adapter: message.serde_adapter().clone(),
         },
     )
 }
 
 pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let (group, message) = match received.kind() {
-        NodeKind::Receive { group, message } => (group, message),
+    let (group, serde_adapter) = match received.kind() {
+        NodeKind::Receive {
+            group, serde_adapter, ..
+        } => (group, serde_adapter),
         _ => return Err(LocalError::new("The given node must be a Receive node")),
     };
 
     let arg_name = "_value".to_string();
-    let serde_adapter = message.serde_adapter().clone();
+    let serde_adapter = serde_adapter.clone();
     let args = [(arg_name.clone(), received.get_strong_ref())].into();
 
     Ok(Node::new(
-        Tag::received(message.full_name()),
+        received.store_in().to_received()?,
         NodeKind::ComputeArray {
             function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased("deserialize", move |id, args| {
                 deserialize(id, args, &arg_name, &serde_adapter)
