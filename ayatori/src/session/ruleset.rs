@@ -11,7 +11,7 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{ArrayFunction, FullName, Node, NodeKind, ScalarFunction, SessionParameters, Tag},
+    protocol::{ArrayFunction, Dependencies, FullName, Node, NodeKind, ScalarFunction, SessionParameters, Tag},
 };
 
 #[derive(Debug)]
@@ -106,7 +106,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
         let mut rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
 
-        for node in output_node.flattened(None) {
+        for node in output_node.flattened(None, Dependencies::All) {
             let mut shared_condition = Condition::empty();
 
             for dependency in node.dependencies() {

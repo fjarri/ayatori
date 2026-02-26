@@ -11,7 +11,7 @@ pub(crate) use function::{
     ArrayFunction, ComputeErrorEnum, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
     WrappedScalarFunction, WrappedScalarFunctionPrivate,
 };
-pub(crate) use node::NodeKind;
+pub(crate) use node::{Dependencies, NodeKind};
 pub(crate) use tag::{FullName, Tag};
 pub(crate) use value::{SerializedValue, Value};
 

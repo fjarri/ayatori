@@ -21,6 +21,12 @@ use super::{
 };
 use crate::error::LocalError;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Dependencies {
+    All,
+    ArgumentsOnly,
+}
+
 // `Node` intentionally does not implement `Clone` - our clones are shallow, which may be confusing for the user.
 #[derive(Debug)]
 pub struct Node<SP: SessionParameters>(Arc<TypedNode<SP>>);
@@ -70,25 +76,21 @@ impl<SP: SessionParameters> Node<SP> {
         self.0.kind()
     }
 
-    pub(crate) fn all_dependencies(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
-        self.0.all_dependencies()
-    }
-
     fn unwrap_or_shallow_clone(self) -> TypedNode<SP> {
         Arc::try_unwrap(self.0).unwrap_or_else(|arc| arc.shallow_clone())
     }
 
-    pub(crate) fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Node<SP> {
+    fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Node<SP> {
         Self::new_typed(self.unwrap_or_shallow_clone().with_replacements(replacements))
     }
 
-    pub(crate) fn shallow_with_added_prefix(self, prefix: &str) -> Self {
+    fn shallow_with_added_prefix(self, prefix: &str) -> Self {
         Self::new_typed(self.unwrap_or_shallow_clone().with_added_prefix(prefix))
     }
 
     pub fn display_tree(&self) -> String {
         let mut s = String::new();
-        for node in self.flattened(None) {
+        for node in self.flattened(None, Dependencies::All) {
             writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
         }
         s
@@ -98,7 +100,7 @@ impl<SP: SessionParameters> Node<SP> {
     /// sorted in such a way that for every node all its dependencies preceed it.
     ///
     /// (In other words, walks the dependency tree depth-first).
-    pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>) -> Vec<Self> {
+    pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>, dependencies: Dependencies) -> Vec<Self> {
         let mut nodes_to_process = vec![self.get_strong_ref()];
         let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
@@ -107,8 +109,11 @@ impl<SP: SessionParameters> Node<SP> {
             .unwrap_or_default();
 
         while let Some(node) = nodes_to_process.pop() {
-            let unprocessed_dependencies = node
-                .all_dependencies()
+            let all_dependencies = match dependencies {
+                Dependencies::ArgumentsOnly => node.kind().args(),
+                Dependencies::All => Box::new(node.dependencies().iter().chain(node.kind().args())),
+            };
+            let unprocessed_dependencies = all_dependencies
                 .filter_map(|dependency| {
                     let id = dependency.id();
                     if nodes_processed.contains(&id) || terminate_at_ids.contains(&id) {
@@ -138,7 +143,7 @@ impl<SP: SessionParameters> Node<SP> {
             .map(|node| (node.id(), node.get_strong_ref()))
             .collect::<BTreeMap<_, _>>();
 
-        for node in self.flattened(Some(&terminate_at)) {
+        for node in self.flattened(Some(&terminate_at), Dependencies::All) {
             let old_id = node.id();
             let new_node = node
                 .with_replacements(&replacement_nodes)
@@ -164,7 +169,7 @@ struct TypedNode<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> TypedNode<SP> {
-    pub fn new(store_in: Tag, kind: NodeKind<SP>) -> Self {
+    fn new(store_in: Tag, kind: NodeKind<SP>) -> Self {
         Self {
             store_in,
             kind,
@@ -172,24 +177,24 @@ impl<SP: SessionParameters> TypedNode<SP> {
         }
     }
 
-    pub fn store_in(&self) -> &Tag {
+    fn store_in(&self) -> &Tag {
         &self.store_in
     }
 
-    pub fn dependencies(&self) -> &[Node<SP>] {
+    fn dependencies(&self) -> &[Node<SP>] {
         &self.dependencies
     }
 
-    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
+    fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         self.kind.group()
     }
 
-    pub fn kind(&self) -> &NodeKind<SP> {
+    fn kind(&self) -> &NodeKind<SP> {
         &self.kind
     }
 
     #[must_use]
-    pub fn with_dependencies(self, dependencies: &[&Node<SP>]) -> Self {
+    fn with_dependencies(self, dependencies: &[&Node<SP>]) -> Self {
         let mut new_node = self;
         new_node
             .dependencies
@@ -198,13 +203,13 @@ impl<SP: SessionParameters> TypedNode<SP> {
     }
 
     #[must_use]
-    pub fn with_store_in(self, name: &str) -> Self {
+    fn with_store_in(self, name: &str) -> Self {
         let mut new_node = self;
         new_node.store_in = new_node.store_in.with_name(name);
         new_node
     }
 
-    pub fn shallow_clone(&self) -> Self {
+    fn shallow_clone(&self) -> Self {
         Self {
             store_in: self.store_in.clone(),
             dependencies: nodes_to_owned(self.dependencies.iter()),
@@ -212,18 +217,14 @@ impl<SP: SessionParameters> TypedNode<SP> {
         }
     }
 
-    pub fn all_dependencies(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
-        Box::new(self.dependencies.iter().chain(self.kind.all_dependencies()))
-    }
-
-    pub fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Self {
+    fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Self {
         let mut new_node = self;
         maybe_replace_slice(&mut new_node.dependencies, replacements);
         new_node.kind.replace(replacements);
         new_node
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
+    fn with_added_prefix(self, prefix: &str) -> Self {
         let mut new_node = self;
         new_node.store_in = new_node.store_in.with_added_prefix(prefix);
         new_node.kind = new_node.kind.with_added_prefix(prefix);
@@ -315,7 +316,7 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
 }
 
 impl<SP: SessionParameters> NodeKind<SP> {
-    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
+    fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         match self {
             Self::ComputeArray { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
                 Some(group)
@@ -324,7 +325,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         }
     }
 
-    pub fn shallow_clone(&self) -> Self {
+    fn shallow_clone(&self) -> Self {
         match self {
             Self::ComputeScalar { function, args } => Self::ComputeScalar {
                 function: function.clone(),
@@ -355,7 +356,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         }
     }
 
-    pub fn all_dependencies(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
+    fn args(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
         match self {
             Self::ComputeScalar { args, .. } | Self::ComputeArray { args, .. } => Box::new(args.values()),
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
@@ -364,7 +365,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         }
     }
 
-    pub fn replace(&mut self, replacements: &BTreeMap<usize, Node<SP>>) {
+    fn replace(&mut self, replacements: &BTreeMap<usize, Node<SP>>) {
         match self {
             Self::ComputeScalar { args, .. } => maybe_replace_map(args, replacements),
             Self::ComputeArray { args, .. } => maybe_replace_map(args, replacements),
@@ -374,7 +375,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         }
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
+    fn with_added_prefix(self, prefix: &str) -> Self {
         match self {
             Self::ComputeScalar { .. }
             | Self::ComputeArray { .. }
