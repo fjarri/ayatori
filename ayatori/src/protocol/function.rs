@@ -261,28 +261,43 @@ macro_rules! define_array_function_type {
     }
 }
 
-define_scalar_function_type!(WrappedScalarFunction<SP>, args: Args<SP>);
-define_scalar_function_type!(WrappedScalarFunctionPrivate<SP>, rng: &mut dyn CryptoRngCore, args: Args<SP>);
-define_array_function_type!(WrappedArrayFunction<SP>, id: &SP::Verifier, args: Args<SP>);
-define_array_function_type!(WrappedArrayFunctionPrivate<SP>, rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>);
+define_scalar_function_type!(
+    WrappedScalarFunction<SP>,
+    args: Args<SP>
+);
+
+define_scalar_function_type!(
+    WrappedScalarFunctionWithRng<SP>,
+    rng: &mut dyn CryptoRngCore, args: Args<SP>
+);
+
+define_array_function_type!(
+    WrappedArrayFunction<SP>,
+    id: &SP::Verifier, args: Args<SP>
+);
+
+define_array_function_type!(
+    WrappedArrayFunctionWithRng<SP>,
+    rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>
+);
 
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ScalarFunction<SP: SessionParameters> {
-    Public(WrappedScalarFunction<SP>),
-    Private(WrappedScalarFunctionPrivate<SP>),
+    NoRng(WrappedScalarFunction<SP>),
+    WithRng(WrappedScalarFunctionWithRng<SP>),
 }
 
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ArrayFunction<SP: SessionParameters> {
-    Public(WrappedArrayFunction<SP>),
-    Private(WrappedArrayFunctionPrivate<SP>),
+    NoRng(WrappedArrayFunction<SP>),
+    WithRng(WrappedArrayFunctionWithRng<SP>),
 }
 
 impl<SP: SessionParameters> Display for ScalarFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Self::Private(function) => write!(f, "{function}[PRIVATE]"),
-            Self::Public(function) => write!(f, "{function}"),
+            Self::WithRng(function) => write!(f, "{function}[RNG]"),
+            Self::NoRng(function) => write!(f, "{function}"),
         }
     }
 }
@@ -290,8 +305,8 @@ impl<SP: SessionParameters> Display for ScalarFunction<SP> {
 impl<SP: SessionParameters> Display for ArrayFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Self::Private(function) => write!(f, "{function}[PRIVATE]"),
-            Self::Public(function) => write!(f, "{function}"),
+            Self::WithRng(function) => write!(f, "{function}[RNG]"),
+            Self::NoRng(function) => write!(f, "{function}"),
         }
     }
 }

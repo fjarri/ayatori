@@ -120,10 +120,10 @@ where
                     let arg_values = self.storage.get_scalar_args(args)?;
                     let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
                     match function {
-                        ScalarFunction::Public(function) => {
+                        ScalarFunction::NoRng(function) => {
                             return Ok(Some(Task::compute_scalar(store_in, function, args)));
                         }
-                        ScalarFunction::Private(function) => {
+                        ScalarFunction::WithRng(function) => {
                             return Ok(Some(Task::compute_scalar_with_rng(store_in, function, args)));
                         }
                     }
@@ -138,10 +138,10 @@ where
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
                     let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
                     match function {
-                        ArrayFunction::Public(function) => {
+                        ArrayFunction::NoRng(function) => {
                             return Ok(Some(Task::compute_array_elem(store_in, index, function, args)));
                         }
-                        ArrayFunction::Private(function) => {
+                        ArrayFunction::WithRng(function) => {
                             return Ok(Some(Task::compute_array_elem_with_rng(store_in, index, function, args)));
                         }
                     }

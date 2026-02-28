@@ -9,7 +9,7 @@ use crate::{
     error::LocalError,
     protocol::{
         Args, ArrayFunctionError, Erasable, ScalarFunctionError, SessionParameters, Tag, Value, WrappedArrayFunction,
-        WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        WrappedArrayFunctionWithRng, WrappedScalarFunction, WrappedScalarFunctionWithRng,
     },
 };
 
@@ -65,10 +65,10 @@ impl<SP: SessionParameters> ComputeTask<SP> {
 #[derive(Debug)]
 enum ComputeWithRngFunction<SP: SessionParameters> {
     Scalar {
-        function: WrappedScalarFunctionPrivate<SP>,
+        function: WrappedScalarFunctionWithRng<SP>,
     },
     Array {
-        function: WrappedArrayFunctionPrivate<SP>,
+        function: WrappedArrayFunctionWithRng<SP>,
         id: SP::Verifier,
     },
 }
@@ -173,7 +173,7 @@ impl<SP: SessionParameters> Task<SP> {
 
     pub(crate) fn compute_scalar_with_rng(
         store_in: Tag,
-        function: WrappedScalarFunctionPrivate<SP>,
+        function: WrappedScalarFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
@@ -199,7 +199,7 @@ impl<SP: SessionParameters> Task<SP> {
     pub(crate) fn compute_array_elem_with_rng(
         store_in: Tag,
         id: SP::Verifier,
-        function: WrappedArrayFunctionPrivate<SP>,
+        function: WrappedArrayFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {

@@ -11,7 +11,7 @@ use super::{
     args::{Args, ProtocolArgs},
     function::{
         ArrayFallibility, ArrayFunction, ScalarFallibility, ScalarFunction, SenderError, ThirdPartyError,
-        WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        WrappedArrayFunction, WrappedArrayFunctionWithRng, WrappedScalarFunction, WrappedScalarFunctionWithRng,
     },
     node::{Node, NodeKind, args_to_owned},
     party::PartyGroup,
@@ -53,7 +53,7 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     Node::new(
         Tag::computed(name),
         NodeKind::ComputeScalar {
-            function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(
+            function: ScalarFunction::NoRng(WrappedScalarFunction::new_pre_erased(
                 name,
                 ScalarFallibility::Infallible,
                 move |_args| Ok(erased_value.clone()),
@@ -69,7 +69,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         Node::new(
             Tag::computed(name),
             NodeKind::ComputeArray {
-                function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
+                function: ArrayFunction::NoRng(WrappedArrayFunction::new_pre_erased(
                     "alias",
                     ArrayFallibility::Infallible,
                     move |_id, args| Ok(args.get_value(arg_name).cloned()?),
@@ -82,7 +82,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         Node::new(
             Tag::computed(name),
             NodeKind::ComputeScalar {
-                function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(
+                function: ScalarFunction::NoRng(WrappedScalarFunction::new_pre_erased(
                     "alias",
                     ScalarFallibility::Infallible,
                     move |args| Ok(args.get_value(arg_name).cloned()?),
@@ -140,7 +140,7 @@ define_scalar_constructor!(
     compute_scalar,
     SP,
     LocalError,
-    ScalarFunction::Public,
+    ScalarFunction::NoRng,
     WrappedScalarFunction::new_infallible,
     Args<SP>
 );
@@ -149,8 +149,8 @@ define_scalar_constructor!(
     compute_scalar_with_rng,
     SP,
     LocalError,
-    ScalarFunction::Private,
-    WrappedScalarFunctionPrivate::new_infallible,
+    ScalarFunction::WithRng,
+    WrappedScalarFunctionWithRng::new_infallible,
     &mut dyn CryptoRngCore,
     Args<SP>
 );
@@ -159,7 +159,7 @@ define_array_constructor!(
     compute_array,
     SP,
     LocalError,
-    ArrayFunction::Public,
+    ArrayFunction::NoRng,
     WrappedArrayFunction::new_infallible,
     &SP::Verifier,
     Args<SP>
@@ -169,7 +169,7 @@ define_array_constructor!(
     compute_array_sender_fallible,
     SP,
     SenderError,
-    ArrayFunction::Public,
+    ArrayFunction::NoRng,
     WrappedArrayFunction::new_sender,
     &SP::Verifier,
     Args<SP>
@@ -179,7 +179,7 @@ define_array_constructor!(
     compute_array_third_party_fallible,
     SP,
     ThirdPartyError<SP>,
-    ArrayFunction::Public,
+    ArrayFunction::NoRng,
     WrappedArrayFunction::new_third_party,
     &SP::Verifier,
     Args<SP>
@@ -189,8 +189,8 @@ define_array_constructor!(
     compute_array_with_rng,
     SP,
     LocalError,
-    ArrayFunction::Private,
-    WrappedArrayFunctionPrivate::new_infallible,
+    ArrayFunction::WithRng,
+    WrappedArrayFunctionWithRng::new_infallible,
     &mut dyn CryptoRngCore,
     &SP::Verifier,
     Args<SP>
@@ -200,8 +200,8 @@ define_array_constructor!(
     compute_array_with_rng_sender_fallible,
     SP,
     SenderError,
-    ArrayFunction::Private,
-    WrappedArrayFunctionPrivate::new_sender,
+    ArrayFunction::WithRng,
+    WrappedArrayFunctionWithRng::new_sender,
     &mut dyn CryptoRngCore,
     &SP::Verifier,
     Args<SP>
@@ -211,8 +211,8 @@ define_array_constructor!(
     compute_array_with_rng_third_party_fallible,
     SP,
     ThirdPartyError<SP>,
-    ArrayFunction::Private,
-    WrappedArrayFunctionPrivate::new_third_party,
+    ArrayFunction::WithRng,
+    WrappedArrayFunctionWithRng::new_third_party,
     &mut dyn CryptoRngCore,
     &SP::Verifier,
     Args<SP>
@@ -279,7 +279,7 @@ pub fn broadcast<SP: SessionParameters>(
     let serialize_and_sign = Node::new(
         tag.clone(),
         NodeKind::ComputeArray {
-            function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
+            function: ArrayFunction::WithRng(WrappedArrayFunctionWithRng::new_pre_erased(
                 "serialize",
                 ArrayFallibility::Infallible,
                 move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
@@ -314,7 +314,7 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
     let serialize_and_sign = Node::new(
         tag.clone(),
         NodeKind::ComputeArray {
-            function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
+            function: ArrayFunction::WithRng(WrappedArrayFunctionWithRng::new_pre_erased(
                 "serialize",
                 ArrayFallibility::Infallible,
                 move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
@@ -389,7 +389,7 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
     Ok(Node::new(
         received.store_in().to_received()?,
         NodeKind::ComputeArray {
-            function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
+            function: ArrayFunction::NoRng(WrappedArrayFunction::new_pre_erased(
                 "deserialize",
                 ArrayFallibility::Sender,
                 move |id, args| Ok(deserialize(id, args, &arg_name, &serde_adapter)?),

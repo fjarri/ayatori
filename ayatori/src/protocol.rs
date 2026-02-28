@@ -9,7 +9,7 @@ mod value;
 
 pub(crate) use function::{
     ArrayFunction, ArrayFunctionError, ScalarFunction, ScalarFunctionError, WrappedArrayFunction,
-    WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+    WrappedArrayFunctionWithRng, WrappedScalarFunction, WrappedScalarFunctionWithRng,
 };
 pub(crate) use node::{Dependencies, NodeKind};
 pub(crate) use tag::{FullName, Tag};
