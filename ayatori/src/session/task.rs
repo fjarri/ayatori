@@ -8,7 +8,7 @@ use super::session::SessionData;
 use crate::{
     error::LocalError,
     protocol::{
-        Args, Erasable, FunctionError, SessionParameters, Tag, Value, WrappedArrayFunction,
+        Args, ArrayFunctionError, Erasable, ScalarFunctionError, SessionParameters, Tag, Value, WrappedArrayFunction,
         WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
 };
@@ -38,27 +38,18 @@ impl<SP: SessionParameters> ComputeTask<SP> {
             ComputeFunction::Scalar { function } => {
                 let result = match function.call(self.args) {
                     Ok(result) => result,
-                    Err(FunctionError::Local(error)) => return Err(error),
-                    Err(FunctionError::Sender) => {
-                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
-                    }
-                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
+                    Err(ScalarFunctionError::Local(error)) => return Err(error),
                 };
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeFunction::Array { function, id } => {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
-                    Err(FunctionError::Local(error)) => return Err(error),
-                    Err(FunctionError::Sender) => {
+                    Err(ArrayFunctionError::Local(error)) => return Err(error),
+                    Err(ArrayFunctionError::Sender) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
                     }
-                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
+                    Err(ArrayFunctionError::ThirdParty { guilty_party, .. }) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -96,27 +87,18 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
             ComputeWithRngFunction::Scalar { function } => {
                 let result = match function.call(rng, self.args) {
                     Ok(result) => result,
-                    Err(FunctionError::Local(error)) => return Err(error),
-                    Err(FunctionError::Sender) => {
-                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
-                    }
-                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
+                    Err(ScalarFunctionError::Local(error)) => return Err(error),
                 };
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeWithRngFunction::Array { function, id } => {
                 let result = match function.call(rng, &id, self.args) {
                     Ok(result) => result,
-                    Err(FunctionError::Local(error)) => return Err(error),
-                    Err(FunctionError::Sender) => {
+                    Err(ArrayFunctionError::Local(error)) => return Err(error),
+                    Err(ArrayFunctionError::Sender) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
                     }
-                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
+                    Err(ArrayFunctionError::ThirdParty { guilty_party, .. }) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -242,7 +224,6 @@ pub(crate) enum TaskResultEnum<Id> {
     Send { store_in: Tag, destination: Id },
     Compute { store_in: Tag, result: Value },
     ComputeArray { store_in: Tag, id: Id, result: Value },
-    UnattributableError { store_in: Tag },
     AttributableError { store_in: Tag, id: Id },
 }
 

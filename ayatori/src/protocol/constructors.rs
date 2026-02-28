@@ -10,8 +10,8 @@ use signature::rand_core::CryptoRngCore;
 use super::{
     args::{Args, ProtocolArgs},
     function::{
-        ArrayFunction, Fallibility, ScalarFunction, SenderError, ThirdPartyError, WrappedArrayFunction,
-        WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        ArrayFallibility, ArrayFunction, ScalarFallibility, ScalarFunction, SenderError, ThirdPartyError,
+        WrappedArrayFunction, WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
     node::{Node, NodeKind, args_to_owned},
     party::PartyGroup,
@@ -55,7 +55,7 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
         NodeKind::ComputeScalar {
             function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(
                 name,
-                Fallibility::Infallible,
+                ScalarFallibility::Infallible,
                 move |_args| Ok(erased_value.clone()),
             )),
             args: BTreeMap::new(),
@@ -71,7 +71,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
             NodeKind::ComputeArray {
                 function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
                     "alias",
-                    Fallibility::Infallible,
+                    ArrayFallibility::Infallible,
                     move |_id, args| Ok(args.get_value(arg_name).cloned()?),
                 )),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
@@ -84,7 +84,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
             NodeKind::ComputeScalar {
                 function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(
                     "alias",
-                    Fallibility::Infallible,
+                    ScalarFallibility::Infallible,
                     move |args| Ok(args.get_value(arg_name).cloned()?),
                 )),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
@@ -166,17 +166,6 @@ define_array_constructor!(
 );
 
 define_array_constructor!(
-    compute_array_with_rng,
-    SP,
-    LocalError,
-    ArrayFunction::Private,
-    WrappedArrayFunctionPrivate::new_infallible,
-    &mut dyn CryptoRngCore,
-    &SP::Verifier,
-    Args<SP>
-);
-
-define_array_constructor!(
     compute_array_sender_fallible,
     SP,
     SenderError,
@@ -192,6 +181,39 @@ define_array_constructor!(
     ThirdPartyError<SP>,
     ArrayFunction::Public,
     WrappedArrayFunction::new_third_party,
+    &SP::Verifier,
+    Args<SP>
+);
+
+define_array_constructor!(
+    compute_array_with_rng,
+    SP,
+    LocalError,
+    ArrayFunction::Private,
+    WrappedArrayFunctionPrivate::new_infallible,
+    &mut dyn CryptoRngCore,
+    &SP::Verifier,
+    Args<SP>
+);
+
+define_array_constructor!(
+    compute_array_with_rng_sender_fallible,
+    SP,
+    SenderError,
+    ArrayFunction::Private,
+    WrappedArrayFunctionPrivate::new_sender,
+    &mut dyn CryptoRngCore,
+    &SP::Verifier,
+    Args<SP>
+);
+
+define_array_constructor!(
+    compute_array_with_rng_third_party_fallible,
+    SP,
+    ThirdPartyError<SP>,
+    ArrayFunction::Private,
+    WrappedArrayFunctionPrivate::new_third_party,
+    &mut dyn CryptoRngCore,
     &SP::Verifier,
     Args<SP>
 );
@@ -259,7 +281,7 @@ pub fn broadcast<SP: SessionParameters>(
         NodeKind::ComputeArray {
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
-                Fallibility::Infallible,
+                ArrayFallibility::Infallible,
                 move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
             )),
             group: group.clone(),
@@ -294,7 +316,7 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
         NodeKind::ComputeArray {
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
-                Fallibility::Infallible,
+                ArrayFallibility::Infallible,
                 move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
             )),
             group: group.clone(),
@@ -369,7 +391,7 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
         NodeKind::ComputeArray {
             function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
                 "deserialize",
-                Fallibility::Sender,
+                ArrayFallibility::Sender,
                 move |id, args| Ok(deserialize(id, args, &arg_name, &serde_adapter)?),
             )),
             group: group.clone(),

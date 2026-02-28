@@ -235,11 +235,6 @@ where
                     "Attributable error when calculating {store_in}[{id:?}]"
                 )));
             }
-            TaskResultEnum::UnattributableError { store_in } => {
-                return Err(LocalError::new(format!(
-                    "Unattributable error when calculating {store_in}"
-                )));
-            }
         }
         Ok(())
     }
