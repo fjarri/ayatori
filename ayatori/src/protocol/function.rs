@@ -14,13 +14,60 @@ use super::{
 };
 use crate::error::LocalError;
 
-#[derive(Debug)]
-pub struct ComputeError<SP: SessionParameters>(pub(crate) ComputeErrorEnum<SP>);
+#[derive(Debug, Default)]
+pub struct SenderError(SenderErrorEnum);
+
+#[derive(Debug, Default)]
+pub(crate) enum SenderErrorEnum {
+    Local(LocalError),
+    #[default]
+    Error,
+}
+
+impl From<LocalError> for SenderError {
+    fn from(source: LocalError) -> Self {
+        Self(SenderErrorEnum::Local(source))
+    }
+}
+
+impl SenderError {
+    pub fn new() -> Self {
+        Self(SenderErrorEnum::Error)
+    }
+}
 
 #[derive(Debug)]
-pub(crate) enum ComputeErrorEnum<SP: SessionParameters> {
+pub struct ThirdPartyError<SP: SessionParameters>(ThirdPartyErrorEnum<SP>);
+
+#[derive(Debug)]
+pub(crate) enum ThirdPartyErrorEnum<SP: SessionParameters> {
     Local(LocalError),
-    Data,
+    Error {
+        guilty_party: SP::Verifier,
+        associated_data: SerializedValue,
+    },
+}
+
+impl<SP: SessionParameters> From<LocalError> for ThirdPartyError<SP> {
+    fn from(source: LocalError) -> Self {
+        Self(ThirdPartyErrorEnum::Local(source))
+    }
+}
+
+impl<SP: SessionParameters> ThirdPartyError<SP> {
+    pub fn new<T: Serialize>(guilty_party: &SP::Verifier, associated_value: T) -> Result<Self, LocalError> {
+        let associated_data = SerializedValue::new(SP::WireFormat::serialize(associated_value)?);
+        Ok(Self(ThirdPartyErrorEnum::Error {
+            guilty_party: guilty_party.clone(),
+            associated_data,
+        }))
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum FunctionError<SP: SessionParameters> {
+    Local(LocalError),
+    Sender,
     ThirdParty {
         guilty_party: SP::Verifier,
         // TODO (#7): will be used for provable failures.
@@ -29,28 +76,41 @@ pub(crate) enum ComputeErrorEnum<SP: SessionParameters> {
     },
 }
 
-impl<SP: SessionParameters> From<LocalError> for ComputeError<SP> {
+impl<SP: SessionParameters> From<LocalError> for FunctionError<SP> {
     fn from(source: LocalError) -> Self {
-        Self(ComputeErrorEnum::Local(source))
+        Self::Local(source)
     }
 }
 
-impl<SP: SessionParameters> ComputeError<SP> {
-    pub fn local(error: LocalError) -> Self {
-        Self(ComputeErrorEnum::Local(error))
+impl<SP: SessionParameters> From<SenderError> for FunctionError<SP> {
+    fn from(source: SenderError) -> Self {
+        match source.0 {
+            SenderErrorEnum::Local(error) => Self::Local(error),
+            SenderErrorEnum::Error => Self::Sender,
+        }
     }
+}
 
-    pub fn sender() -> Self {
-        Self(ComputeErrorEnum::Data)
+impl<SP: SessionParameters> From<ThirdPartyError<SP>> for FunctionError<SP> {
+    fn from(source: ThirdPartyError<SP>) -> Self {
+        match source.0 {
+            ThirdPartyErrorEnum::Local(error) => Self::Local(error),
+            ThirdPartyErrorEnum::Error {
+                guilty_party,
+                associated_data,
+            } => Self::ThirdParty {
+                guilty_party,
+                associated_data,
+            },
+        }
     }
+}
 
-    pub fn third_party<T: Serialize>(guilty_party: &SP::Verifier, associated_value: T) -> Result<Self, LocalError> {
-        let associated_data = SerializedValue::new(SP::WireFormat::serialize(associated_value)?);
-        Ok(Self(ComputeErrorEnum::ThirdParty {
-            guilty_party: guilty_party.clone(),
-            associated_data,
-        }))
-    }
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Fallibility {
+    Infallible,
+    Sender,
+    ThirdParty,
 }
 
 macro_rules! define_function_type {
@@ -58,8 +118,9 @@ macro_rules! define_function_type {
         #[derive_where::derive_where(Clone)]
         pub(crate) struct $type_name<$generic_name: SessionParameters> {
             #[allow(clippy::type_complexity)]
-            function: Arc<dyn Fn($($arg_type),*) -> Result<Value, ComputeError<SP>>>,
+            function: Arc<dyn Fn($($arg_type),*) -> Result<Value, FunctionError<SP>>>,
             name: String,
+            fallibility: Fallibility,
         }
 
         impl<$generic_name: SessionParameters> Debug for $type_name<$generic_name> {
@@ -75,23 +136,53 @@ macro_rules! define_function_type {
         }
 
         impl<$generic_name: SessionParameters> $type_name<$generic_name> {
-            pub fn new<Ret: Erasable>(function: impl 'static + Fn($($arg_type),*) -> Result<Ret, ComputeError<SP>>) -> Self {
+            pub fn new_infallible<Ret: Erasable>(
+                function: impl 'static + Fn($($arg_type),*) -> Result<Ret, LocalError>
+            ) -> Self {
                 let name = core::any::type_name_of_val(&function).to_string();
-                Self::new_pre_erased(name, move |$($arg_name: $arg_type),*| function($($arg_name),*).map(Value::new))
+                Self::new_pre_erased(
+                    name,
+                    Fallibility::Infallible,
+                    move |$($arg_name: $arg_type),*| Ok(function($($arg_name),*).map(Value::new)?)
+                )
+            }
+
+            pub fn new_sender<Ret: Erasable>(
+                function: impl 'static + Fn($($arg_type),*) -> Result<Ret, SenderError>
+            ) -> Self {
+                let name = core::any::type_name_of_val(&function).to_string();
+                Self::new_pre_erased(
+                    name,
+                    Fallibility::Sender,
+                    move |$($arg_name: $arg_type),*| Ok(function($($arg_name),*).map(Value::new)?)
+                )
+            }
+
+            pub fn new_third_party<Ret: Erasable>(
+                function: impl 'static + Fn($($arg_type),*) -> Result<Ret, ThirdPartyError<SP>>
+            ) -> Self {
+                let name = core::any::type_name_of_val(&function).to_string();
+                Self::new_pre_erased(
+                    name,
+                    Fallibility::ThirdParty,
+                    move |$($arg_name: $arg_type),*| Ok(function($($arg_name),*).map(Value::new)?)
+                )
             }
 
             pub fn new_pre_erased(
                 name: impl Into<String>,
-                function: impl 'static + Fn($($arg_type),*) -> Result<Value, ComputeError<SP>>,
+                fallibility: Fallibility,
+                function: impl 'static + Fn($($arg_type),*) -> Result<Value, FunctionError<SP>>,
             ) -> Self {
                 let wrapped = Arc::new(function);
                 Self {
                     function: wrapped,
                     name: name.into(),
+                    fallibility,
                 }
             }
 
-            pub fn call(&self, $($arg_name: $arg_type),*) -> Result<Value, ComputeError<SP>> {
+            pub fn call(&self, $($arg_name: $arg_type),*) -> Result<Value, FunctionError<SP>> {
                 (self.function)($($arg_name),*)
             }
         }

@@ -10,8 +10,8 @@ use signature::rand_core::CryptoRngCore;
 use super::{
     args::{Args, ProtocolArgs},
     function::{
-        ArrayFunction, ComputeError, ScalarFunction, WrappedArrayFunction, WrappedArrayFunctionPrivate,
-        WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        ArrayFunction, Fallibility, ScalarFunction, SenderError, ThirdPartyError, WrappedArrayFunction,
+        WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
     node::{Node, NodeKind, args_to_owned},
     party::PartyGroup,
@@ -53,9 +53,11 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     Node::new(
         Tag::computed(name),
         NodeKind::ComputeScalar {
-            function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(name, move |_args| {
-                Ok(erased_value.clone())
-            })),
+            function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(
+                name,
+                Fallibility::Infallible,
+                move |_args| Ok(erased_value.clone()),
+            )),
             args: BTreeMap::new(),
         },
     )
@@ -67,9 +69,11 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         Node::new(
             Tag::computed(name),
             NodeKind::ComputeArray {
-                function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased("alias", move |_id, args| {
-                    args.get_value(arg_name).cloned().map_err(ComputeError::<SP>::local)
-                })),
+                function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
+                    "alias",
+                    Fallibility::Infallible,
+                    move |_id, args| Ok(args.get_value(arg_name).cloned()?),
+                )),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
                 group: group.clone(),
             },
@@ -78,98 +82,119 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         Node::new(
             Tag::computed(name),
             NodeKind::ComputeScalar {
-                function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased("alias", move |args| {
-                    args.get_value(arg_name).cloned().map_err(ComputeError::<SP>::local)
-                })),
+                function: ScalarFunction::Public(WrappedScalarFunction::new_pre_erased(
+                    "alias",
+                    Fallibility::Infallible,
+                    move |args| Ok(args.get_value(arg_name).cloned()?),
+                )),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
             },
         )
     }
 }
 
-pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
-    name: &str,
-    function: impl 'static + Fn(Args<SP>) -> Result<Ret, ComputeError<SP>>,
-    args: &[(&str, &Node<SP>)],
-) -> Result<Node<SP>, LocalError> {
-    Ok(Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeScalar {
-            function: ScalarFunction::Public(WrappedScalarFunction::new(function)),
-            args: args_to_owned(args.iter().cloned())?,
-        },
-    ))
-}
-
-pub fn compute_scalar_private<SP: SessionParameters, Ret: Erasable>(
-    name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, Args<SP>) -> Result<Ret, ComputeError<SP>>,
-    args: &[(&str, &Node<SP>)],
-) -> Result<Node<SP>, LocalError> {
-    Ok(Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeScalar {
-            function: ScalarFunction::Private(WrappedScalarFunctionPrivate::new(function)),
-            args: args_to_owned(args.iter().cloned())?,
-        },
-    ))
-}
-
-pub fn compute_array<SP: SessionParameters, Ret: Erasable>(
-    name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ComputeError<SP>>,
-    group: &PartyGroup<SP::Verifier>,
-    args: &[(&str, &Node<SP>)],
-) -> Result<Node<SP>, LocalError> {
-    Ok(Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeArray {
-            function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
-            group: group.clone(),
-            args: args_to_owned(args.iter().cloned())?,
-        },
-    ))
-}
-
-pub fn compute_array_private<SP: SessionParameters, Ret: Erasable>(
-    name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> Result<Ret, ComputeError<SP>>,
-    group: &PartyGroup<SP::Verifier>,
-    args: &[(&str, &Node<SP>)],
-) -> Result<Node<SP>, LocalError> {
-    Ok(Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeArray {
-            function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new(function)),
-            group: group.clone(),
-            args: args_to_owned(args.iter().cloned())?,
-        },
-    ))
-}
-
-pub fn verify<SP: SessionParameters>(
-    name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<(), ComputeError<SP>>,
-    args: &[(&str, &Node<SP>)],
-) -> Result<Node<SP>, LocalError> {
-    let groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
-    // TODO (#29): support compute-array with only scalar args (the group needs to be given explicitly)
-    let group = *groups
-        .first()
-        .ok_or_else(|| LocalError::new("There must be at least one array argument"))?;
-    if groups.iter().any(|g| g != &group) {
-        return Err(LocalError::new("The group of all arguments must be the same"));
+macro_rules! define_scalar_constructor {
+    ($func_name:ident, $SP:ident, $error:ty, $outer_type:ident::$outer_ctr:ident, $inner_type:ident::$inner_ctr:ident $(, $arg_type:ty )*) => {
+        pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
+            name: &str,
+            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error>,
+            args: &[(&str, &Node<$SP>)],
+        ) -> Result<Node<$SP>, LocalError> {
+            Ok(Node::new(
+                Tag::computed(name),
+                NodeKind::ComputeScalar {
+                    function: $outer_type::$outer_ctr($inner_type::$inner_ctr(function)),
+                    args: args_to_owned(args.iter().cloned())?,
+                },
+            ))
+        }
     }
-
-    Ok(Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeArray {
-            function: ArrayFunction::Public(WrappedArrayFunction::new(function)),
-            group: group.clone(),
-            args: args_to_owned(args.iter().cloned())?,
-        },
-    ))
 }
+
+macro_rules! define_array_constructor {
+    ($func_name:ident, $SP:ident, $error:ty, $outer_type:ident::$outer_ctr:ident, $inner_type:ident::$inner_ctr:ident $(, $arg_type:ty )*) => {
+        pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
+            name: &str,
+            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error>,
+            group: &PartyGroup<SP::Verifier>,
+            args: &[(&str, &Node<$SP>)],
+        ) -> Result<Node<$SP>, LocalError> {
+            let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
+            if arg_groups.iter().any(|g| g != &group) {
+                return Err(LocalError::new("The group of all arguments must be equal to the one provided to the constructor"));
+            }
+
+            Ok(Node::new(
+                Tag::computed(name),
+                NodeKind::ComputeArray {
+                    function: $outer_type::$outer_ctr($inner_type::$inner_ctr(function)),
+                    args: args_to_owned(args.iter().cloned())?,
+                    group: group.clone(),
+                },
+            ))
+        }
+    }
+}
+
+define_scalar_constructor!(
+    compute_scalar,
+    SP,
+    LocalError,
+    ScalarFunction::Public,
+    WrappedScalarFunction::new_infallible,
+    Args<SP>
+);
+
+define_scalar_constructor!(
+    compute_scalar_with_rng,
+    SP,
+    LocalError,
+    ScalarFunction::Private,
+    WrappedScalarFunctionPrivate::new_infallible,
+    &mut dyn CryptoRngCore,
+    Args<SP>
+);
+
+define_array_constructor!(
+    compute_array,
+    SP,
+    LocalError,
+    ArrayFunction::Public,
+    WrappedArrayFunction::new_infallible,
+    &SP::Verifier,
+    Args<SP>
+);
+
+define_array_constructor!(
+    compute_array_with_rng,
+    SP,
+    LocalError,
+    ArrayFunction::Private,
+    WrappedArrayFunctionPrivate::new_infallible,
+    &mut dyn CryptoRngCore,
+    &SP::Verifier,
+    Args<SP>
+);
+
+define_array_constructor!(
+    compute_array_sender_fallible,
+    SP,
+    SenderError,
+    ArrayFunction::Public,
+    WrappedArrayFunction::new_sender,
+    &SP::Verifier,
+    Args<SP>
+);
+
+define_array_constructor!(
+    compute_array_third_party_fallible,
+    SP,
+    ThirdPartyError<SP>,
+    ArrayFunction::Public,
+    WrappedArrayFunction::new_third_party,
+    &SP::Verifier,
+    Args<SP>
+);
 
 /// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
 /// since some RustCrypto libraries don't accept a `?Sized` RNG.
@@ -198,7 +223,7 @@ fn serialize<SP: SessionParameters>(
     args: Args<SP>,
     arg_name: &str,
     serde_adapter: &SerdeAdapter<SP::WireFormat>,
-) -> Result<Value, ComputeError<SP>> {
+) -> Result<Value, LocalError> {
     let value = args.get_value(arg_name)?;
     let serialized_value = serde_adapter.serialize(value)?;
     let mut typed_rng = Rng(rng);
@@ -234,7 +259,8 @@ pub fn broadcast<SP: SessionParameters>(
         NodeKind::ComputeArray {
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
-                move |rng, id, args| serialize(rng, id, args, &arg_name, &serde_adapter),
+                Fallibility::Infallible,
+                move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
             )),
             group: group.clone(),
             args,
@@ -268,7 +294,8 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
         NodeKind::ComputeArray {
             function: ArrayFunction::Private(WrappedArrayFunctionPrivate::new_pre_erased(
                 "serialize",
-                move |rng, id, args| serialize(rng, id, args, &arg_name, &serde_adapter),
+                Fallibility::Infallible,
+                move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
             )),
             group: group.clone(),
             args,
@@ -291,22 +318,22 @@ fn deserialize<SP: SessionParameters>(
     args: Args<SP>,
     arg_name: &str,
     serde_adapter: &SerdeAdapter<SP::WireFormat>,
-) -> Result<Value, ComputeError<SP>> {
+) -> Result<Value, SenderError> {
     let received = args.get::<VerifiedValue<SP>>(arg_name)?;
 
     let expected_senders = args
         .session_data()
         .expected_messages
         .get(args.store_in_name())
-        .ok_or_else(|| ComputeError::<SP>::sender())?;
+        .ok_or_else(SenderError::new)?;
 
     if !expected_senders.contains(id) {
-        return Err(ComputeError::<SP>::sender());
+        return Err(SenderError::new());
     }
 
     let value = serde_adapter
         .deserialize(received.serialized_value())
-        .map_err(|_err| ComputeError::<SP>::sender())?;
+        .map_err(|_err| SenderError::new())?;
 
     Ok(value)
 }
@@ -340,9 +367,11 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
     Ok(Node::new(
         received.store_in().to_received()?,
         NodeKind::ComputeArray {
-            function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased("deserialize", move |id, args| {
-                deserialize(id, args, &arg_name, &serde_adapter)
-            })),
+            function: ArrayFunction::Public(WrappedArrayFunction::new_pre_erased(
+                "deserialize",
+                Fallibility::Sender,
+                move |id, args| Ok(deserialize(id, args, &arg_name, &serde_adapter)?),
+            )),
             group: group.clone(),
             args,
         },

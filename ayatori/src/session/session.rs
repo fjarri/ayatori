@@ -60,6 +60,8 @@ where
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, protocol_args)?;
         let ruleset = Ruleset::new(output_node)?;
+        extern crate std;
+        std::println!("{ruleset}");
         let expected_messages = ruleset.expected_messages().clone();
         let storage = Storage::new();
         let data = Arc::new(SessionData {
@@ -131,6 +133,7 @@ where
                     function,
                     index,
                     args,
+                    ..
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
                     let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;

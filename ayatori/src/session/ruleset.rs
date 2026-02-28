@@ -32,6 +32,7 @@ pub(crate) enum Action<SP: SessionParameters> {
         index: SP::Verifier,
         function: ArrayFunction<SP>,
         args: BTreeMap<String, Arg>,
+        messages_to_reproduce: BTreeSet<Tag>,
     },
     Send {
         store_in: Tag,
@@ -51,11 +52,20 @@ struct Rule<SP: SessionParameters> {
     action: Action<SP>,
 }
 
+fn get_messages_to_reproduce<SP: SessionParameters>(node: &Node<SP>) -> BTreeSet<Tag> {
+    let mut tags = BTreeSet::new();
+    for arg in node.flattened(None, Dependencies::ArgumentsOnly) {
+        tags.insert(arg.store_in().clone());
+    }
+    tags
+}
+
 fn make_compute_array_action<SP: SessionParameters>(
     store_in: &Tag,
     id: &SP::Verifier,
     function: &ArrayFunction<SP>,
     args: &BTreeMap<String, Node<SP>>,
+    messages_to_reproduce: &BTreeSet<Tag>,
 ) -> (Action<SP>, Condition<SP::Verifier>) {
     let mut specific_condition = Condition::empty();
     for arg in args.values() {
@@ -71,22 +81,25 @@ fn make_compute_array_action<SP: SessionParameters>(
         }
     }
 
+    let arg_tags = args
+        .iter()
+        .map(|(name, arg)| {
+            let tag = arg.store_in().clone();
+            let arg = if arg.group().is_some() {
+                Arg::ArrayElem(tag)
+            } else {
+                Arg::Scalar(tag)
+            };
+            (name.clone(), arg)
+        })
+        .collect();
+
     let action = Action::ComputeArrayElement {
         store_in: store_in.clone(),
         function: function.clone(),
         index: id.clone(),
-        args: args
-            .iter()
-            .map(|(name, arg)| {
-                let tag = arg.store_in().clone();
-                let arg = if arg.group().is_some() {
-                    Arg::ArrayElem(tag)
-                } else {
-                    Arg::Scalar(tag)
-                };
-                (name.clone(), arg)
-            })
-            .collect(),
+        args: arg_tags,
+        messages_to_reproduce: messages_to_reproduce.clone(),
     };
 
     (action, specific_condition)
@@ -145,8 +158,15 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     ));
                 }
                 NodeKind::ComputeArray { function, args, group } => {
+                    let messages_to_reproduce = get_messages_to_reproduce(&node);
                     for id in group.ids() {
-                        actions.push(make_compute_array_action(node.store_in(), id, function, args));
+                        actions.push(make_compute_array_action(
+                            node.store_in(),
+                            id,
+                            function,
+                            args,
+                            &messages_to_reproduce,
+                        ));
                     }
                 }
                 NodeKind::DirectMessage { data, group } => {
@@ -269,6 +289,7 @@ impl<SP: SessionParameters> Display for Action<SP> {
                 index,
                 function,
                 args,
+                messages_to_reproduce,
             } => {
                 let joined_args = args
                     .iter()
@@ -280,7 +301,12 @@ impl<SP: SessionParameters> Display for Action<SP> {
                         format!("{}={}", name, arg_str)
                     })
                     .join(", ");
-                write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")
+                write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")?;
+                write!(
+                    f,
+                    "\n  {}",
+                    messages_to_reproduce.iter().map(ToString::to_string).join(", ")
+                )
             }
             Self::Send {
                 store_in,

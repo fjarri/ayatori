@@ -8,7 +8,7 @@ use super::session::SessionData;
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ComputeError, ComputeErrorEnum, Erasable, SessionParameters, Tag, Value, WrappedArrayFunction,
+        Args, Erasable, FunctionError, SessionParameters, Tag, Value, WrappedArrayFunction,
         WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
     },
 };
@@ -38,11 +38,11 @@ impl<SP: SessionParameters> ComputeTask<SP> {
             ComputeFunction::Scalar { function } => {
                 let result = match function.call(self.args) {
                     Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
+                    Err(FunctionError::Local(error)) => return Err(error),
+                    Err(FunctionError::Sender) => {
                         return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
                     }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
+                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -54,11 +54,11 @@ impl<SP: SessionParameters> ComputeTask<SP> {
             ComputeFunction::Array { function, id } => {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
+                    Err(FunctionError::Local(error)) => return Err(error),
+                    Err(FunctionError::Sender) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
                     }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
+                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -96,11 +96,11 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
             ComputeWithRngFunction::Scalar { function } => {
                 let result = match function.call(rng, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
+                    Err(FunctionError::Local(error)) => return Err(error),
+                    Err(FunctionError::Sender) => {
                         return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
                     }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
+                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -112,11 +112,11 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
             ComputeWithRngFunction::Array { function, id } => {
                 let result = match function.call(rng, &id, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
+                    Err(FunctionError::Local(error)) => return Err(error),
+                    Err(FunctionError::Sender) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
                     }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
+                    Err(FunctionError::ThirdParty { guilty_party, .. }) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
