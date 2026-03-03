@@ -65,27 +65,27 @@ impl<SP: SessionParameters> ThirdPartyError<SP> {
 }
 
 macro_rules! define_function_type {
-    ($type_name:ident<$generic_name:ident>, $error_type:ty $(, $arg_name:ident: $arg_type:ty )*) => {
+    ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> $error_type:ty ) => {
         #[derive_where::derive_where(Clone)]
-        pub(crate) struct $type_name<$generic_name: SessionParameters> {
+        pub(crate) struct $type_name<$SP: SessionParameters> {
             #[allow(clippy::type_complexity)]
             function: Arc<dyn Fn($($arg_type),*) -> Result<Value, $error_type>>,
             name: String,
         }
 
-        impl<$generic_name: SessionParameters> Debug for $type_name<$generic_name> {
+        impl<$SP: SessionParameters> Debug for $type_name<$SP> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
                 write!(f, "{} {{ function: {} }}", stringify!($type_name), self.name)
             }
         }
 
-        impl<$generic_name: SessionParameters> Display for $type_name<$generic_name> {
+        impl<$SP: SessionParameters> Display for $type_name<$SP> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
                 write!(f, "{}", self.name)
             }
         }
 
-        impl<$generic_name: SessionParameters> $type_name<$generic_name> {
+        impl<$SP: SessionParameters> $type_name<$SP> {
             pub fn new<Ret: Erasable>(
                 function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>
             ) -> Self {
@@ -116,38 +116,32 @@ macro_rules! define_function_type {
 
 define_function_type!(
     InfallibleScalarFunction<SP>,
-    LocalError,
-    args: Args<SP>
+    (args: Args<SP>) -> LocalError
 );
 
 define_function_type!(
     InfallibleScalarFunctionWithRng<SP>,
-    LocalError,
-    rng: &mut dyn CryptoRngCore, args: Args<SP>
+    (rng: &mut dyn CryptoRngCore, args: Args<SP>) -> LocalError
 );
 
 define_function_type!(
     InfallibleArrayFunction<SP>,
-    LocalError,
-    id: &SP::Verifier, args: Args<SP>
+    (id: &SP::Verifier, args: Args<SP>) -> LocalError
 );
 
 define_function_type!(
     InfallibleArrayFunctionWithRng<SP>,
-    LocalError,
-    rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>
+    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>) -> LocalError
 );
 
 define_function_type!(
     SenderAttributableArrayFunction<SP>,
-    SenderError,
-    id: &SP::Verifier, args: Args<SP>
+    (id: &SP::Verifier, args: Args<SP>) -> SenderError
 );
 
 define_function_type!(
     ThirdPartyAttributableArrayFunction<SP>,
-    ThirdPartyError<SP>,
-    id: &SP::Verifier, args: Args<SP>
+    (id: &SP::Verifier, args: Args<SP>) -> ThirdPartyError<SP>
 );
 
 #[derive_where::derive_where(Debug, Clone)]

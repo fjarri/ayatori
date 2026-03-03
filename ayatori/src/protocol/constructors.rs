@@ -90,16 +90,18 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
 }
 
 macro_rules! define_scalar_constructor {
-    ($func_name:ident, $SP:ident, $error:ty, $outer_type:ident::$outer_ctr:ident, $inner_type:ident::$inner_ctr:ident $(, $arg_type:ty )*) => {
+    ($func_name:ident<$SP:ident>, $outer_type:ident::$outer_ctr:ident($inner_type:ident),
+        ($($arg_type:ty),+) -> $error_type:ty ) =>
+    {
         pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
             name: &str,
-            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error>,
+            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
             Ok(Node::new(
                 Tag::computed(name),
                 NodeKind::ComputeScalar {
-                    function: $outer_type::$outer_ctr($inner_type::$inner_ctr(function)),
+                    function: $outer_type::$outer_ctr($inner_type::new(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
             ))
@@ -108,22 +110,26 @@ macro_rules! define_scalar_constructor {
 }
 
 macro_rules! define_array_constructor {
-    ($func_name:ident, $SP:ident, $error:ty, $outer_type:ident::$outer_ctr:ident, $inner_type:ident::$inner_ctr:ident $(, $arg_type:ty )*) => {
+    ($func_name:ident<$SP:ident>, $outer_type:ident::$outer_ctr:ident($inner_type:ident),
+        ($($arg_type:ty),+) -> $error_type:ty ) =>
+    {
         pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
             name: &str,
-            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error>,
+            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
             group: &PartyGroup<SP::Verifier>,
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
             let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
             if arg_groups.iter().any(|g| g != &group) {
-                return Err(LocalError::new("The group of all arguments must be equal to the one provided to the constructor"));
+                return Err(LocalError::new(
+                    "The group of all arguments must be equal to the one provided to the constructor"
+                ));
             }
 
             Ok(Node::new(
                 Tag::computed(name),
                 NodeKind::ComputeArray {
-                    function: $outer_type::$outer_ctr($inner_type::$inner_ctr(function)),
+                    function: $outer_type::$outer_ctr($inner_type::new(function)),
                     args: args_to_owned(args.iter().cloned())?,
                     group: group.clone(),
                 },
@@ -133,63 +139,39 @@ macro_rules! define_array_constructor {
 }
 
 define_scalar_constructor!(
-    compute_scalar,
-    SP,
-    LocalError,
-    ScalarFunction::Infallible,
-    InfallibleScalarFunction::new,
-    Args<SP>
+    compute_scalar<SP>,
+    ScalarFunction::Infallible(InfallibleScalarFunction),
+    (Args<SP>) -> LocalError
 );
 
 define_scalar_constructor!(
-    compute_scalar_with_rng,
-    SP,
-    LocalError,
-    ScalarFunction::InfallibleWithRng,
-    InfallibleScalarFunctionWithRng::new,
-    &mut dyn CryptoRngCore,
-    Args<SP>
+    compute_scalar_with_rng<SP>,
+    ScalarFunction::InfallibleWithRng(InfallibleScalarFunctionWithRng),
+    (&mut dyn CryptoRngCore, Args<SP>) -> LocalError
 );
 
 define_array_constructor!(
-    compute_array,
-    SP,
-    LocalError,
-    ArrayFunction::Infallible,
-    InfallibleArrayFunction::new,
-    &SP::Verifier,
-    Args<SP>
+    compute_array<SP>,
+    ArrayFunction::Infallible(InfallibleArrayFunction),
+    (&SP::Verifier, Args<SP>) -> LocalError
 );
 
 define_array_constructor!(
-    compute_array_sender_fallible,
-    SP,
-    SenderError,
-    ArrayFunction::SenderAttributable,
-    SenderAttributableArrayFunction::new,
-    &SP::Verifier,
-    Args<SP>
+    compute_array_sender_fallible<SP>,
+    ArrayFunction::SenderAttributable(SenderAttributableArrayFunction),
+    (&SP::Verifier, Args<SP>) -> SenderError
 );
 
 define_array_constructor!(
-    compute_array_third_party_fallible,
-    SP,
-    ThirdPartyError<SP>,
-    ArrayFunction::ThirdPartyAttributable,
-    ThirdPartyAttributableArrayFunction::new,
-    &SP::Verifier,
-    Args<SP>
+    compute_array_third_party_fallible<SP>,
+    ArrayFunction::ThirdPartyAttributable(ThirdPartyAttributableArrayFunction),
+    (&SP::Verifier, Args<SP>) -> ThirdPartyError<SP>
 );
 
 define_array_constructor!(
-    compute_array_with_rng,
-    SP,
-    LocalError,
-    ArrayFunction::InfallibleWithRng,
-    InfallibleArrayFunctionWithRng::new,
-    &mut dyn CryptoRngCore,
-    &SP::Verifier,
-    Args<SP>
+    compute_array_with_rng<SP>,
+    ArrayFunction::InfallibleWithRng(InfallibleArrayFunctionWithRng),
+    (&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> LocalError
 );
 
 /// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
