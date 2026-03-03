@@ -8,18 +8,27 @@ use super::session::SessionData;
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ArrayFunctionError, Erasable, ScalarFunctionError, SessionParameters, Tag, Value, WrappedArrayFunction,
-        WrappedArrayFunctionWithRng, WrappedScalarFunction, WrappedScalarFunctionWithRng,
+        Args, Erasable, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
+        InfallibleScalarFunctionWithRng, SenderAttributableArrayFunction, SenderError, SenderErrorEnum,
+        SessionParameters, Tag, ThirdPartyAttributableArrayFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
     },
 };
 
 #[derive(Debug)]
 enum ComputeFunction<SP: SessionParameters> {
-    Scalar {
-        function: WrappedScalarFunction<SP>,
+    ScalarInfallible {
+        function: InfallibleScalarFunction<SP>,
     },
-    Array {
-        function: WrappedArrayFunction<SP>,
+    ArrayInfallible {
+        function: InfallibleArrayFunction<SP>,
+        id: SP::Verifier,
+    },
+    ArraySenderAttributable {
+        function: SenderAttributableArrayFunction<SP>,
+        id: SP::Verifier,
+    },
+    ArrayThirdPartyAttributable {
+        function: ThirdPartyAttributableArrayFunction<SP>,
         id: SP::Verifier,
     },
 }
@@ -35,21 +44,29 @@ impl<SP: SessionParameters> ComputeTask<SP> {
     pub fn compute(self) -> Result<TaskResult<SP::Verifier>, LocalError> {
         let store_in = self.store_in.clone();
         match self.function {
-            ComputeFunction::Scalar { function } => {
-                let result = match function.call(self.args) {
-                    Ok(result) => result,
-                    Err(ScalarFunctionError::Local(error)) => return Err(error),
-                };
+            ComputeFunction::ScalarInfallible { function } => {
+                let result = function.call(self.args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
-            ComputeFunction::Array { function, id } => {
+            ComputeFunction::ArrayInfallible { function, id } => {
+                let result = function.call(&id, self.args)?;
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+            }
+            ComputeFunction::ArraySenderAttributable { function, id } => {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
-                    Err(ArrayFunctionError::Local(error)) => return Err(error),
-                    Err(ArrayFunctionError::Sender) => {
+                    Err(SenderError(SenderErrorEnum::Local(error))) => return Err(error),
+                    Err(SenderError(SenderErrorEnum::Error)) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
                     }
-                    Err(ArrayFunctionError::ThirdParty { guilty_party, .. }) => {
+                };
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+            }
+            ComputeFunction::ArrayThirdPartyAttributable { function, id } => {
+                let result = match function.call(&id, self.args) {
+                    Ok(result) => result,
+                    Err(ThirdPartyError(ThirdPartyErrorEnum::Local(error))) => return Err(error),
+                    Err(ThirdPartyError(ThirdPartyErrorEnum::Error { guilty_party, .. })) => {
                         return Ok(TaskResult(TaskResultEnum::AttributableError {
                             id: guilty_party,
                             store_in,
@@ -64,11 +81,11 @@ impl<SP: SessionParameters> ComputeTask<SP> {
 
 #[derive(Debug)]
 enum ComputeWithRngFunction<SP: SessionParameters> {
-    Scalar {
-        function: WrappedScalarFunctionWithRng<SP>,
+    ScalarInfallible {
+        function: InfallibleScalarFunctionWithRng<SP>,
     },
-    Array {
-        function: WrappedArrayFunctionWithRng<SP>,
+    ArrayInfallible {
+        function: InfallibleArrayFunctionWithRng<SP>,
         id: SP::Verifier,
     },
 }
@@ -84,27 +101,12 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
     pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP::Verifier>, LocalError> {
         let store_in = self.store_in.clone();
         match self.function {
-            ComputeWithRngFunction::Scalar { function } => {
-                let result = match function.call(rng, self.args) {
-                    Ok(result) => result,
-                    Err(ScalarFunctionError::Local(error)) => return Err(error),
-                };
+            ComputeWithRngFunction::ScalarInfallible { function } => {
+                let result = function.call(rng, self.args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
-            ComputeWithRngFunction::Array { function, id } => {
-                let result = match function.call(rng, &id, self.args) {
-                    Ok(result) => result,
-                    Err(ArrayFunctionError::Local(error)) => return Err(error),
-                    Err(ArrayFunctionError::Sender) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
-                    }
-                    Err(ArrayFunctionError::ThirdParty { guilty_party, .. }) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
-                };
+            ComputeWithRngFunction::ArrayInfallible { function, id } => {
+                let result = function.call(rng, &id, self.args)?;
                 Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
             }
         }
@@ -163,48 +165,78 @@ impl<SP: SessionParameters> Task<SP> {
         })
     }
 
-    pub(crate) fn compute_scalar(store_in: Tag, function: WrappedScalarFunction<SP>, args: Args<SP>) -> Self {
-        Self::Compute(ComputeTask {
-            store_in,
-            function: ComputeFunction::Scalar { function },
-            args,
-        })
-    }
-
-    pub(crate) fn compute_scalar_with_rng(
+    pub(crate) fn compute_scalar_infallible(
         store_in: Tag,
-        function: WrappedScalarFunctionWithRng<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::ComputeWithRng(ComputeWithRngTask {
-            store_in,
-            function: ComputeWithRngFunction::Scalar { function },
-            args,
-        })
-    }
-
-    pub(crate) fn compute_array_elem(
-        store_in: Tag,
-        id: SP::Verifier,
-        function: WrappedArrayFunction<SP>,
+        function: InfallibleScalarFunction<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::Compute(ComputeTask {
             store_in,
-            function: ComputeFunction::Array { id, function },
+            function: ComputeFunction::ScalarInfallible { function },
             args,
         })
     }
 
-    pub(crate) fn compute_array_elem_with_rng(
+    pub(crate) fn compute_scalar_infallible_with_rng(
         store_in: Tag,
-        id: SP::Verifier,
-        function: WrappedArrayFunctionWithRng<SP>,
+        function: InfallibleScalarFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
             store_in,
-            function: ComputeWithRngFunction::Array { id, function },
+            function: ComputeWithRngFunction::ScalarInfallible { function },
+            args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_infallible(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: InfallibleArrayFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::Compute(ComputeTask {
+            store_in,
+            function: ComputeFunction::ArrayInfallible { id, function },
+            args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_infallible_with_rng(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: InfallibleArrayFunctionWithRng<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::ComputeWithRng(ComputeWithRngTask {
+            store_in,
+            function: ComputeWithRngFunction::ArrayInfallible { id, function },
+            args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_sender_attributable(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: SenderAttributableArrayFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::Compute(ComputeTask {
+            store_in,
+            function: ComputeFunction::ArraySenderAttributable { id, function },
+            args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_third_party_attributable(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: ThirdPartyAttributableArrayFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::Compute(ComputeTask {
+            store_in,
+            function: ComputeFunction::ArrayThirdPartyAttributable { id, function },
             args,
         })
     }

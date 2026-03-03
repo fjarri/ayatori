@@ -119,14 +119,14 @@ where
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
                     let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
-                    match function {
-                        ScalarFunction::NoRng(function) => {
-                            return Ok(Some(Task::compute_scalar(store_in, function, args)));
+                    return Ok(Some(match function {
+                        ScalarFunction::Infallible(function) => {
+                            Task::compute_scalar_infallible(store_in, function, args)
                         }
-                        ScalarFunction::WithRng(function) => {
-                            return Ok(Some(Task::compute_scalar_with_rng(store_in, function, args)));
+                        ScalarFunction::InfallibleWithRng(function) => {
+                            Task::compute_scalar_infallible_with_rng(store_in, function, args)
                         }
-                    }
+                    }));
                 }
                 Action::ComputeArrayElement {
                     store_in,
@@ -137,14 +137,20 @@ where
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
                     let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
-                    match function {
-                        ArrayFunction::NoRng(function) => {
-                            return Ok(Some(Task::compute_array_elem(store_in, index, function, args)));
+                    return Ok(Some(match function {
+                        ArrayFunction::Infallible(function) => {
+                            Task::compute_array_elem_infallible(store_in, index, function, args)
                         }
-                        ArrayFunction::WithRng(function) => {
-                            return Ok(Some(Task::compute_array_elem_with_rng(store_in, index, function, args)));
+                        ArrayFunction::InfallibleWithRng(function) => {
+                            Task::compute_array_elem_infallible_with_rng(store_in, index, function, args)
                         }
-                    }
+                        ArrayFunction::SenderAttributable(function) => {
+                            Task::compute_array_elem_sender_attributable(store_in, index, function, args)
+                        }
+                        ArrayFunction::ThirdPartyAttributable(function) => {
+                            Task::compute_array_elem_third_party_attributable(store_in, index, function, args)
+                        }
+                    }));
                 }
                 Action::Collect { store_in, values } => {
                     self.storage.set(&store_in, self.storage.get_dict_as_value(&values)?)?;

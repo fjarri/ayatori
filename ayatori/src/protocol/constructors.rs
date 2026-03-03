@@ -10,8 +10,9 @@ use signature::rand_core::CryptoRngCore;
 use super::{
     args::{Args, ProtocolArgs},
     function::{
-        ArrayFallibility, ArrayFunction, ScalarFallibility, ScalarFunction, SenderError, ThirdPartyError,
-        WrappedArrayFunction, WrappedArrayFunctionWithRng, WrappedScalarFunction, WrappedScalarFunctionWithRng,
+        ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
+        InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction, SenderError,
+        ThirdPartyAttributableArrayFunction, ThirdPartyError,
     },
     node::{Node, NodeKind, args_to_owned},
     party::PartyGroup,
@@ -53,11 +54,9 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     Node::new(
         Tag::computed(name),
         NodeKind::ComputeScalar {
-            function: ScalarFunction::NoRng(WrappedScalarFunction::new_pre_erased(
-                name,
-                ScalarFallibility::Infallible,
-                move |_args| Ok(erased_value.clone()),
-            )),
+            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(name, move |_args| {
+                Ok(erased_value.clone())
+            })),
             args: BTreeMap::new(),
         },
     )
@@ -69,10 +68,9 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         Node::new(
             Tag::computed(name),
             NodeKind::ComputeArray {
-                function: ArrayFunction::NoRng(WrappedArrayFunction::new_pre_erased(
+                function: ArrayFunction::Infallible(InfallibleArrayFunction::new_pre_erased(
                     "alias",
-                    ArrayFallibility::Infallible,
-                    move |_id, args| Ok(args.get_value(arg_name).cloned()?),
+                    move |_id, args| args.get_value(arg_name).cloned(),
                 )),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
                 group: group.clone(),
@@ -82,11 +80,9 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         Node::new(
             Tag::computed(name),
             NodeKind::ComputeScalar {
-                function: ScalarFunction::NoRng(WrappedScalarFunction::new_pre_erased(
-                    "alias",
-                    ScalarFallibility::Infallible,
-                    move |args| Ok(args.get_value(arg_name).cloned()?),
-                )),
+                function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased("alias", move |args| {
+                    args.get_value(arg_name).cloned()
+                })),
                 args: [(arg_name.into(), node.get_strong_ref())].into(),
             },
         )
@@ -140,8 +136,8 @@ define_scalar_constructor!(
     compute_scalar,
     SP,
     LocalError,
-    ScalarFunction::NoRng,
-    WrappedScalarFunction::new_infallible,
+    ScalarFunction::Infallible,
+    InfallibleScalarFunction::new,
     Args<SP>
 );
 
@@ -149,8 +145,8 @@ define_scalar_constructor!(
     compute_scalar_with_rng,
     SP,
     LocalError,
-    ScalarFunction::WithRng,
-    WrappedScalarFunctionWithRng::new_infallible,
+    ScalarFunction::InfallibleWithRng,
+    InfallibleScalarFunctionWithRng::new,
     &mut dyn CryptoRngCore,
     Args<SP>
 );
@@ -159,8 +155,8 @@ define_array_constructor!(
     compute_array,
     SP,
     LocalError,
-    ArrayFunction::NoRng,
-    WrappedArrayFunction::new_infallible,
+    ArrayFunction::Infallible,
+    InfallibleArrayFunction::new,
     &SP::Verifier,
     Args<SP>
 );
@@ -169,8 +165,8 @@ define_array_constructor!(
     compute_array_sender_fallible,
     SP,
     SenderError,
-    ArrayFunction::NoRng,
-    WrappedArrayFunction::new_sender,
+    ArrayFunction::SenderAttributable,
+    SenderAttributableArrayFunction::new,
     &SP::Verifier,
     Args<SP>
 );
@@ -179,8 +175,8 @@ define_array_constructor!(
     compute_array_third_party_fallible,
     SP,
     ThirdPartyError<SP>,
-    ArrayFunction::NoRng,
-    WrappedArrayFunction::new_third_party,
+    ArrayFunction::ThirdPartyAttributable,
+    ThirdPartyAttributableArrayFunction::new,
     &SP::Verifier,
     Args<SP>
 );
@@ -189,30 +185,8 @@ define_array_constructor!(
     compute_array_with_rng,
     SP,
     LocalError,
-    ArrayFunction::WithRng,
-    WrappedArrayFunctionWithRng::new_infallible,
-    &mut dyn CryptoRngCore,
-    &SP::Verifier,
-    Args<SP>
-);
-
-define_array_constructor!(
-    compute_array_with_rng_sender_fallible,
-    SP,
-    SenderError,
-    ArrayFunction::WithRng,
-    WrappedArrayFunctionWithRng::new_sender,
-    &mut dyn CryptoRngCore,
-    &SP::Verifier,
-    Args<SP>
-);
-
-define_array_constructor!(
-    compute_array_with_rng_third_party_fallible,
-    SP,
-    ThirdPartyError<SP>,
-    ArrayFunction::WithRng,
-    WrappedArrayFunctionWithRng::new_third_party,
+    ArrayFunction::InfallibleWithRng,
+    InfallibleArrayFunctionWithRng::new,
     &mut dyn CryptoRngCore,
     &SP::Verifier,
     Args<SP>
@@ -279,10 +253,9 @@ pub fn broadcast<SP: SessionParameters>(
     let serialize_and_sign = Node::new(
         tag.clone(),
         NodeKind::ComputeArray {
-            function: ArrayFunction::WithRng(WrappedArrayFunctionWithRng::new_pre_erased(
+            function: ArrayFunction::InfallibleWithRng(InfallibleArrayFunctionWithRng::new_pre_erased(
                 "serialize",
-                ArrayFallibility::Infallible,
-                move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
+                move |rng, id, args| serialize(rng, id, args, &arg_name, &serde_adapter),
             )),
             group: group.clone(),
             args,
@@ -314,10 +287,9 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
     let serialize_and_sign = Node::new(
         tag.clone(),
         NodeKind::ComputeArray {
-            function: ArrayFunction::WithRng(WrappedArrayFunctionWithRng::new_pre_erased(
+            function: ArrayFunction::InfallibleWithRng(InfallibleArrayFunctionWithRng::new_pre_erased(
                 "serialize",
-                ArrayFallibility::Infallible,
-                move |rng, id, args| Ok(serialize(rng, id, args, &arg_name, &serde_adapter)?),
+                move |rng, id, args| serialize(rng, id, args, &arg_name, &serde_adapter),
             )),
             group: group.clone(),
             args,
@@ -389,10 +361,9 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
     Ok(Node::new(
         received.store_in().to_received()?,
         NodeKind::ComputeArray {
-            function: ArrayFunction::NoRng(WrappedArrayFunction::new_pre_erased(
+            function: ArrayFunction::SenderAttributable(SenderAttributableArrayFunction::new_pre_erased(
                 "deserialize",
-                ArrayFallibility::Sender,
-                move |id, args| Ok(deserialize(id, args, &arg_name, &serde_adapter)?),
+                move |id, args| deserialize(id, args, &arg_name, &serde_adapter),
             )),
             group: group.clone(),
             args,
