@@ -191,7 +191,6 @@ macro_rules! define_array_function_type {
             #[allow(clippy::type_complexity)]
             function: Arc<dyn Fn($($arg_type),*) -> Result<Value, ArrayFunctionError<SP>>>,
             name: String,
-            #[allow(unused)]
             fallibility: ArrayFallibility,
         }
 
@@ -287,10 +286,29 @@ pub(crate) enum ScalarFunction<SP: SessionParameters> {
     WithRng(WrappedScalarFunctionWithRng<SP>),
 }
 
+impl<SP: SessionParameters> ScalarFunction<SP> {
+    pub fn takes_rng(&self) -> bool {
+        matches!(self, Self::WithRng(_))
+    }
+}
+
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ArrayFunction<SP: SessionParameters> {
     NoRng(WrappedArrayFunction<SP>),
     WithRng(WrappedArrayFunctionWithRng<SP>),
+}
+
+impl<SP: SessionParameters> ArrayFunction<SP> {
+    pub fn fallibility(&self) -> ArrayFallibility {
+        match self {
+            Self::NoRng(function) => function.fallibility,
+            Self::WithRng(function) => function.fallibility,
+        }
+    }
+
+    pub fn takes_rng(&self) -> bool {
+        matches!(self, Self::WithRng(_))
+    }
 }
 
 impl<SP: SessionParameters> Display for ScalarFunction<SP> {

@@ -11,13 +11,21 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{ArrayFunction, Dependencies, FullName, Node, NodeKind, ScalarFunction, SessionParameters, Tag},
+    protocol::{
+        ArrayFunction, Dependencies, FullName, Node, NodeKind, Reproducibility, ScalarFunction, SessionParameters, Tag,
+    },
 };
 
 #[derive(Debug)]
 pub(crate) enum Arg {
     Scalar(Tag),
     ArrayElem(Tag),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum OnError {
+    CollectEvidence(BTreeSet<Tag>),
+    Escalate,
 }
 
 #[derive_where::derive_where(Debug)]
@@ -32,7 +40,7 @@ pub(crate) enum Action<SP: SessionParameters> {
         index: SP::Verifier,
         function: ArrayFunction<SP>,
         args: BTreeMap<String, Arg>,
-        messages_to_reproduce: BTreeSet<Tag>,
+        on_error: OnError,
     },
     Send {
         store_in: Tag,
@@ -52,12 +60,16 @@ struct Rule<SP: SessionParameters> {
     action: Action<SP>,
 }
 
-fn get_messages_to_reproduce<SP: SessionParameters>(node: &Node<SP>) -> BTreeSet<Tag> {
-    let mut tags = BTreeSet::new();
-    for arg in node.flattened(None, Dependencies::ArgumentsOnly) {
-        tags.insert(arg.store_in().clone());
+fn get_on_error<SP: SessionParameters>(node: &Node<SP>) -> OnError {
+    match node.reproducibility() {
+        Reproducibility::Available(leaf_nodes) => OnError::CollectEvidence(
+            leaf_nodes
+                .iter()
+                .map(|node| node.store_in().clone())
+                .collect::<BTreeSet<_>>(),
+        ),
+        Reproducibility::NotAvailable => OnError::Escalate,
     }
-    tags
 }
 
 fn make_compute_array_action<SP: SessionParameters>(
@@ -65,7 +77,7 @@ fn make_compute_array_action<SP: SessionParameters>(
     id: &SP::Verifier,
     function: &ArrayFunction<SP>,
     args: &BTreeMap<String, Node<SP>>,
-    messages_to_reproduce: &BTreeSet<Tag>,
+    on_error: &OnError,
 ) -> (Action<SP>, Condition<SP::Verifier>) {
     let mut specific_condition = Condition::empty();
     for arg in args.values() {
@@ -99,7 +111,7 @@ fn make_compute_array_action<SP: SessionParameters>(
         function: function.clone(),
         index: id.clone(),
         args: arg_tags,
-        messages_to_reproduce: messages_to_reproduce.clone(),
+        on_error: on_error.clone(),
     };
 
     (action, specific_condition)
@@ -158,14 +170,14 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     ));
                 }
                 NodeKind::ComputeArray { function, args, group } => {
-                    let messages_to_reproduce = get_messages_to_reproduce(&node);
+                    let on_error = get_on_error(&node);
                     for id in group.ids() {
                         actions.push(make_compute_array_action(
                             node.store_in(),
                             id,
                             function,
                             args,
-                            &messages_to_reproduce,
+                            &on_error,
                         ));
                     }
                 }
@@ -289,7 +301,7 @@ impl<SP: SessionParameters> Display for Action<SP> {
                 index,
                 function,
                 args,
-                messages_to_reproduce,
+                on_error,
             } => {
                 let joined_args = args
                     .iter()
@@ -302,11 +314,7 @@ impl<SP: SessionParameters> Display for Action<SP> {
                     })
                     .join(", ");
                 write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")?;
-                write!(
-                    f,
-                    "\n  {}",
-                    messages_to_reproduce.iter().map(ToString::to_string).join(", ")
-                )
+                write!(f, "\n  on_error: {on_error:?}",)
             }
             Self::Send {
                 store_in,

@@ -21,6 +21,12 @@ use super::{
 };
 use crate::error::LocalError;
 
+#[derive(Debug)]
+pub(crate) enum Reproducibility<SP: SessionParameters> {
+    Available(Vec<Node<SP>>),
+    NotAvailable,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Dependencies {
     All,
@@ -94,6 +100,57 @@ impl<SP: SessionParameters> Node<SP> {
             writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
         }
         s
+    }
+
+    pub(crate) fn reproducibility(&self) -> Reproducibility<SP> {
+        match self.kind() {
+            NodeKind::ComputeScalar { function, args, .. } => {
+                if function.takes_rng() {
+                    return Reproducibility::NotAvailable;
+                }
+
+                let mut leaf_nodes = BTreeMap::<usize, Node<SP>>::new();
+                for arg in args.values() {
+                    match arg.reproducibility() {
+                        Reproducibility::Available(nodes) => {
+                            for node in nodes {
+                                leaf_nodes.insert(node.id(), node.get_strong_ref());
+                            }
+                        }
+                        Reproducibility::NotAvailable => return Reproducibility::NotAvailable,
+                    }
+                }
+                Reproducibility::Available(leaf_nodes.into_values().collect())
+            }
+            NodeKind::ComputeArray { function, args, .. } => {
+                if function.takes_rng() {
+                    return Reproducibility::NotAvailable;
+                }
+
+                let mut leaf_nodes = BTreeMap::<usize, Node<SP>>::new();
+                for arg in args.values() {
+                    match arg.reproducibility() {
+                        Reproducibility::Available(nodes) => {
+                            for node in nodes {
+                                leaf_nodes.insert(node.id(), node.get_strong_ref());
+                            }
+                        }
+                        Reproducibility::NotAvailable => return Reproducibility::NotAvailable,
+                    }
+                }
+                Reproducibility::Available(leaf_nodes.into_values().collect())
+            }
+            NodeKind::DirectMessage { .. } => {
+                // We can always reproduce the result of this, since it is an infallible `()`.
+                Reproducibility::Available(Vec::new())
+            }
+            NodeKind::Collect { .. } => {
+                // TODO: the collect nodes that only depend on locally created values are reproducible,
+                // but that's a rare case, and it requires propagating/calculating the "locality" property.
+                Reproducibility::NotAvailable
+            }
+            NodeKind::Receive { .. } => Reproducibility::Available([self.get_strong_ref()].into()),
+        }
     }
 
     /// Returns the list of nodes consisting of `self` and all its subtree

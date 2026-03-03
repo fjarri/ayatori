@@ -11,7 +11,7 @@ pub(crate) use function::{
     ArrayFunction, ArrayFunctionError, ScalarFunction, ScalarFunctionError, WrappedArrayFunction,
     WrappedArrayFunctionWithRng, WrappedScalarFunction, WrappedScalarFunctionWithRng,
 };
-pub(crate) use node::{Dependencies, NodeKind};
+pub(crate) use node::{Dependencies, NodeKind, Reproducibility};
 pub(crate) use tag::{FullName, Tag};
 pub(crate) use value::{SerializedValue, Value};
 
