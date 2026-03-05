@@ -1,18 +1,19 @@
 use alloc::collections::BTreeMap;
+use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
 use super::message::{SignedValue, VerifiedValue};
 use crate::error::LocalError;
-use crate::protocol::{SessionParameters, Tag};
+use crate::protocol::{ExecutableProtocol, SessionParameters, Tag};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Evidence<SP: SessionParameters> {
-    SenderError(SenderErrorEvidence<SP>),
+pub enum Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    SenderError(SenderErrorEvidence<SP, P>),
     ConflictingMessages(ConflictingMessagesEvidence<SP>),
 }
 
-impl<SP: SessionParameters> Evidence<SP> {
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
     pub fn guilty_party(&self) -> &SP::Verifier {
         match self {
             Self::SenderError(error) => error.guilty_party(),
@@ -40,25 +41,34 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
     pub fn guilty_party(&self) -> &SP::Verifier {
         &self.guilty_party
     }
+
+    pub fn verify(&self) -> Result<(), LocalError> {
+        todo!()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SenderErrorEvidence<SP: SessionParameters> {
+pub struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     guilty_party: SP::Verifier,
+    reported_by: SP::Verifier,
     failed_at: Tag,
     signed_values: BTreeMap<Tag, SignedValue<SP>>,
+    phantom: PhantomData<P>,
 }
 
-impl<SP: SessionParameters> SenderErrorEvidence<SP> {
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P> {
     pub(crate) fn new(
         guilty_party: &SP::Verifier,
+        reported_by: &SP::Verifier,
         failed_at: &Tag,
         signed_values: BTreeMap<Tag, SignedValue<SP>>,
     ) -> Self {
         Self {
             guilty_party: guilty_party.clone(),
+            reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
             signed_values,
+            phantom: PhantomData,
         }
     }
 
@@ -66,7 +76,16 @@ impl<SP: SessionParameters> SenderErrorEvidence<SP> {
         &self.guilty_party
     }
 
-    pub fn verify(&self) -> Result<(), LocalError> {
+    pub fn verify(&self, _shared_data: &P::SharedData) -> Result<(), LocalError> {
+        /*
+        let participants = P::all_participants(shared_data);
+        let public_inputs = P::make_public_inputs(shared_data);
+        let protocol_args = ProtocolArgs::new_from_inputs(private_inputs, public_inputs)?;
+        let build_data = P::make_build_data(shared_data);
+        let output_node = P::build(&self.reported_by, &build_data, protocol_args)?;
+        let ruleset = Ruleset::new(&output_node)?;
+        Ok(())
+        */
         todo!()
     }
 }

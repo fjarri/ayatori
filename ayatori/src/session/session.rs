@@ -43,7 +43,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
     data: Arc<SessionData<SP>>,
-    provable_errors: BTreeMap<SP::Verifier, Evidence<SP>>,
+    provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
     nodes: BTreeMap<Tag, Node<SP>>,
     phantom: PhantomData<P>,
@@ -100,7 +100,7 @@ where
         self.data.signer.verifying_key()
     }
 
-    fn register_provable_error(&mut self, evidence: Evidence<SP>) {
+    fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
         // TODO: remove all affected rules
     }
@@ -111,8 +111,8 @@ where
         // TODO: remove all affected rules
     }
 
-    fn make_report(self) -> SessionReport<SP> {
-        SessionReport {
+    fn make_report(self) -> SessionReport<SP, P> {
+        SessionReport::<SP, P> {
             provable_errors: self.provable_errors,
             attributable_errors: self.attributable_errors,
         }
@@ -121,7 +121,7 @@ where
     pub fn finalize_with_success(
         self,
         _token: FinalizeWithSuccessToken,
-    ) -> Result<(P::Output, SessionReport<SP>), LocalError> {
+    ) -> Result<(P::Output, SessionReport<SP, P>), LocalError> {
         let value = self.storage.get(self.ruleset.output_tag())?;
         let result = value.downcast::<P::Output>()?;
         Ok((result, self.make_report()))
@@ -295,7 +295,12 @@ where
                                 _ => {}
                             }
                         }
-                        let evidence = Evidence::SenderError(SenderErrorEvidence::new(&id, &store_in, signed_values));
+                        let evidence = Evidence::SenderError(SenderErrorEvidence::new(
+                            &id,
+                            &self.data.signer.verifying_key(),
+                            &store_in,
+                            signed_values,
+                        ));
                         self.register_provable_error(evidence);
                     }
                     Reproducibility::NotAvailable => {
@@ -341,7 +346,7 @@ pub struct DuplicateMessagesError<SP: SessionParameters> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionReport<SP: SessionParameters> {
-    pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP>>,
+pub struct SessionReport<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     pub attributable_errors: BTreeMap<SP::Verifier, String>,
 }
