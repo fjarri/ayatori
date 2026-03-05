@@ -1,5 +1,4 @@
 use alloc::{
-    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     format,
     string::String,
@@ -7,19 +6,25 @@ use alloc::{
 };
 use core::{fmt::Debug, marker::PhantomData};
 
+use serde::{Deserialize, Serialize};
 use signature::Keypair;
 
 use super::{
+    evidence::{ConflictingMessagesEvidence, Evidence, SenderErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
     ruleset::{Action, Ruleset},
     session_id::SessionId,
     storage::Storage,
-    task::{PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult, TaskResultEnum},
+    task::{
+        FinalizeWithSuccessToken, PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult,
+        TaskResultEnum,
+    },
 };
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ArrayFunction, ExecutableProtocol, FullName, ProtocolArgs, ScalarFunction, SessionParameters, Value,
+        Args, ArrayFunction, Dependencies, ExecutableProtocol, FullName, Node, NodeKind, ProtocolArgs, Reproducibility,
+        ScalarFunction, SessionParameters, Tag, Value,
     },
 };
 
@@ -38,6 +43,9 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
     data: Arc<SessionData<SP>>,
+    provable_errors: BTreeMap<SP::Verifier, Evidence<SP>>,
+    attributable_errors: BTreeMap<SP::Verifier, String>,
+    nodes: BTreeMap<Tag, Node<SP>>,
     phantom: PhantomData<P>,
 }
 
@@ -59,9 +67,15 @@ where
         let protocol_args = ProtocolArgs::new_from_inputs(private_inputs, public_inputs)?;
         let build_data = P::make_build_data(shared_data);
         let output_node = P::build(&signer.verifying_key(), &build_data, protocol_args)?;
-        let ruleset = Ruleset::new(output_node)?;
-        extern crate std;
-        std::println!("{ruleset}");
+
+        // TODO: or just save Reproducibility?
+        let nodes = output_node
+            .flattened(None, Dependencies::All)
+            .into_iter()
+            .map(|node| (node.store_in().clone(), node))
+            .collect();
+
+        let ruleset = Ruleset::new(&output_node)?;
         let expected_messages = ruleset.expected_messages().clone();
         let storage = Storage::new();
         let data = Arc::new(SessionData {
@@ -75,6 +89,9 @@ where
             ruleset,
             storage,
             data,
+            provable_errors: BTreeMap::new(),
+            attributable_errors: BTreeMap::new(),
+            nodes,
             phantom: PhantomData,
         })
     }
@@ -83,9 +100,36 @@ where
         self.data.signer.verifying_key()
     }
 
+    fn register_provable_error(&mut self, evidence: Evidence<SP>) {
+        self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
+        // TODO: remove all affected rules
+    }
+
+    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: Tag) {
+        self.attributable_errors
+            .insert(guilty_party, format!("Error when calculating {tag}"));
+        // TODO: remove all affected rules
+    }
+
+    fn make_report(self) -> SessionReport<SP> {
+        SessionReport {
+            provable_errors: self.provable_errors,
+            attributable_errors: self.attributable_errors,
+        }
+    }
+
+    pub fn finalize_with_success(
+        self,
+        _token: FinalizeWithSuccessToken,
+    ) -> Result<(P::Output, SessionReport<SP>), LocalError> {
+        let value = self.storage.get(self.ruleset.output_tag())?;
+        let result = value.downcast::<P::Output>()?;
+        Ok((result, self.make_report()))
+    }
+
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
         if self.storage.contains(self.ruleset.output_tag()) {
-            return Ok(Some(Task::finalize(self.storage.get(self.ruleset.output_tag())?)));
+            return Ok(Some(Task::finalize_with_success()));
         }
 
         if self.ruleset.is_empty() {
@@ -184,15 +228,13 @@ where
                     if typed_existing_value.metadata() != typed_received_value.metadata()
                         || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
                     {
-                        // TODO (#7): to be packed into an evidence.
-                        return Err(PreprocessingError::ConflictingMessages(
-                            ConflictingMessagesError {
-                                guilty_party: id.clone(),
-                                first: typed_existing_value.clone().unverify(),
-                                second: typed_received_value.clone().unverify(),
-                            }
-                            .into(),
+                        let evidence = Evidence::ConflictingMessages(ConflictingMessagesEvidence::new(
+                            &id,
+                            typed_existing_value,
+                            typed_received_value,
                         ));
+                        self.register_provable_error(evidence);
+                        return Ok(());
                     }
 
                     // The message is a duplicate, we cannot do anything at this point.
@@ -234,13 +276,34 @@ where
                 self.storage.set_elem(&store_in, &id, result)?;
                 self.ruleset.update_with_array_element_ready(&store_in, &id);
             }
-            TaskResultEnum::AttributableError { store_in, id } => {
-                // TODO (#39): ban the node internally and carry on.
-                // For now we are returning a `LocalError` right away.
-                return Err(LocalError::new(format!(
-                    "Attributable error when calculating {store_in}[{id:?}]"
-                )));
+            TaskResultEnum::SenderError { store_in, id } => {
+                let node = self.nodes.get(&store_in).unwrap();
+                // TODO: this is quite fragile.
+                // Ideally we would want to do that at session creation time.
+                match node.reproducibility() {
+                    Reproducibility::Available(leaf_nodes) => {
+                        let mut signed_values = BTreeMap::new();
+                        for node in leaf_nodes {
+                            match node.kind() {
+                                NodeKind::Receive { .. } => {
+                                    let value = self.storage.get_elem(node.store_in(), &id)?;
+                                    let signed_value = value.downcast_ref::<SignedValue<SP>>()?;
+                                    signed_values.insert(node.store_in().clone(), signed_value.clone());
+                                }
+                                // TODO: if we hit a private value here, we need to fall back to
+                                // registering an attributable error.
+                                _ => {}
+                            }
+                        }
+                        let evidence = Evidence::SenderError(SenderErrorEvidence::new(&id, &store_in, signed_values));
+                        self.register_provable_error(evidence);
+                    }
+                    Reproducibility::NotAvailable => {
+                        self.register_attributable_error(id, store_in);
+                    }
+                }
             }
+            TaskResultEnum::ThirdPartyError { .. } => todo!(),
         }
         Ok(())
     }
@@ -250,7 +313,6 @@ where
 pub enum PreprocessingError<SP: SessionParameters> {
     Local(LocalError),
     InvalidMessage(InvalidMessageError<SP>),
-    ConflictingMessages(Box<ConflictingMessagesError<SP>>),
     DuplicateMessages(DuplicateMessagesError<SP>),
 }
 
@@ -273,14 +335,13 @@ impl<SP: SessionParameters> From<InvalidMessageError<SP>> for PreprocessingError
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct ConflictingMessagesError<SP: SessionParameters> {
-    pub guilty_party: SP::Verifier,
-    pub first: SignedValue<SP>,
-    pub second: SignedValue<SP>,
-}
-
-#[derive_where::derive_where(Debug)]
 pub struct DuplicateMessagesError<SP: SessionParameters> {
     pub first: MessageId<SP>,
     pub second: MessageId<SP>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionReport<SP: SessionParameters> {
+    pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP>>,
+    pub attributable_errors: BTreeMap<SP::Verifier, String>,
 }

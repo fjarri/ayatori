@@ -10,7 +10,8 @@ use crate::{
     protocol::{
         Args, Erasable, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
         InfallibleScalarFunctionWithRng, SenderAttributableArrayFunction, SenderError, SenderErrorEnum,
-        SessionParameters, Tag, ThirdPartyAttributableArrayFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
+        SerializedValue, SessionParameters, Tag, ThirdPartyAttributableArrayFunction, ThirdPartyError,
+        ThirdPartyErrorEnum, Value,
     },
 };
 
@@ -57,7 +58,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Ok(result) => result,
                     Err(SenderError(SenderErrorEnum::Local(error))) => return Err(error),
                     Err(SenderError(SenderErrorEnum::Error)) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
+                        return Ok(TaskResult(TaskResultEnum::SenderError { store_in, id }));
                     }
                 };
                 Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
@@ -66,10 +67,14 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
                     Err(ThirdPartyError(ThirdPartyErrorEnum::Local(error))) => return Err(error),
-                    Err(ThirdPartyError(ThirdPartyErrorEnum::Error { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
+                    Err(ThirdPartyError(ThirdPartyErrorEnum::Error {
+                        guilty_party,
+                        associated_data,
+                    })) => {
+                        return Ok(TaskResult(TaskResultEnum::ThirdPartyError {
                             store_in,
+                            id: guilty_party,
+                            associated_data,
                         }));
                     }
                 };
@@ -133,28 +138,21 @@ impl<SP: SessionParameters> SendTask<SP> {
     }
 }
 
+#[allow(missing_copy_implementations)]
 #[derive(Debug)]
-pub struct FinalizeTask {
-    outcome: Value,
-}
-
-impl FinalizeTask {
-    pub fn value<T: Clone + Erasable>(self) -> Result<T, LocalError> {
-        self.outcome.downcast::<T>()
-    }
-}
+pub struct FinalizeWithSuccessToken(());
 
 #[derive(Debug)]
 pub enum Task<SP: SessionParameters> {
     Send(SendTask<SP>),
     Compute(ComputeTask<SP>),
     ComputeWithRng(ComputeWithRngTask<SP>),
-    Finalize(FinalizeTask),
+    FinalizeWithSuccess(FinalizeWithSuccessToken),
 }
 
 impl<SP: SessionParameters> Task<SP> {
-    pub(crate) fn finalize(value: Value) -> Self {
-        Self::Finalize(FinalizeTask { outcome: value })
+    pub(crate) fn finalize_with_success() -> Self {
+        Self::FinalizeWithSuccess(FinalizeWithSuccessToken(()))
     }
 
     pub(crate) fn send(store_in: Tag, destination: SP::Verifier, signed_value: Value) -> Self {
@@ -253,10 +251,28 @@ impl<Id> TaskResult<Id> {
 
 #[derive(Debug)]
 pub(crate) enum TaskResultEnum<Id> {
-    Send { store_in: Tag, destination: Id },
-    Compute { store_in: Tag, result: Value },
-    ComputeArray { store_in: Tag, id: Id, result: Value },
-    AttributableError { store_in: Tag, id: Id },
+    Send {
+        store_in: Tag,
+        destination: Id,
+    },
+    Compute {
+        store_in: Tag,
+        result: Value,
+    },
+    ComputeArray {
+        store_in: Tag,
+        id: Id,
+        result: Value,
+    },
+    SenderError {
+        store_in: Tag,
+        id: Id,
+    },
+    ThirdPartyError {
+        store_in: Tag,
+        id: Id,
+        associated_data: SerializedValue,
+    },
 }
 
 #[derive(Debug)]

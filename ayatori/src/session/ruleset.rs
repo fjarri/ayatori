@@ -125,7 +125,7 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
-    pub fn new(output_node: Node<SP>) -> Result<Self, LocalError> {
+    pub fn new(output_node: &Node<SP>) -> Result<Self, LocalError> {
         let output_tag = output_node.store_in().clone();
 
         let mut rules = Vec::new();

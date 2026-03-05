@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LocalError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) enum TagKind {
     /// A locally computed value coming from an explicit computation/verification node
     /// (not from serialization/deserialization).
@@ -73,7 +73,7 @@ impl Display for FullName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) struct Tag {
     full_name: FullName,
     kind: TagKind,
