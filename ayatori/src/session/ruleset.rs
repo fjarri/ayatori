@@ -11,9 +11,7 @@ use itertools::Itertools;
 use super::conditions::{Condition, LeafCondition};
 use crate::{
     error::LocalError,
-    protocol::{
-        ArrayFunction, Dependencies, FullName, Node, NodeKind, Reproducibility, ScalarFunction, SessionParameters, Tag,
-    },
+    protocol::{ArrayFunction, FullName, Node, NodeKind, Reproducibility, ScalarFunction, SessionParameters, Tag},
 };
 
 #[derive(Debug)]
@@ -133,7 +131,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
         let mut arguments = Vec::new();
 
-        for node in output_node.flattened(None, Dependencies::All) {
+        for node in output_node.flattened() {
             let mut shared_condition = Condition::empty();
 
             for dependency in node.dependencies() {

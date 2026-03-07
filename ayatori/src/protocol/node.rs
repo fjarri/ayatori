@@ -31,12 +31,6 @@ pub(crate) enum Reproducibility {
     NotAvailable,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Dependencies {
-    All,
-    ArgumentsOnly,
-}
-
 // `Node` intentionally does not implement `Clone` - our clones are shallow, which may be confusing for the user.
 #[derive(Debug)]
 pub struct Node<SP: SessionParameters>(Arc<TypedNode<SP>>);
@@ -100,14 +94,14 @@ impl<SP: SessionParameters> Node<SP> {
 
     pub fn display_tree(&self) -> String {
         let mut s = String::new();
-        for node in self.flattened(None, Dependencies::All) {
+        for node in self.flattened() {
             writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
         }
         s
     }
 
     pub(crate) fn get_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
-        for node in self.flattened(None, Dependencies::All) {
+        for node in self.flattened() {
             if node.store_in() == tag {
                 return Ok(node.get_strong_ref());
             }
@@ -187,24 +181,18 @@ impl<SP: SessionParameters> Node<SP> {
     /// sorted in such a way that for every node all its dependencies preceed it.
     ///
     /// (In other words, walks the dependency tree depth-first).
-    pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>, dependencies: Dependencies) -> Vec<Self> {
+    pub(crate) fn flattened(&self) -> Vec<Self> {
         // TODO: the arguments `terminate_at` and `dependencies` may be unused
         let mut nodes_to_process = vec![self.get_strong_ref()];
         let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
-        let terminate_at_ids = terminate_at
-            .map(|nodes| nodes.iter().map(|node| node.id()).collect::<BTreeSet<_>>())
-            .unwrap_or_default();
 
         while let Some(node) = nodes_to_process.pop() {
-            let all_dependencies = match dependencies {
-                Dependencies::ArgumentsOnly => node.kind().args(),
-                Dependencies::All => Box::new(node.dependencies().iter().chain(node.kind().args())),
-            };
+            let all_dependencies = node.dependencies().iter().chain(node.kind().args());
             let unprocessed_dependencies = all_dependencies
                 .filter_map(|dependency| {
                     let id = dependency.id();
-                    if nodes_processed.contains(&id) || terminate_at_ids.contains(&id) {
+                    if nodes_processed.contains(&id) {
                         None
                     } else {
                         Some(dependency.get_strong_ref())
@@ -224,14 +212,11 @@ impl<SP: SessionParameters> Node<SP> {
         flat_nodes
     }
 
-    pub(crate) fn with_added_prefix(&self, prefix: &str, terminate_at: Vec<Self>) -> Self {
+    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
         let root_id = self.id();
-        let mut replacement_nodes = terminate_at
-            .iter()
-            .map(|node| (node.id(), node.get_strong_ref()))
-            .collect::<BTreeMap<_, _>>();
+        let mut replacement_nodes = BTreeMap::new();
 
-        for node in self.flattened(Some(&terminate_at), Dependencies::All) {
+        for node in self.flattened() {
             let old_id = node.id();
             let new_node = node
                 .with_replacements(&replacement_nodes)
@@ -246,7 +231,7 @@ impl<SP: SessionParameters> Node<SP> {
         let root_id = self.id();
         let mut replacement_nodes = BTreeMap::new();
 
-        for node in self.flattened(None, Dependencies::All) {
+        for node in self.flattened() {
             let old_id = node.id();
 
             let new_node = if let NodeKind::ScalarArgument { name } = node.kind() {

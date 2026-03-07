@@ -12,7 +12,7 @@ pub(crate) use function::{
     InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction, SenderErrorEnum,
     ThirdPartyAttributableArrayFunction, ThirdPartyErrorEnum,
 };
-pub(crate) use node::{Dependencies, NodeKind, Reproducibility};
+pub(crate) use node::{NodeKind, Reproducibility};
 pub(crate) use tag::{FullName, Tag};
 pub(crate) use value::{SerializedValue, Value};
 
