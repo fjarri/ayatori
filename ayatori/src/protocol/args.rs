@@ -3,13 +3,12 @@ use alloc::{
     format,
     string::{String, ToString},
     sync::Arc,
-    vec::Vec,
 };
 
 use itertools::Itertools;
 
 use super::{
-    constructors::{alias, constant},
+    constructors::scalar_argument,
     node::Node,
     tag::FullName,
     traits::SessionParameters,
@@ -22,6 +21,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Args<SP: SessionParameters> {
+    // TODO: this is only needed for serialization/deserialization closures.
+    // Seems like a crutch. Can we somehow avoid it?
     store_in_name: FullName,
     session_data: Arc<SessionData<SP>>,
     my_id: SP::Verifier,
@@ -86,32 +87,65 @@ impl<SP: SessionParameters> Args<SP> {
 }
 
 #[derive(Debug, Default)]
-pub struct PrivateInputs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+pub struct PrivateInputs(BTreeMap<String, Value>);
 
-impl<SP: SessionParameters> PrivateInputs<SP> {
+impl PrivateInputs {
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
     pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
         let mut args = self.0;
-        args.insert(name.to_string(), constant(name, value));
+        args.insert(name.to_string(), Value::new(value));
         Self(args)
+    }
+
+    pub fn names(&self) -> BTreeSet<String> {
+        self.0.keys().cloned().collect()
+    }
+
+    pub(crate) fn into_inner(self) -> BTreeMap<String, Value> {
+        self.0
     }
 }
 
 #[derive(Debug, Default)]
-pub struct PublicInputs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+pub struct PublicInputs(BTreeMap<String, Value>);
 
-impl<SP: SessionParameters> PublicInputs<SP> {
+impl PublicInputs {
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
     pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
         let mut args = self.0;
-        args.insert(name.to_string(), constant(name, value));
+        args.insert(name.to_string(), Value::new(value));
         Self(args)
+    }
+
+    pub(crate) fn into_inner(self) -> BTreeMap<String, Value> {
+        self.0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ArgNodes<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+
+impl<SP: SessionParameters> ArgNodes<SP> {
+    pub(crate) fn new(signature: &ProtocolSignature) -> Self {
+        Self(
+            signature
+                .0
+                .iter()
+                .map(|name| (name.clone(), scalar_argument(name)))
+                .collect(),
+        )
+    }
+
+    pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
+        self.0
+            .get(name)
+            .ok_or_else(|| LocalError::new(format!("Argument {name} was not found")))
     }
 }
 
@@ -129,36 +163,14 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
         Self(args)
     }
 
+    pub fn nodes(&self) -> &BTreeMap<String, Node<SP>> {
+        &self.0
+    }
+
     pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
         self.0
             .get(name)
             .ok_or_else(|| LocalError::new(format!("Argument {name} was not found")))
-    }
-
-    pub(crate) fn with_aliases(self, signature: ProtocolSignature) -> Result<(Self, Vec<Node<SP>>), LocalError> {
-        let mut new_nodes = BTreeMap::new();
-        for name in signature.0.iter() {
-            let node = self.0.get(name).ok_or_else(|| {
-                LocalError::new(format!("{name} is in the signature but not among the given arguments"))
-            })?;
-            let alias = alias(name, node);
-            new_nodes.insert(name.to_string(), alias);
-        }
-        Ok((Self(new_nodes), self.0.into_values().collect()))
-    }
-
-    pub(crate) fn new_from_inputs(
-        private_inputs: PrivateInputs<SP>,
-        public_inputs: PublicInputs<SP>,
-    ) -> Result<Self, LocalError> {
-        let mut args = private_inputs.0;
-        for (name, arg) in public_inputs.0.into_iter() {
-            if args.contains_key(&name) {
-                return Err(LocalError::new(format!("Duplicate argument name: {name}")));
-            }
-            args.insert(name, arg);
-        }
-        Ok(Self(args))
     }
 }
 
@@ -174,5 +186,26 @@ impl ProtocolSignature {
         let mut args = self.0;
         args.insert(name.to_string());
         Self(args)
+    }
+
+    pub(crate) fn bind<SP: SessionParameters>(
+        &self,
+        args: ProtocolArgs<SP>,
+    ) -> Result<BoundProtocolArgs<SP>, LocalError> {
+        if self.0 != args.0.keys().cloned().collect::<BTreeSet<_>>() {
+            return Err(LocalError::new("Argument mismatch when binding"));
+        }
+
+        Ok(BoundProtocolArgs(args.0))
+    }
+}
+
+pub(crate) struct BoundProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+
+impl<SP: SessionParameters> BoundProtocolArgs<SP> {
+    pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
+        self.0
+            .get(name)
+            .ok_or_else(|| LocalError::new(format!("Bound argument {name} was not found")))
     }
 }

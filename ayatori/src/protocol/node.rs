@@ -13,6 +13,7 @@ use core::fmt::Debug;
 use itertools::Itertools;
 
 use super::{
+    args::BoundProtocolArgs,
     function::{ArrayFunction, ScalarFunction},
     party::PartyGroup,
     tag::{FullName, Tag},
@@ -22,8 +23,11 @@ use super::{
 use crate::error::LocalError;
 
 #[derive(Debug)]
-pub(crate) enum Reproducibility<SP: SessionParameters> {
-    Available(Vec<Node<SP>>),
+pub(crate) enum Reproducibility {
+    Available {
+        arguments: BTreeSet<String>,
+        messages: BTreeSet<FullName>,
+    },
     NotAvailable,
 }
 
@@ -102,54 +106,80 @@ impl<SP: SessionParameters> Node<SP> {
         s
     }
 
-    pub(crate) fn reproducibility(&self) -> Reproducibility<SP> {
+    pub(crate) fn get_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
+        for node in self.flattened(None, Dependencies::All) {
+            if node.store_in() == tag {
+                return Ok(node.get_strong_ref());
+            }
+        }
+        Err(LocalError::new(format!("Node {tag} was not found")))
+    }
+
+    pub(crate) fn reproducibility(&self) -> Reproducibility {
+        // TODO: get rid of recursive calls
         match self.kind() {
             NodeKind::ComputeScalar { function, args, .. } => {
                 if function.takes_rng() {
                     return Reproducibility::NotAvailable;
                 }
 
-                let mut leaf_nodes = BTreeMap::<usize, Node<SP>>::new();
+                let mut arguments = BTreeSet::<String>::new();
+                let mut messages = BTreeSet::<FullName>::new();
                 for arg in args.values() {
                     match arg.reproducibility() {
-                        Reproducibility::Available(nodes) => {
-                            for node in nodes {
-                                leaf_nodes.insert(node.id(), node.get_strong_ref());
-                            }
+                        Reproducibility::Available {
+                            arguments: arg_arguments,
+                            messages: arg_messages,
+                        } => {
+                            arguments.extend(arg_arguments);
+                            messages.extend(arg_messages);
                         }
                         Reproducibility::NotAvailable => return Reproducibility::NotAvailable,
                     }
                 }
-                Reproducibility::Available(leaf_nodes.into_values().collect())
+                Reproducibility::Available { arguments, messages }
             }
             NodeKind::ComputeArray { function, args, .. } => {
                 if function.takes_rng() {
                     return Reproducibility::NotAvailable;
                 }
 
-                let mut leaf_nodes = BTreeMap::<usize, Node<SP>>::new();
+                let mut arguments = BTreeSet::<String>::new();
+                let mut messages = BTreeSet::<FullName>::new();
                 for arg in args.values() {
                     match arg.reproducibility() {
-                        Reproducibility::Available(nodes) => {
-                            for node in nodes {
-                                leaf_nodes.insert(node.id(), node.get_strong_ref());
-                            }
+                        Reproducibility::Available {
+                            arguments: arg_arguments,
+                            messages: arg_messages,
+                        } => {
+                            arguments.extend(arg_arguments);
+                            messages.extend(arg_messages);
                         }
                         Reproducibility::NotAvailable => return Reproducibility::NotAvailable,
                     }
                 }
-                Reproducibility::Available(leaf_nodes.into_values().collect())
+                Reproducibility::Available { arguments, messages }
             }
             NodeKind::DirectMessage { .. } => {
                 // We can always reproduce the result of this, since it is an infallible `()`.
-                Reproducibility::Available(Vec::new())
+                Reproducibility::Available {
+                    arguments: BTreeSet::new(),
+                    messages: BTreeSet::new(),
+                }
             }
             NodeKind::Collect { .. } => {
                 // TODO: the collect nodes that only depend on locally created values are reproducible,
                 // but that's a rare case, and it requires propagating/calculating the "locality" property.
                 Reproducibility::NotAvailable
             }
-            NodeKind::Receive { .. } => Reproducibility::Available([self.get_strong_ref()].into()),
+            NodeKind::Receive { message_name, .. } => Reproducibility::Available {
+                arguments: BTreeSet::new(),
+                messages: [message_name.clone()].into(),
+            },
+            NodeKind::ScalarArgument { name, .. } => Reproducibility::Available {
+                arguments: [name.clone()].into(),
+                messages: BTreeSet::new(),
+            },
         }
     }
 
@@ -158,6 +188,7 @@ impl<SP: SessionParameters> Node<SP> {
     ///
     /// (In other words, walks the dependency tree depth-first).
     pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>, dependencies: Dependencies) -> Vec<Self> {
+        // TODO: the arguments `terminate_at` and `dependencies` may be unused
         let mut nodes_to_process = vec![self.get_strong_ref()];
         let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
@@ -209,6 +240,24 @@ impl<SP: SessionParameters> Node<SP> {
         }
 
         replacement_nodes.remove(&root_id).expect("The root node was processed")
+    }
+
+    pub(crate) fn substitute_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
+        let root_id = self.id();
+        let mut replacement_nodes = BTreeMap::new();
+
+        for node in self.flattened(None, Dependencies::All) {
+            let old_id = node.id();
+
+            let new_node = if let NodeKind::ScalarArgument { name } = node.kind() {
+                arguments.get(name)?.get_strong_ref()
+            } else {
+                node.with_replacements(&replacement_nodes)
+            };
+            replacement_nodes.insert(old_id, new_node);
+        }
+
+        Ok(replacement_nodes.remove(&root_id).expect("The root node was processed"))
     }
 }
 
@@ -283,7 +332,9 @@ impl<SP: SessionParameters> TypedNode<SP> {
 
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut new_node = self;
-        new_node.store_in = new_node.store_in.with_added_prefix(prefix);
+        if !matches!(new_node.kind, NodeKind::ScalarArgument { .. }) {
+            new_node.store_in = new_node.store_in.with_added_prefix(prefix);
+        }
         new_node.kind = new_node.kind.with_added_prefix(prefix);
         new_node
     }
@@ -330,6 +381,9 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
+    ScalarArgument {
+        name: String,
+    },
 }
 
 impl<SP: SessionParameters> Display for NodeKind<SP> {
@@ -368,6 +422,7 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                 message_name: _message_name,
                 serde_adapter: _serde_adapter,
             } => write!(f, "receive()"),
+            Self::ScalarArgument { name } => write!(f, "argument({name})"),
         }
     }
 }
@@ -378,7 +433,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeArray { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
                 Some(group)
             }
-            Self::Collect { .. } | Self::ComputeScalar { .. } => None,
+            Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
         }
     }
 
@@ -410,6 +465,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
+            Self::ScalarArgument { name } => Self::ScalarArgument { name: name.clone() },
         }
     }
 
@@ -419,6 +475,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
             Self::DirectMessage { data, .. } => Box::new(core::iter::once(data)),
             Self::Receive { .. } => Box::new(core::iter::empty()),
+            Self::ScalarArgument { .. } => Box::new(core::iter::empty()),
         }
     }
 
@@ -428,7 +485,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeArray { args, .. } => maybe_replace_map(args, replacements),
             Self::Collect { values, .. } => maybe_replace(values, replacements),
             Self::DirectMessage { data, .. } => maybe_replace(data, replacements),
-            Self::Receive { .. } => {}
+            Self::Receive { .. } | Self::ScalarArgument { .. } => {}
         }
     }
 
@@ -437,7 +494,8 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeScalar { .. }
             | Self::ComputeArray { .. }
             | Self::Collect { .. }
-            | Self::DirectMessage { .. } => self,
+            | Self::DirectMessage { .. }
+            | Self::ScalarArgument { .. } => self,
             Self::Receive {
                 group,
                 message_name,

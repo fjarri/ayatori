@@ -24,7 +24,7 @@ pub(crate) enum Arg {
 
 #[derive(Debug, Clone)]
 pub(crate) enum OnError {
-    CollectEvidence(BTreeSet<Tag>),
+    CollectEvidence(BTreeSet<FullName>),
     Escalate,
 }
 
@@ -60,14 +60,14 @@ struct Rule<SP: SessionParameters> {
     action: Action<SP>,
 }
 
-fn get_on_error<SP: SessionParameters>(node: &Node<SP>) -> OnError {
+fn get_on_error<SP: SessionParameters>(node: &Node<SP>, private_inputs: &BTreeSet<String>) -> OnError {
     match node.reproducibility() {
-        Reproducibility::Available(leaf_nodes) => OnError::CollectEvidence(
-            leaf_nodes
-                .iter()
-                .map(|node| node.store_in().clone())
-                .collect::<BTreeSet<_>>(),
-        ),
+        Reproducibility::Available { arguments, messages } => {
+            if !arguments.is_disjoint(private_inputs) {
+                return OnError::Escalate;
+            }
+            OnError::CollectEvidence(messages)
+        }
         Reproducibility::NotAvailable => OnError::Escalate,
     }
 }
@@ -125,11 +125,13 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
-    pub fn new(output_node: &Node<SP>) -> Result<Self, LocalError> {
+    pub fn new(output_node: &Node<SP>, private_inputs: &BTreeSet<String>) -> Result<Self, LocalError> {
         let output_tag = output_node.store_in().clone();
 
         let mut rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
+
+        let mut arguments = Vec::new();
 
         for node in output_node.flattened(None, Dependencies::All) {
             let mut shared_condition = Condition::empty();
@@ -137,6 +139,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             for dependency in node.dependencies() {
                 match dependency.group() {
                     Some(_group) => {
+                        // TODO: should be checked at node graph creation stage
                         return Err(LocalError::new("Only scalar nodes are allowed as dependencies"));
                     }
                     None => {
@@ -150,6 +153,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
             let mut actions = Vec::new();
 
             match node.kind() {
+                NodeKind::ScalarArgument { name } => {
+                    // TODO: check that the remaining argument nodes correspond to arguments provided.
+                    arguments.push(name.clone());
+                }
                 NodeKind::ComputeScalar { function, args } => {
                     let mut specific_condition = Condition::empty();
                     for arg in args.values() {
@@ -170,7 +177,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     ));
                 }
                 NodeKind::ComputeArray { function, args, group } => {
-                    let on_error = get_on_error(&node);
+                    let on_error = get_on_error(&node, private_inputs);
                     for id in group.ids() {
                         actions.push(make_compute_array_action(
                             node.store_in(),
@@ -231,11 +238,17 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
         }
 
-        Ok(Self {
+        let mut result = Self {
             output_tag,
             rules,
             expected_messages,
-        })
+        };
+
+        for name in arguments {
+            result.update_with_value_ready(&Tag::computed(&name));
+        }
+
+        Ok(result)
     }
 
     pub fn update_with_value_ready(&mut self, tag: &Tag) {

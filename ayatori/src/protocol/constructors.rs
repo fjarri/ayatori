@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
-    args::{Args, ProtocolArgs},
+    args::{ArgNodes, Args, ProtocolArgs},
     function::{
         ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
         InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction, SenderError,
@@ -47,6 +47,14 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
     pub(crate) fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
         &self.serde_adapter
     }
+}
+
+pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
+    Node::new(
+        // TODO: a special tag type?
+        Tag::computed(name),
+        NodeKind::ScalarArgument { name: name.to_string() },
+    )
 }
 
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
@@ -383,9 +391,12 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     build_data: &P::BuildData,
     args: ProtocolArgs<SP>,
 ) -> Result<Node<SP>, LocalError> {
+    // TODO: merge Signature and ArgNodes types? They are always created together.
     let signature = P::signature();
-    let (aliased_args, original_nodes) = args.with_aliases(signature)?;
-    let output = P::build(my_id, build_data, aliased_args)?;
-    let prefixed = output.with_added_prefix(prefix, original_nodes);
-    Ok(prefixed)
+    let arg_nodes = ArgNodes::new(&signature);
+    let output = P::build(my_id, build_data, arg_nodes)?;
+    let prefixed = output.with_added_prefix(prefix, Vec::new());
+    let bound_args = signature.bind(args)?;
+    let with_args = prefixed.substitute_arguments(bound_args)?;
+    Ok(with_args)
 }

@@ -4,11 +4,11 @@ use core::fmt::Debug;
 use signature::rand_core::CryptoRngCore;
 
 use super::message::{Message, MessageId, SignedValue, VerificationError};
-use super::session::SessionData;
+use super::{ruleset::OnError, session::SessionData};
 use crate::{
     error::LocalError,
     protocol::{
-        Args, Erasable, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
+        Args, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
         InfallibleScalarFunctionWithRng, SenderAttributableArrayFunction, SenderError, SenderErrorEnum,
         SerializedValue, SessionParameters, Tag, ThirdPartyAttributableArrayFunction, ThirdPartyError,
         ThirdPartyErrorEnum, Value,
@@ -39,6 +39,7 @@ pub struct ComputeTask<SP: SessionParameters> {
     store_in: Tag,
     function: ComputeFunction<SP>,
     args: Args<SP>,
+    on_error: OnError,
 }
 
 impl<SP: SessionParameters> ComputeTask<SP> {
@@ -58,7 +59,11 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Ok(result) => result,
                     Err(SenderError(SenderErrorEnum::Local(error))) => return Err(error),
                     Err(SenderError(SenderErrorEnum::Error)) => {
-                        return Ok(TaskResult(TaskResultEnum::SenderError { store_in, id }));
+                        return Ok(TaskResult(TaskResultEnum::SenderError {
+                            store_in,
+                            id,
+                            on_error: self.on_error,
+                        }));
                     }
                 };
                 Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
@@ -172,6 +177,7 @@ impl<SP: SessionParameters> Task<SP> {
             store_in,
             function: ComputeFunction::ScalarInfallible { function },
             args,
+            on_error: OnError::Escalate,
         })
     }
 
@@ -197,6 +203,7 @@ impl<SP: SessionParameters> Task<SP> {
             store_in,
             function: ComputeFunction::ArrayInfallible { id, function },
             args,
+            on_error: OnError::Escalate,
         })
     }
 
@@ -218,11 +225,13 @@ impl<SP: SessionParameters> Task<SP> {
         id: SP::Verifier,
         function: SenderAttributableArrayFunction<SP>,
         args: Args<SP>,
+        on_error: OnError,
     ) -> Self {
         Self::Compute(ComputeTask {
             store_in,
             function: ComputeFunction::ArraySenderAttributable { id, function },
             args,
+            on_error,
         })
     }
 
@@ -236,6 +245,8 @@ impl<SP: SessionParameters> Task<SP> {
             store_in,
             function: ComputeFunction::ArrayThirdPartyAttributable { id, function },
             args,
+            // TODO: support third party attributable failures
+            on_error: OnError::Escalate,
         })
     }
 }
@@ -267,6 +278,7 @@ pub(crate) enum TaskResultEnum<Id> {
     SenderError {
         store_in: Tag,
         id: Id,
+        on_error: OnError,
     },
     ThirdPartyError {
         store_in: Tag,

@@ -12,7 +12,7 @@ use signature::Keypair;
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, SenderErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
-    ruleset::{Action, Ruleset},
+    ruleset::{Action, OnError, Ruleset},
     session_id::SessionId,
     storage::Storage,
     task::{
@@ -23,8 +23,7 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ArrayFunction, Dependencies, ExecutableProtocol, FullName, Node, NodeKind, ProtocolArgs, Reproducibility,
-        ScalarFunction, SessionParameters, Tag, Value,
+        ArgNodes, Args, ArrayFunction, ExecutableProtocol, FullName, ScalarFunction, SessionParameters, Tag, Value,
     },
 };
 
@@ -45,7 +44,6 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     data: Arc<SessionData<SP>>,
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
-    nodes: BTreeMap<Tag, Node<SP>>,
     phantom: PhantomData<P>,
 }
 
@@ -60,24 +58,19 @@ where
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
+        let build_data = P::make_build_data(shared_data);
+        let signature = P::signature();
+        let arg_nodes = ArgNodes::new(&signature);
+        let output_node = P::build(&signer.verifying_key(), &build_data, arg_nodes)?;
+
         let participants = P::all_participants(shared_data);
         let local_participants = BTreeSet::from([signer.verifying_key()]);
         let public_inputs = P::make_public_inputs(shared_data);
         let private_inputs = P::make_private_inputs(private_data);
-        let protocol_args = ProtocolArgs::new_from_inputs(private_inputs, public_inputs)?;
-        let build_data = P::make_build_data(shared_data);
-        let output_node = P::build(&signer.verifying_key(), &build_data, protocol_args)?;
 
-        // TODO: or just save Reproducibility?
-        let nodes = output_node
-            .flattened(None, Dependencies::All)
-            .into_iter()
-            .map(|node| (node.store_in().clone(), node))
-            .collect();
-
-        let ruleset = Ruleset::new(&output_node)?;
+        let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
         let expected_messages = ruleset.expected_messages().clone();
-        let storage = Storage::new();
+        let storage = Storage::new(public_inputs, private_inputs);
         let data = Arc::new(SessionData {
             id,
             signer,
@@ -91,7 +84,6 @@ where
             data,
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
-            nodes,
             phantom: PhantomData,
         })
     }
@@ -177,7 +169,7 @@ where
                     function,
                     index,
                     args,
-                    ..
+                    on_error,
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
                     let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
@@ -189,7 +181,7 @@ where
                             Task::compute_array_elem_infallible_with_rng(store_in, index, function, args)
                         }
                         ArrayFunction::SenderAttributable(function) => {
-                            Task::compute_array_elem_sender_attributable(store_in, index, function, args)
+                            Task::compute_array_elem_sender_attributable(store_in, index, function, args, on_error)
                         }
                         ArrayFunction::ThirdPartyAttributable(function) => {
                             Task::compute_array_elem_third_party_attributable(store_in, index, function, args)
@@ -276,38 +268,24 @@ where
                 self.storage.set_elem(&store_in, &id, result)?;
                 self.ruleset.update_with_array_element_ready(&store_in, &id);
             }
-            TaskResultEnum::SenderError { store_in, id } => {
-                let node = self.nodes.get(&store_in).unwrap();
-                // TODO: this is quite fragile.
-                // Ideally we would want to do that at session creation time.
-                match node.reproducibility() {
-                    Reproducibility::Available(leaf_nodes) => {
-                        let mut signed_values = BTreeMap::new();
-                        for node in leaf_nodes {
-                            match node.kind() {
-                                NodeKind::Receive { .. } => {
-                                    let value = self.storage.get_elem(node.store_in(), &id)?;
-                                    let signed_value = value.downcast_ref::<SignedValue<SP>>()?;
-                                    signed_values.insert(node.store_in().clone(), signed_value.clone());
-                                }
-                                // TODO: if we hit a private value here, we need to fall back to
-                                // registering an attributable error.
-                                _ => {}
-                            }
-                        }
-                        let evidence = Evidence::SenderError(SenderErrorEvidence::new(
-                            &id,
-                            &self.data.signer.verifying_key(),
-                            &store_in,
-                            signed_values,
-                        ));
-                        self.register_provable_error(evidence);
+            TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
+                OnError::Escalate => self.register_attributable_error(id, store_in),
+                OnError::CollectEvidence(message_names) => {
+                    let mut signed_values = BTreeMap::new();
+                    for name in message_names {
+                        let value = self.storage.get_elem(&Tag::signed_remote_with_full_name(&name), &id)?;
+                        let signed_value = value.downcast_ref::<SignedValue<SP>>()?;
+                        signed_values.insert(name.clone(), signed_value.clone());
                     }
-                    Reproducibility::NotAvailable => {
-                        self.register_attributable_error(id, store_in);
-                    }
+                    let evidence = Evidence::SenderError(SenderErrorEvidence::new(
+                        &id,
+                        &self.data.signer.verifying_key(),
+                        &store_in,
+                        signed_values,
+                    ));
+                    self.register_provable_error(evidence);
                 }
-            }
+            },
             TaskResultEnum::ThirdPartyError { .. } => todo!(),
         }
         Ok(())

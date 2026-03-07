@@ -35,7 +35,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
     fn build(
         _my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        inputs: ProtocolArgs<SP>,
+        inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Protocol2Message>("x");
 
@@ -78,11 +78,11 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol1 {
     type SharedData = Protocol1SharedData<SP>;
     type Output = u64;
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
         PrivateInputs::new()
     }
 
-    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs<SP> {
+    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs {
         PublicInputs::new().input("p1", shared_data.p1)
     }
 
@@ -102,11 +102,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         ProtocolSignature::new().input("p1")
     }
 
-    fn build(
-        my_id: &SP::Verifier,
-        build_data: &Self::BuildData,
-        inputs: ProtocolArgs<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    fn build(my_id: &SP::Verifier, build_data: &Self::BuildData, inputs: ArgNodes<SP>) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Protocol1Message>("x");
 
         let all_parties = build_data;

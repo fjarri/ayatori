@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::message::{SignedValue, VerifiedValue};
 use crate::error::LocalError;
-use crate::protocol::{ExecutableProtocol, SessionParameters, Tag};
+use crate::protocol::{ExecutableProtocol, FullName, SessionParameters, Tag};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
@@ -52,7 +52,7 @@ pub struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>>
     guilty_party: SP::Verifier,
     reported_by: SP::Verifier,
     failed_at: Tag,
-    signed_values: BTreeMap<Tag, SignedValue<SP>>,
+    signed_values: BTreeMap<FullName, SignedValue<SP>>,
     phantom: PhantomData<P>,
 }
 
@@ -61,7 +61,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
         guilty_party: &SP::Verifier,
         reported_by: &SP::Verifier,
         failed_at: &Tag,
-        signed_values: BTreeMap<Tag, SignedValue<SP>>,
+        signed_values: BTreeMap<FullName, SignedValue<SP>>,
     ) -> Self {
         Self {
             guilty_party: guilty_party.clone(),
@@ -78,14 +78,21 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
 
     pub fn verify(&self, _shared_data: &P::SharedData) -> Result<(), LocalError> {
         /*
-        let participants = P::all_participants(shared_data);
-        let public_inputs = P::make_public_inputs(shared_data);
-        let protocol_args = ProtocolArgs::new_from_inputs(private_inputs, public_inputs)?;
         let build_data = P::make_build_data(shared_data);
-        let output_node = P::build(&self.reported_by, &build_data, protocol_args)?;
-        let ruleset = Ruleset::new(&output_node)?;
-        Ok(())
+        let signature = P::signature();
+        let arg_nodes = ArgNodes::new(&signature);
+        let output_node = P::build(&self.reported_by, &build_data, arg_nodes)?;
+
+        let output_node = output_node.get_subtree(&self.failed_at)?;
+
+        let private_inputs = PrivateInputs::new();
+        let public_inputs = P::make_public_inputs(shared_data);
+
+        let ruleset = Ruleset::new(&output_node, &private_inputs)?;
+        let storage = Storage::new(public_inputs, private_inputs);
+
+        //let state = State::new(ruleset, storage);
         */
-        todo!()
+        Ok(())
     }
 }

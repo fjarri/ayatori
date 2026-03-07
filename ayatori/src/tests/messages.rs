@@ -66,11 +66,11 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
         PrivateInputs::new()
     }
 
-    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs<SP> {
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs {
         PublicInputs::new()
     }
 
@@ -93,7 +93,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     fn build(
         my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        _inputs: ProtocolArgs<SP>,
+        _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
