@@ -52,10 +52,6 @@ impl<SP: SessionParameters> Args<SP> {
         &self.session_data
     }
 
-    pub(crate) fn signer(&self) -> &SP::Signer {
-        &self.session_data.signer
-    }
-
     pub fn my_id(&self) -> &SP::Verifier {
         &self.my_id
     }

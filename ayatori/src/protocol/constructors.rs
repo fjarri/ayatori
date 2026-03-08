@@ -10,9 +10,9 @@ use signature::rand_core::CryptoRngCore;
 use super::{
     args::{ArgNodes, Args, ProtocolArgs},
     function::{
-        ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
-        InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction, SenderError,
-        ThirdPartyAttributableArrayFunction, ThirdPartyError,
+        ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleArrayFunctionWithSigner,
+        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction,
+        SenderError, ThirdPartyAttributableArrayFunction, ThirdPartyError,
     },
     node::{Node, NodeKind, args_to_owned},
     party::PartyGroup,
@@ -205,6 +205,7 @@ impl signature::rand_core::CryptoRng for Rng<'_> {}
 
 fn serialize<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
+    signer: &SP::Signer,
     id: &SP::Verifier,
     args: Args<SP>,
     arg_name: &str,
@@ -215,7 +216,7 @@ fn serialize<SP: SessionParameters>(
     let mut typed_rng = Rng(rng);
     let signed_value = SignedValue::<SP>::new(
         &mut typed_rng,
-        args.signer(),
+        signer,
         args.session_id(),
         args.store_in_name(),
         id,
@@ -243,9 +244,9 @@ pub fn broadcast<SP: SessionParameters>(
     let serialize_and_sign = Node::new(
         tag.clone(),
         NodeKind::ComputeArray {
-            function: ArrayFunction::InfallibleWithRng(InfallibleArrayFunctionWithRng::new_pre_erased(
+            function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
                 "serialize",
-                move |rng, id, args| serialize(rng, id, args, &arg_name, &serde_adapter),
+                move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
             )),
             group: group.clone(),
             args,
@@ -277,9 +278,9 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
     let serialize_and_sign = Node::new(
         tag.clone(),
         NodeKind::ComputeArray {
-            function: ArrayFunction::InfallibleWithRng(InfallibleArrayFunctionWithRng::new_pre_erased(
+            function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
                 "serialize",
-                move |rng, id, args| serialize(rng, id, args, &arg_name, &serde_adapter),
+                move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
             )),
             group: group.clone(),
             args,

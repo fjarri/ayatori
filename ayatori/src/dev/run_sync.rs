@@ -14,7 +14,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 ) -> Result<BTreeMap<SP::Verifier, P::Output>, LocalError> {
     let mut sessions = sessions
         .into_iter()
-        .map(|session| (session.verifier(), session))
+        .map(|session| (session.verifier().clone(), session))
         .collect::<BTreeMap<_, _>>();
     let mut messages = sessions
         .keys()

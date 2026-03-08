@@ -23,14 +23,14 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        ArgNodes, Args, ArrayFunction, ExecutableProtocol, FullName, ScalarFunction, SessionParameters, Tag, Value,
+        ArgNodes, Args, ArrayFunction, ExecutableProtocol, FullName, PrivateInputs, ScalarFunction, SessionParameters,
+        Tag, Value,
     },
 };
 
 #[derive(Debug)]
 pub(crate) struct SessionData<SP: SessionParameters> {
     pub(crate) id: SessionId<SP>,
-    pub(crate) signer: SP::Signer,
     pub(crate) participants: BTreeSet<SP::Verifier>,
     pub(crate) local_participants: BTreeSet<SP::Verifier>,
     pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
@@ -41,6 +41,8 @@ pub(crate) struct SessionData<SP: SessionParameters> {
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
+    signer: Option<Arc<SP::Signer>>,
+    verifier: SP::Verifier,
     data: Arc<SessionData<SP>>,
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
@@ -58,6 +60,8 @@ where
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
+        let verifier = signer.verifying_key();
+
         let build_data = P::make_build_data(shared_data);
         let signature = P::signature();
         let arg_nodes = ArgNodes::new(&signature);
@@ -73,7 +77,6 @@ where
         let storage = Storage::new(public_inputs, private_inputs);
         let data = Arc::new(SessionData {
             id,
-            signer,
             participants,
             local_participants,
             expected_messages,
@@ -81,6 +84,8 @@ where
         Ok(Self {
             ruleset,
             storage,
+            signer: Some(Arc::new(signer)),
+            verifier,
             data,
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
@@ -88,8 +93,49 @@ where
         })
     }
 
-    pub fn verifier(&self) -> SP::Verifier {
-        self.data.signer.verifying_key()
+    pub(crate) fn new_subtree(
+        id: SessionId<SP>,
+        subtree_root: &Tag,
+        verifier: &SP::Verifier,
+        shared_data: &P::SharedData,
+    ) -> Result<Self, LocalError> {
+        // TODO: extract common code with new()
+
+        let build_data = P::make_build_data(shared_data);
+        let signature = P::signature();
+        let arg_nodes = ArgNodes::new(&signature);
+        let output_node = P::build(verifier, &build_data, arg_nodes)?.get_subtree(subtree_root)?;
+
+        let participants = P::all_participants(shared_data);
+        let local_participants = BTreeSet::from([verifier.clone()]);
+
+        let private_inputs = PrivateInputs::new();
+        let public_inputs = P::make_public_inputs(shared_data);
+
+        // TODO: we only need rules leading to `failed_at[guilty_party]`, not the whole `failed_at` array.
+        let ruleset = Ruleset::new(&output_node, &BTreeSet::new())?;
+        let expected_messages = ruleset.expected_messages().clone();
+        let storage = Storage::new(public_inputs, private_inputs);
+        let data = Arc::new(SessionData {
+            id,
+            participants,
+            local_participants,
+            expected_messages,
+        });
+        Ok(Self {
+            ruleset,
+            storage,
+            signer: None,
+            verifier: verifier.clone(),
+            data,
+            provable_errors: BTreeMap::new(),
+            attributable_errors: BTreeMap::new(),
+            phantom: PhantomData,
+        })
+    }
+
+    pub fn verifier(&self) -> &SP::Verifier {
+        &self.verifier
     }
 
     fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
@@ -130,9 +176,7 @@ where
             ));
         }
 
-        loop {
-            let Some(action) = self.ruleset.pop_action() else { break };
-
+        while let Some(action) = self.ruleset.pop_action() {
             match action {
                 Action::Send {
                     store_in,
@@ -154,7 +198,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
-                    let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
+                    let args = Args::new(store_in.full_name(), &self.data, self.verifier(), arg_values)?;
                     return Ok(Some(match function {
                         ScalarFunction::Infallible(function) => {
                             Task::compute_scalar_infallible(store_in, function, args)
@@ -172,13 +216,20 @@ where
                     on_error,
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
-                    let args = Args::new(store_in.full_name(), &self.data, &self.verifier(), arg_values)?;
+                    let args = Args::new(store_in.full_name(), &self.data, self.verifier(), arg_values)?;
                     return Ok(Some(match function {
                         ArrayFunction::Infallible(function) => {
                             Task::compute_array_elem_infallible(store_in, index, function, args)
                         }
                         ArrayFunction::InfallibleWithRng(function) => {
                             Task::compute_array_elem_infallible_with_rng(store_in, index, function, args)
+                        }
+                        ArrayFunction::InfallibleWithSigner(function) => {
+                            let signer = self
+                                .signer
+                                .as_ref()
+                                .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
+                            Task::compute_array_elem_infallible_with_signer(store_in, signer, index, function, args)
                         }
                         ArrayFunction::SenderAttributable(function) => {
                             Task::compute_array_elem_sender_attributable(store_in, index, function, args, on_error)
@@ -198,11 +249,19 @@ where
         Ok(None)
     }
 
+    pub(crate) fn make_preprocessing_task(
+        &self,
+        message_id: &MessageId<SP>,
+        signed_value: SignedValue<SP>,
+    ) -> PreprocessingTask<SP> {
+        PreprocessingTask::new(&self.data, message_id.clone(), signed_value)
+    }
+
     pub fn preprocess_message(&self, message: MessageWithId<SP>) -> impl Iterator<Item = PreprocessingTask<SP>> {
         let message_id = message.id().clone();
         message
             .into_values()
-            .map(move |value| PreprocessingTask::new(&self.data, message_id.clone(), value))
+            .map(move |signed_value| self.make_preprocessing_task(&message_id, signed_value))
     }
 
     pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
@@ -278,8 +337,9 @@ where
                         signed_values.insert(name.clone(), signed_value.clone());
                     }
                     let evidence = Evidence::SenderError(SenderErrorEvidence::new(
+                        &self.data.id,
                         &id,
-                        &self.data.signer.verifying_key(),
+                        &self.verifier,
                         &store_in,
                         signed_values,
                     ));

@@ -8,9 +8,9 @@ mod traits;
 mod value;
 
 pub(crate) use function::{
-    ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
-    InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction, SenderErrorEnum,
-    ThirdPartyAttributableArrayFunction, ThirdPartyErrorEnum,
+    ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleArrayFunctionWithSigner,
+    InfallibleScalarFunction, InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction,
+    SenderErrorEnum, ThirdPartyAttributableArrayFunction, ThirdPartyErrorEnum,
 };
 pub(crate) use node::{NodeKind, Reproducibility};
 pub(crate) use tag::{FullName, Tag};

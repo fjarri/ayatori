@@ -135,6 +135,11 @@ define_function_type!(
 );
 
 define_function_type!(
+    InfallibleArrayFunctionWithSigner<SP>,
+    (rng: &mut dyn CryptoRngCore, signer: &SP::Signer, id: &SP::Verifier, args: Args<SP>) -> LocalError
+);
+
+define_function_type!(
     SenderAttributableArrayFunction<SP>,
     (id: &SP::Verifier, args: Args<SP>) -> SenderError
 );
@@ -151,8 +156,8 @@ pub(crate) enum ScalarFunction<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ScalarFunction<SP> {
-    pub fn takes_rng(&self) -> bool {
-        matches!(self, Self::InfallibleWithRng(_))
+    pub fn is_reproducible(&self) -> bool {
+        !matches!(self, Self::InfallibleWithRng(_))
     }
 }
 
@@ -160,13 +165,14 @@ impl<SP: SessionParameters> ScalarFunction<SP> {
 pub(crate) enum ArrayFunction<SP: SessionParameters> {
     Infallible(InfallibleArrayFunction<SP>),
     InfallibleWithRng(InfallibleArrayFunctionWithRng<SP>),
+    InfallibleWithSigner(InfallibleArrayFunctionWithSigner<SP>),
     SenderAttributable(SenderAttributableArrayFunction<SP>),
     ThirdPartyAttributable(ThirdPartyAttributableArrayFunction<SP>),
 }
 
 impl<SP: SessionParameters> ArrayFunction<SP> {
-    pub fn takes_rng(&self) -> bool {
-        matches!(self, Self::InfallibleWithRng(_))
+    pub fn is_reproducible(&self) -> bool {
+        !matches!(self, Self::InfallibleWithRng(_) | Self::InfallibleWithSigner(_))
     }
 }
 
@@ -183,6 +189,7 @@ impl<SP: SessionParameters> Display for ArrayFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::InfallibleWithRng(function) => write!(f, "{function}[RNG]"),
+            Self::InfallibleWithSigner(function) => write!(f, "{function}[Signer]"),
             Self::Infallible(function) => write!(f, "{function}"),
             Self::SenderAttributable(function) => write!(f, "{function}"),
             Self::ThirdPartyAttributable(function) => write!(f, "{function}"),

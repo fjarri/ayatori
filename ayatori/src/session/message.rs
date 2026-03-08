@@ -281,6 +281,13 @@ impl<SP: SessionParameters> MessageId<SP> {
         rng.fill_bytes(&mut buffer);
         Self(buffer)
     }
+
+    // TODO: used in Evidence::verify() just to be able to reuse the preprocessing machinery; can we avoid it?
+    pub(crate) fn from_usize(id: usize) -> Self {
+        let mut buffer = digest::Output::<SP::Digest>::default();
+        buffer[0..{ usize::BITS as usize / 8 }].copy_from_slice(&id.to_be_bytes());
+        Self(buffer)
+    }
 }
 
 impl<SP: SessionParameters> Debug for MessageId<SP> {

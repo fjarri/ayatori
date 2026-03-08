@@ -101,6 +101,9 @@ impl<SP: SessionParameters> Node<SP> {
     }
 
     pub(crate) fn get_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
+        // TODO: we should clear the dependencies from all nodes, too,
+        // since we don't need those nodes for evidence verification.
+        // And rename it to something more specific.
         for node in self.flattened() {
             if node.store_in() == tag {
                 return Ok(node.get_strong_ref());
@@ -113,7 +116,7 @@ impl<SP: SessionParameters> Node<SP> {
         // TODO: get rid of recursive calls
         match self.kind() {
             NodeKind::ComputeScalar { function, args, .. } => {
-                if function.takes_rng() {
+                if !function.is_reproducible() {
                     return Reproducibility::NotAvailable;
                 }
 
@@ -134,7 +137,7 @@ impl<SP: SessionParameters> Node<SP> {
                 Reproducibility::Available { arguments, messages }
             }
             NodeKind::ComputeArray { function, args, .. } => {
-                if function.takes_rng() {
+                if !function.is_reproducible() {
                     return Reproducibility::NotAvailable;
                 }
 

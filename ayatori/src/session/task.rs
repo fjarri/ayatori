@@ -8,9 +8,9 @@ use super::{ruleset::OnError, session::SessionData};
 use crate::{
     error::LocalError,
     protocol::{
-        Args, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleScalarFunction,
-        InfallibleScalarFunctionWithRng, SenderAttributableArrayFunction, SenderError, SenderErrorEnum,
-        SerializedValue, SessionParameters, Tag, ThirdPartyAttributableArrayFunction, ThirdPartyError,
+        Args, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleArrayFunctionWithSigner,
+        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, SenderAttributableArrayFunction, SenderError,
+        SenderErrorEnum, SerializedValue, SessionParameters, Tag, ThirdPartyAttributableArrayFunction, ThirdPartyError,
         ThirdPartyErrorEnum, Value,
     },
 };
@@ -98,6 +98,11 @@ enum ComputeWithRngFunction<SP: SessionParameters> {
         function: InfallibleArrayFunctionWithRng<SP>,
         id: SP::Verifier,
     },
+    ArrayInfallibleWithSigner {
+        signer: Arc<SP::Signer>,
+        function: InfallibleArrayFunctionWithSigner<SP>,
+        id: SP::Verifier,
+    },
 }
 
 #[derive(Debug)]
@@ -117,6 +122,10 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
             }
             ComputeWithRngFunction::ArrayInfallible { function, id } => {
                 let result = function.call(rng, &id, self.args)?;
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+            }
+            ComputeWithRngFunction::ArrayInfallibleWithSigner { signer, function, id } => {
+                let result = function.call(rng, &signer, &id, self.args)?;
                 Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
             }
         }
@@ -216,6 +225,24 @@ impl<SP: SessionParameters> Task<SP> {
         Self::ComputeWithRng(ComputeWithRngTask {
             store_in,
             function: ComputeWithRngFunction::ArrayInfallible { id, function },
+            args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_infallible_with_signer(
+        store_in: Tag,
+        signer: &Arc<SP::Signer>,
+        id: SP::Verifier,
+        function: InfallibleArrayFunctionWithSigner<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::ComputeWithRng(ComputeWithRngTask {
+            store_in,
+            function: ComputeWithRngFunction::ArrayInfallibleWithSigner {
+                signer: signer.clone(),
+                id,
+                function,
+            },
             args,
         })
     }
