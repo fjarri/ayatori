@@ -25,6 +25,13 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
             Self::ConflictingMessages(error) => error.guilty_party(),
         }
     }
+
+    pub fn verify(&self, shared_data: &P::SharedData) -> Result<(), LocalError> {
+        match self {
+            Self::SenderError(evidence) => evidence.verify(shared_data),
+            Self::ConflictingMessages(evidence) => evidence.verify(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,7 +128,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
                 Task::Send(_task) => {
                     // TODO: generate a fake () value here
                 }
-                Task::FinalizeWithSuccess(_token) => {
+                Task::FinalizeWithSuccess(_task) => {
+                    panic!()
+                }
+                Task::FinalizeWithStall(_task) => {
                     panic!()
                 }
             }

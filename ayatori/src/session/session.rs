@@ -12,11 +12,11 @@ use signature::Keypair;
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, SenderErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
-    ruleset::{Action, OnError, Ruleset},
+    ruleset::{Action, ActionGroup, OnError, Ruleset},
     session_id::SessionId,
     storage::Storage,
     task::{
-        FinalizeWithSuccessToken, PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult,
+        FinalizeWithSuccessTask, PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult,
         TaskResultEnum,
     },
 };
@@ -27,6 +27,9 @@ use crate::{
         Tag, Value,
     },
 };
+
+#[cfg(any(test, feature = "dev"))]
+use crate::dev::Replacement;
 
 #[derive(Debug)]
 pub(crate) struct SessionData<SP: SessionParameters> {
@@ -134,22 +137,65 @@ where
         })
     }
 
+    #[cfg(any(test, feature = "dev"))]
+    pub fn new_with_replacements(
+        id: SessionId<SP>,
+        signer: SP::Signer,
+        private_data: &P::PrivateData,
+        shared_data: &P::SharedData,
+        replacement: Replacement<SP>,
+    ) -> Result<Self, LocalError> {
+        let verifier = signer.verifying_key();
+
+        let build_data = P::make_build_data(shared_data);
+        let signature = P::signature();
+        let arg_nodes = ArgNodes::new(&signature);
+        let output_node = P::build(&signer.verifying_key(), &build_data, arg_nodes)?;
+
+        let output_node = replacement.apply(output_node)?;
+
+        let participants = P::all_participants(shared_data);
+        let local_participants = BTreeSet::from([signer.verifying_key()]);
+        let public_inputs = P::make_public_inputs(shared_data);
+        let private_inputs = P::make_private_inputs(private_data);
+
+        let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
+        let expected_messages = ruleset.expected_messages().clone();
+        let storage = Storage::new(public_inputs, private_inputs);
+        let data = Arc::new(SessionData {
+            id,
+            participants,
+            local_participants,
+            expected_messages,
+        });
+        Ok(Self {
+            ruleset,
+            storage,
+            signer: Some(Arc::new(signer)),
+            verifier,
+            data,
+            provable_errors: BTreeMap::new(),
+            attributable_errors: BTreeMap::new(),
+            phantom: PhantomData,
+        })
+    }
+
     pub fn verifier(&self) -> &SP::Verifier {
         &self.verifier
     }
 
     fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
+        self.ruleset.update_with_banned_party(evidence.guilty_party());
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
-        // TODO: remove all affected rules
     }
 
     fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: Tag) {
+        self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
-        // TODO: remove all affected rules
     }
 
-    fn make_report(self) -> SessionReport<SP, P> {
+    pub fn make_report(self) -> SessionReport<SP, P> {
         SessionReport::<SP, P> {
             provable_errors: self.provable_errors,
             attributable_errors: self.attributable_errors,
@@ -158,25 +204,25 @@ where
 
     pub fn finalize_with_success(
         self,
-        _token: FinalizeWithSuccessToken,
+        task: FinalizeWithSuccessTask,
     ) -> Result<(P::Output, SessionReport<SP, P>), LocalError> {
-        let value = self.storage.get(self.ruleset.output_tag())?;
+        let value = self.storage.get(task.output_tag())?;
         let result = value.downcast::<P::Output>()?;
         Ok((result, self.make_report()))
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
-        if self.storage.contains(self.ruleset.output_tag()) {
-            return Ok(Some(Task::finalize_with_success()));
-        }
+        while let Some(action_group) = self.ruleset.pop_action()? {
+            let action = match action_group {
+                ActionGroup::Action(action) => action,
+                ActionGroup::ReturnOutput(tag) => {
+                    return Ok(Some(Task::finalize_with_success(tag)));
+                }
+                ActionGroup::Terminate(tag) => {
+                    return Ok(Some(Task::finalize_with_stall(tag)));
+                }
+            };
 
-        if self.ruleset.is_empty() {
-            return Err(LocalError::new(
-                "No rules to apply, and the output value has not been set",
-            ));
-        }
-
-        while let Some(action) = self.ruleset.pop_action() {
             match action {
                 Action::Send {
                     store_in,
@@ -333,8 +379,8 @@ where
                     let mut signed_values = BTreeMap::new();
                     for name in message_names {
                         let value = self.storage.get_elem(&Tag::signed_remote_with_full_name(&name), &id)?;
-                        let signed_value = value.downcast_ref::<SignedValue<SP>>()?;
-                        signed_values.insert(name.clone(), signed_value.clone());
+                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        signed_values.insert(name.clone(), signed_value);
                     }
                     let evidence = Evidence::SenderError(SenderErrorEvidence::new(
                         &self.data.id,

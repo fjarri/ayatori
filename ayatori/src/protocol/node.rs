@@ -230,6 +230,7 @@ impl<SP: SessionParameters> Node<SP> {
         replacement_nodes.remove(&root_id).expect("The root node was processed")
     }
 
+    // TODO: change name to `with_*`
     pub(crate) fn substitute_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
         let root_id = self.id();
         let mut replacement_nodes = BTreeMap::new();
@@ -246,6 +247,24 @@ impl<SP: SessionParameters> Node<SP> {
         }
 
         Ok(replacement_nodes.remove(&root_id).expect("The root node was processed"))
+    }
+
+    pub(crate) fn with_replaced_subnode(&self, old_subnode: &Self, new_subnode: &Self) -> Self {
+        let root_id = self.id();
+        let mut replacement_nodes = BTreeMap::new();
+
+        for node in self.flattened() {
+            let old_id = node.id();
+
+            let new_node = if node.id() == old_subnode.id() {
+                new_subnode.get_strong_ref()
+            } else {
+                node.with_replacements(&replacement_nodes)
+            };
+            replacement_nodes.insert(old_id, new_node);
+        }
+
+        replacement_nodes.remove(&root_id).expect("The root node was processed")
     }
 }
 

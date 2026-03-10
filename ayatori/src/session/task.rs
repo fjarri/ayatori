@@ -152,21 +152,34 @@ impl<SP: SessionParameters> SendTask<SP> {
     }
 }
 
-#[allow(missing_copy_implementations)]
-#[derive(Debug)]
-pub struct FinalizeWithSuccessToken(());
+#[derive(Debug, Clone)]
+pub struct FinalizeWithSuccessTask(Tag);
+
+impl FinalizeWithSuccessTask {
+    pub(crate) fn output_tag(&self) -> &Tag {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FinalizeWithStallTask(Tag);
 
 #[derive(Debug)]
 pub enum Task<SP: SessionParameters> {
     Send(SendTask<SP>),
     Compute(ComputeTask<SP>),
     ComputeWithRng(ComputeWithRngTask<SP>),
-    FinalizeWithSuccess(FinalizeWithSuccessToken),
+    FinalizeWithSuccess(FinalizeWithSuccessTask),
+    FinalizeWithStall(FinalizeWithStallTask),
 }
 
 impl<SP: SessionParameters> Task<SP> {
-    pub(crate) fn finalize_with_success() -> Self {
-        Self::FinalizeWithSuccess(FinalizeWithSuccessToken(()))
+    pub(crate) fn finalize_with_success(tag: Tag) -> Self {
+        Self::FinalizeWithSuccess(FinalizeWithSuccessTask(tag))
+    }
+
+    pub(crate) fn finalize_with_stall(tag: Tag) -> Self {
+        Self::FinalizeWithStall(FinalizeWithStallTask(tag))
     }
 
     pub(crate) fn send(store_in: Tag, destination: SP::Verifier, signed_value: Value) -> Self {
@@ -338,6 +351,8 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         // Before storing the value in the database, we check for the failures that are unattributable at this level.
         // In case of a failure all we can do is report the message ID and let the user deal with it
         // if their transport protocol allows it.
+
+        // TODO: reject messages from already banned nodes
 
         let source = self.signed_value.source().clone();
 

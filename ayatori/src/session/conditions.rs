@@ -43,6 +43,21 @@ impl<Id: PartyId> Condition<Id> {
         self.all_of.extend(condition.all_of);
     }
 
+    pub fn is_satisfiable(&self, banned_ids: &BTreeSet<Id>) -> bool {
+        for leaf in self.all_of.iter() {
+            match leaf {
+                // TODO (#20): this will get more complicated when threshold is involved
+                LeafCondition::Array { .. } => {
+                    if !banned_ids.is_empty() {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
     pub fn update_with_value_ready(&mut self, tag: &Tag) {
         self.all_of.retain_mut(|leaf| match leaf {
             LeafCondition::Array { tag: condition_tag, .. }

@@ -235,7 +235,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 }
 
 #[test]
-fn run_echo_protocol() {
+fn happy_path() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let party_group = PartyGroup::new(&ids);

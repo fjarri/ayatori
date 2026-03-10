@@ -11,6 +11,6 @@ mod task;
 pub(crate) use session::SessionData;
 
 pub use message::{Message, SignedHash, SignedValue, ValueMetadata, VerifiedValue};
-pub use session::{PreprocessingError, Session};
+pub use session::{PreprocessingError, Session, SessionReport};
 pub use session_id::SessionId;
 pub use task::Task;

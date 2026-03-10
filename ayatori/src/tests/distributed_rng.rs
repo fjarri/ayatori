@@ -102,7 +102,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
 }
 
 #[test]
-fn run_protocol() {
+fn happy_path() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let party_group = PartyGroup::new(&ids);
@@ -124,7 +124,7 @@ fn run_protocol() {
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    let value = results[&ids[0]];
-    assert_eq!(results[&ids[1]], value);
-    assert_eq!(results[&ids[2]], value);
+    let value = results.outputs[&ids[0]];
+    assert_eq!(results.outputs[&ids[1]], value);
+    assert_eq!(results.outputs[&ids[2]], value);
 }

@@ -52,6 +52,18 @@ pub(crate) enum Action<SP: SessionParameters> {
     },
 }
 
+impl<SP: SessionParameters> Action<SP> {
+    pub fn store_in(&self) -> &Tag {
+        // TODO: should this just be a field?
+        match self {
+            Self::ComputeScalar { store_in, .. }
+            | Self::ComputeArrayElement { store_in, .. }
+            | Self::Send { store_in, .. }
+            | Self::Collect { store_in, .. } => store_in,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Rule<SP: SessionParameters> {
     condition: Condition<SP::Verifier>,
@@ -116,10 +128,26 @@ fn make_compute_array_action<SP: SessionParameters>(
 }
 
 #[derive(Debug)]
+enum State {
+    InProgress,
+    ReachedOutput,
+    StalledAt(Tag),
+}
+
+#[derive(Debug)]
+pub(crate) enum ActionGroup<SP: SessionParameters> {
+    Action(Action<SP>),
+    ReturnOutput(Tag),
+    Terminate(Tag),
+}
+
+#[derive(Debug)]
 pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: Tag,
     rules: Vec<Rule<SP>>,
     expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
+    state: State,
+    banned_parties: BTreeSet<SP::Verifier>,
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
@@ -240,6 +268,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
             output_tag,
             rules,
             expected_messages,
+            state: State::InProgress,
+            banned_parties: BTreeSet::new(),
         };
 
         for name in arguments {
@@ -249,9 +279,24 @@ impl<SP: SessionParameters> Ruleset<SP> {
         Ok(result)
     }
 
+    pub fn update_with_banned_party(&mut self, id: &SP::Verifier) {
+        self.banned_parties.insert(id.clone());
+        for rule in &mut self.rules {
+            if !rule.condition.is_satisfiable(&self.banned_parties) {
+                // TODO (#21): it is possible that the output is reached by other branches,
+                // so we are not always stalled.
+                self.state = State::StalledAt(rule.action.store_in().clone());
+                return;
+            }
+        }
+    }
+
     pub fn update_with_value_ready(&mut self, tag: &Tag) {
         for rule in &mut self.rules {
             rule.condition.update_with_value_ready(tag);
+        }
+        if tag == &self.output_tag {
+            self.state = State::ReachedOutput;
         }
     }
 
@@ -261,34 +306,49 @@ impl<SP: SessionParameters> Ruleset<SP> {
         }
     }
 
-    fn pop_send_action(&mut self) -> Option<Action<SP>> {
+    fn pop_send_action(&mut self) -> Option<ActionGroup<SP>> {
         self.rules
             .extract_if(.., |rule| {
                 matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
             })
             .next()
             .map(|rule| rule.action)
+            .map(ActionGroup::Action)
     }
 
-    fn pop_local_action(&mut self) -> Option<Action<SP>> {
+    fn pop_local_action(&mut self) -> Option<ActionGroup<SP>> {
         self.rules
             .extract_if(.., |rule| {
                 !matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
             })
             .next()
             .map(|rule| rule.action)
+            .map(ActionGroup::Action)
     }
 
-    pub fn pop_action(&mut self) -> Option<Action<SP>> {
-        self.pop_local_action().or_else(|| self.pop_send_action())
-    }
+    pub fn pop_action(&mut self) -> Result<Option<ActionGroup<SP>>, LocalError> {
+        if matches!(self.state, State::InProgress) && self.rules.is_empty() {
+            return Err(LocalError::new(
+                "No rules to apply, and the output value has not been set",
+            ));
+        }
 
-    pub fn is_empty(&self) -> bool {
-        self.rules.is_empty()
-    }
-
-    pub fn output_tag(&self) -> &Tag {
-        &self.output_tag
+        // TODO: we need to not expose Action to the outside. This way we can flatten ActionGroup.
+        Ok(match &self.state {
+            // Regular operation: first pop all locally computable actions
+            // to have as many values ready to send as possible.
+            State::InProgress => self.pop_local_action().or_else(|| self.pop_send_action()),
+            // If we are ready to terminate, pop all send action first so that we don't stall other nodes,
+            // then return the terminating action.
+            State::ReachedOutput => self
+                .pop_send_action()
+                .or_else(|| Some(ActionGroup::ReturnOutput(self.output_tag.clone()))),
+            State::StalledAt(tag) => {
+                let tag = tag.clone();
+                self.pop_send_action()
+                    .or_else(move || Some(ActionGroup::Terminate(tag)))
+            }
+        })
     }
 
     pub fn expected_messages(&self) -> &BTreeMap<FullName, BTreeSet<SP::Verifier>> {

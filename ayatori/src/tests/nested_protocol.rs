@@ -121,7 +121,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
 }
 
 #[test]
-fn run_protocol() {
+fn happy_path() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let shared_data = Protocol1SharedData {

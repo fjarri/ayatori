@@ -20,6 +20,7 @@ use crate::{
 };
 
 #[derive(Debug)]
+#[derive_where::derive_where(Clone)]
 pub struct Args<SP: SessionParameters> {
     // TODO: this is only needed for serialization/deserialization closures.
     // Seems like a crutch. Can we somehow avoid it?
