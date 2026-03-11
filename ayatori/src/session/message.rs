@@ -49,6 +49,7 @@ impl From<LocalError> for VerificationError {
 }
 
 fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::Output<D>, LocalError> {
+    // TODO: should we just have `expect` here?
     let value_len =
         u64::try_from(value.as_ref().len()).map_err(|_| LocalError::new("Message size exceeds 2^64 bytes"))?;
     Ok(D::new_with_prefix(b"SerializedValueDigest")

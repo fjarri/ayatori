@@ -43,6 +43,10 @@ pub struct ComputeTask<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ComputeTask<SP> {
+    pub(crate) fn store_in(&self) -> &Tag {
+        &self.store_in
+    }
+
     pub fn compute(self) -> Result<TaskResult<SP::Verifier>, LocalError> {
         let store_in = self.store_in.clone();
         match self.function {
@@ -295,6 +299,10 @@ impl<SP: SessionParameters> Task<SP> {
 pub struct TaskResult<Id>(TaskResultEnum<Id>);
 
 impl<Id> TaskResult<Id> {
+    pub(crate) fn as_enum(&self) -> &TaskResultEnum<Id> {
+        &self.0
+    }
+
     pub(crate) fn into_enum(self) -> TaskResultEnum<Id> {
         self.0
     }

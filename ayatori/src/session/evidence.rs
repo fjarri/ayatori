@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, format, string::String};
 use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,7 @@ use super::{
     session::{PreprocessingError, Session},
     session_id::SessionId,
     task::Task,
+    task::TaskResultEnum,
 };
 use crate::error::LocalError;
 use crate::protocol::{ExecutableProtocol, FullName, SessionParameters, Tag};
@@ -64,26 +65,30 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
 
     pub fn verify(&self) -> Result<(), EvidenceError> {
         if &self.guilty_party != self.first.source() {
-            return Err(EvidenceError::InvalidEvidence);
+            return Err(EvidenceError::new(
+                "First message's source does not match `guilty_party`",
+            ));
         }
 
         if &self.guilty_party != self.second.source() {
-            return Err(EvidenceError::InvalidEvidence);
+            return Err(EvidenceError::new(
+                "Second message's source does not match `guilty_party`",
+            ));
         }
 
         if self.first.metadata() != self.second.metadata() {
-            return Err(EvidenceError::InvalidEvidence);
+            return Err(EvidenceError::new("Message metadatas differ"));
         }
 
         if self.first.metadata().session_id() != &self.session_id {
-            return Err(EvidenceError::InvalidEvidence);
+            return Err(EvidenceError::new("Message's session ID does not match the one stored"));
         }
 
         let first_value = self.first.clone().verify_and_unpack()?;
         let second_value = self.second.clone().verify_and_unpack()?;
 
         if first_value == second_value {
-            return Err(EvidenceError::InvalidEvidence);
+            return Err(EvidenceError::new("Serialized values of both messages are equal"));
         }
 
         Ok(())
@@ -125,65 +130,72 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
 
     pub fn verify(&self, shared_data: &P::SharedData) -> Result<(), EvidenceError> {
         let mut session =
-            Session::<SP, P>::new_subtree(self.session_id.clone(), &self.failed_at, &self.reported_by, shared_data)
-                .map_err(|_err| EvidenceError::InvalidEvidence)?;
+            Session::<SP, P>::new_subtree(self.session_id.clone(), &self.failed_at, &self.reported_by, shared_data)?;
 
         for (idx, signed_value) in self.signed_values.values().enumerate() {
             let message_id = MessageId::from_usize(idx);
             let task = session.make_preprocessing_task(&message_id, signed_value.clone());
-            let result = task.execute().map_err(|_err| EvidenceError::InvalidEvidence)?;
-
-            match session.add_preprocess_result(result) {
-                Ok(()) => {}
-                Err(PreprocessingError::Local(_error)) => return Err(EvidenceError::InvalidEvidence),
-                Err(PreprocessingError::InvalidMessage(_error)) => {
-                    return Err(EvidenceError::InvalidEvidence);
-                }
-                Err(PreprocessingError::DuplicateMessages(_error)) => {
-                    return Err(EvidenceError::InvalidEvidence);
-                }
-            };
+            let result = task.execute()?;
+            session.add_preprocess_result(result)?;
         }
 
-        while let Some(task) = session.make_task().map_err(|_err| EvidenceError::InvalidEvidence)? {
+        while let Some(task) = session.make_task()? {
             match task {
                 Task::Compute(task) => {
-                    let result = task.compute().map_err(|_err| EvidenceError::InvalidEvidence)?;
-                    // TODO: we need to skip evidence generation on error, just get the error back.
-                    session
-                        .add_result(result)
-                        .map_err(|_err| EvidenceError::InvalidEvidence)?;
+                    let store_in = task.store_in().clone();
+                    let result = task.compute()?;
+                    if store_in == self.failed_at && matches!(result.as_enum(), TaskResultEnum::SenderError { .. }) {
+                        return Ok(());
+                    }
+                    session.add_result(result)?;
                 }
                 Task::ComputeWithRng(_task) => {
-                    panic!()
+                    return Err(EvidenceError::new(
+                        "Unexpected RNG-based computation when reproducing the failure",
+                    ));
                 }
-                Task::Send(_task) => {
-                    // TODO: generate a fake () value here
+                Task::Send(task) => {
+                    let (_message, result) = task.compute()?;
+                    session.add_result(result)?;
                 }
                 Task::FinalizeWithSuccess(_task) => {
-                    panic!()
+                    return Err(EvidenceError::new("Unexpected finalization with success task"));
                 }
                 Task::FinalizeWithStall(_task) => {
-                    panic!()
+                    return Err(EvidenceError::new("Unexpected finalization with stall task"));
                 }
             }
         }
 
-        Ok(())
+        Err(EvidenceError::new("The execution did not encounter the expected error"))
     }
 }
 
-#[derive(Debug)]
-pub enum EvidenceError {
-    InvalidEvidence,
-    Local(LocalError),
+#[derive(displaydoc::Display, Debug, Clone)]
+#[displaydoc("Local error: {0}")]
+pub struct EvidenceError(String);
+
+impl EvidenceError {
+    /// Creates a new error from anything castable to string.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
+impl From<LocalError> for EvidenceError {
+    fn from(source: LocalError) -> Self {
+        EvidenceError::new(format!("{source}"))
+    }
 }
 
 impl From<VerificationError> for EvidenceError {
     fn from(source: VerificationError) -> Self {
-        match source {
-            VerificationError::SignatureMismatch => EvidenceError::InvalidEvidence,
-            VerificationError::Local(error) => EvidenceError::Local(error),
-        }
+        EvidenceError::new(format!("Verification error: {source:?}"))
+    }
+}
+
+impl<SP: SessionParameters> From<PreprocessingError<SP>> for EvidenceError {
+    fn from(source: PreprocessingError<SP>) -> Self {
+        EvidenceError::new(format!("Preprocessing error: {source:?}"))
     }
 }

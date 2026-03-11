@@ -399,7 +399,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum PreprocessingError<SP: SessionParameters> {
     Local(LocalError),
     InvalidMessage(InvalidMessageError<SP>),
