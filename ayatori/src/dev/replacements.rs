@@ -6,8 +6,6 @@ use crate::protocol::{
     Args, Erasable, InfallibleScalarFunction, Node, NodeKind, ScalarFunction, SessionParameters, Tag, Value,
 };
 
-// TODO: support several replacements with a shared state
-
 pub struct Replacement<SP: SessionParameters> {
     tag: Tag,
     kind: ReplacementEnum<SP>,
@@ -33,7 +31,7 @@ impl<SP: SessionParameters> Replacement<SP> {
         F: 'static + Fn(&Ret, Args<SP>) -> Result<Ret, LocalError>,
     {
         Self {
-            // TODO: support accessing nodes in subprotocols.
+            // TODO (#61): support accessing nodes in subprotocols.
             tag: Tag::computed(name),
             kind: ReplacementEnum::Scalar {
                 function: Box::new(move |value, args| {

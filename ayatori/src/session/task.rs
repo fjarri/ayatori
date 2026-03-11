@@ -295,7 +295,7 @@ impl<SP: SessionParameters> Task<SP> {
             store_in,
             function: ComputeFunction::ArrayThirdPartyAttributable { id, function },
             args,
-            // TODO: support third party attributable failures
+            // TODO (#59): support third party attributable failures
             on_error: OnError::Escalate,
         })
     }
@@ -366,7 +366,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         // In case of a failure all we can do is report the message ID and let the user deal with it
         // if their transport protocol allows it.
 
-        // TODO: reject messages from already banned nodes
+        // TODO (#60): reject messages from already banned nodes
 
         let source = self.signed_value.source().clone();
 

@@ -51,7 +51,7 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
 
 pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
     Node::new(
-        // TODO: a special tag type?
+        // TODO (#62): a special tag type?
         Tag::computed(name),
         NodeKind::ScalarArgument { name: name.to_string() },
     )
