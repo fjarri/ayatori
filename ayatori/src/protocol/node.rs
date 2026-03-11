@@ -101,9 +101,9 @@ impl<SP: SessionParameters> Node<SP> {
     }
 
     pub(crate) fn get_reproduction_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
-        for node in self.flattened_args() {
+        for node in self.flattened() {
             if node.store_in() == tag {
-                return Ok(node.get_strong_ref());
+                return Ok(node.tree_without_dependencies());
             }
         }
         Err(LocalError::new(format!("Node {tag} was not found")))
@@ -216,6 +216,23 @@ impl<SP: SessionParameters> Node<SP> {
         replacement_nodes.remove(&root_id).expect("The root node was processed")
     }
 
+    fn without_dependencies(self) -> Self {
+        Self::new_typed(self.unwrap_or_shallow_clone().without_dependencies())
+    }
+
+    fn tree_without_dependencies(&self) -> Self {
+        let root_id = self.id();
+        let mut replacement_nodes = BTreeMap::new();
+
+        for node in self.flattened_args() {
+            let old_id = node.id();
+            let new_node = node.without_dependencies().with_replacements(&replacement_nodes);
+            replacement_nodes.insert(old_id, new_node);
+        }
+
+        replacement_nodes.remove(&root_id).expect("The root node was processed")
+    }
+
     pub(crate) fn with_substituted_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
         let root_id = self.id();
         let mut replacement_nodes = BTreeMap::new();
@@ -298,6 +315,12 @@ impl<SP: SessionParameters> TypedNode<SP> {
         new_node
             .dependencies
             .extend(dependencies.iter().map(|dependency| dependency.get_strong_ref()));
+        new_node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut new_node = self;
+        new_node.dependencies = Vec::new();
         new_node
     }
 
