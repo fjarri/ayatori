@@ -56,14 +56,13 @@ pub trait SessionParameters: 'static {
 pub trait ExecutableProtocol<SP: SessionParameters>: Debug + ComposableProtocol<SP> {
     type SharedData;
     type PrivateData;
-    // TODO: we may not need `Clone` here
+    // The `Clone` bound is necessary to downcast the erased value to a typed one when the session is ready to finalize;
+    // we cannot guarantee that there is only one reference to it at that point.
     type Output: Clone + Erasable;
 
     fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs;
     fn make_private_inputs(private_data: &Self::PrivateData) -> PrivateInputs;
     fn make_build_data(shared_data: &Self::SharedData) -> <Self as ComposableProtocol<SP>>::BuildData;
-
-    // TODO: can we combine it out of all Receive nodes' groups?
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier>;
 }
 

@@ -385,14 +385,12 @@ pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, Loc
     ))
 }
 
-// TODO: can we avoid passing `my_id` explicitly?
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     prefix: &str,
     my_id: &SP::Verifier,
     build_data: &P::BuildData,
     args: ProtocolArgs<SP>,
 ) -> Result<Node<SP>, LocalError> {
-    // TODO: merge Signature and ArgNodes types? They are always created together.
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
     let output = P::build(my_id, build_data, arg_nodes)?;

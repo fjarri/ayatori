@@ -371,7 +371,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         let source = self.signed_value.source().clone();
 
         // Check that the value is from one of the session participants.
-        // If it isnot, even if we detect something provably wrong with it,
+        // If it is not, even if we detect something provably wrong with it,
         // the proof will be useless.
         if !self.session_data.participants.contains(self.signed_value.source()) {
             return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
