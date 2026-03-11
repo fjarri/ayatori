@@ -11,12 +11,13 @@ use super::{
     task::TaskResultEnum,
 };
 use crate::error::LocalError;
-use crate::protocol::{ExecutableProtocol, FullName, SessionParameters, Tag};
+use crate::protocol::{ExecutableProtocol, FullName, SerializedValue, SessionParameters, Tag};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     SenderError(SenderErrorEvidence<SP, P>),
     ConflictingMessages(ConflictingMessagesEvidence<SP>),
+    ThirdPartyError(ThirdPartyErrorEvidence<SP, P>),
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
@@ -24,6 +25,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
         match self {
             Self::SenderError(error) => error.guilty_party(),
             Self::ConflictingMessages(error) => error.guilty_party(),
+            Self::ThirdPartyError(error) => error.guilty_party(),
         }
     }
 
@@ -32,6 +34,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
         match self {
             Self::SenderError(evidence) => evidence.verify(shared_data),
             Self::ConflictingMessages(evidence) => evidence.verify(),
+            Self::ThirdPartyError(evidence) => evidence.verify(),
         }
     }
 }
@@ -197,5 +200,39 @@ impl From<VerificationError> for EvidenceError {
 impl<SP: SessionParameters> From<PreprocessingError<SP>> for EvidenceError {
     fn from(source: PreprocessingError<SP>) -> Self {
         EvidenceError::new(format!("Preprocessing error: {source:?}"))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    guilty_party: SP::Verifier,
+    failed_at: Tag,
+    session_id: SessionId<SP>,
+    associated_data: SerializedValue,
+    phantom: PhantomData<P>,
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
+    pub(crate) fn new(
+        session_id: &SessionId<SP>,
+        guilty_party: &SP::Verifier,
+        failed_at: &Tag,
+        associated_data: SerializedValue,
+    ) -> Self {
+        Self {
+            session_id: session_id.clone(),
+            guilty_party: guilty_party.clone(),
+            failed_at: failed_at.clone(),
+            associated_data,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn guilty_party(&self) -> &SP::Verifier {
+        &self.guilty_party
+    }
+
+    pub fn verify(&self) -> Result<(), EvidenceError> {
+        todo!()
     }
 }

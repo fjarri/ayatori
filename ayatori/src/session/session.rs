@@ -9,7 +9,7 @@ use core::{fmt::Debug, marker::PhantomData};
 use signature::Keypair;
 
 use super::{
-    evidence::{ConflictingMessagesEvidence, Evidence, SenderErrorEvidence},
+    evidence::{ConflictingMessagesEvidence, Evidence, SenderErrorEvidence, ThirdPartyErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
     ruleset::{Action, ActionGroup, OnError, Ruleset},
     session_id::SessionId,
@@ -400,7 +400,19 @@ where
                     self.register_provable_error(evidence);
                 }
             },
-            TaskResultEnum::ThirdPartyError { .. } => todo!(),
+            TaskResultEnum::ThirdPartyError {
+                store_in,
+                id,
+                associated_data,
+            } => {
+                let evidence = Evidence::ThirdPartyError(ThirdPartyErrorEvidence::new(
+                    &self.data.id,
+                    &id,
+                    &store_in,
+                    associated_data,
+                ));
+                self.register_provable_error(evidence);
+            }
         }
         Ok(())
     }
