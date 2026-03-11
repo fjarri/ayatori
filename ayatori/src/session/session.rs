@@ -3,6 +3,7 @@ use alloc::{
     format,
     string::String,
     sync::Arc,
+    vec::Vec,
 };
 use core::{fmt::Debug, marker::PhantomData};
 
@@ -342,11 +343,11 @@ where
             TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
                 OnError::Escalate => self.register_attributable_error(id, store_in),
                 OnError::CollectEvidence(message_names) => {
-                    let mut signed_values = BTreeMap::new();
+                    let mut signed_values = Vec::new();
                     for name in message_names {
                         let value = self.storage.get_elem(&Tag::signed_remote_with_full_name(&name), &id)?;
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
-                        signed_values.insert(name.clone(), signed_value);
+                        signed_values.push(signed_value);
                     }
                     let evidence = Evidence::SenderError(SenderErrorEvidence::new(
                         &self.data.id,

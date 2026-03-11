@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, format, string::String};
+use alloc::{format, string::String, vec::Vec};
 use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use super::{
     task::TaskResultEnum,
 };
 use crate::error::LocalError;
-use crate::protocol::{ExecutableProtocol, FullName, SerializedValue, SessionParameters, Tag};
+use crate::protocol::{ExecutableProtocol, SerializedValue, SessionParameters, Tag};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
@@ -105,8 +105,7 @@ pub struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>>
     reported_by: SP::Verifier,
     failed_at: Tag,
     session_id: SessionId<SP>,
-    // TODO: SignedValue already has its name inside (and signed), we don't need to keep a mapping
-    signed_values: BTreeMap<FullName, SignedValue<SP>>,
+    signed_values: Vec<SignedValue<SP>>,
     phantom: PhantomData<P>,
 }
 
@@ -116,7 +115,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
         guilty_party: &SP::Verifier,
         reported_by: &SP::Verifier,
         failed_at: &Tag,
-        signed_values: BTreeMap<FullName, SignedValue<SP>>,
+        signed_values: Vec<SignedValue<SP>>,
     ) -> Self {
         Self {
             session_id: session_id.clone(),
@@ -140,7 +139,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
             shared_data,
         )?;
 
-        for (idx, signed_value) in self.signed_values.values().enumerate() {
+        for (idx, signed_value) in self.signed_values.iter().enumerate() {
             let message_id = MessageId::from_usize(idx);
             let task = session.make_preprocessing_task(&message_id, signed_value.clone());
             let result = task.execute()?;
@@ -238,7 +237,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
     }
 
     pub fn verify(&self) -> Result<(), EvidenceError> {
-        // TODO: support third party error verification.
+        // TODO (#59): support third party error verification.
         todo!()
     }
 }
