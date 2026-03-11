@@ -1,4 +1,5 @@
 use alloc::{boxed::Box, format, vec::Vec};
+use core::fmt::{self, Debug};
 
 use crate::error::LocalError;
 use crate::protocol::{
@@ -12,8 +13,15 @@ pub struct Replacement<SP: SessionParameters> {
     kind: ReplacementEnum<SP>,
 }
 
+impl<SP: SessionParameters> Debug for Replacement<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "Replacement function for `{}`", self.tag)
+    }
+}
+
 enum ReplacementEnum<SP: SessionParameters> {
     Scalar {
+        #[allow(clippy::type_complexity)]
         function: Box<dyn Fn(&Value, Args<SP>) -> Result<Value, LocalError>>,
     },
 }

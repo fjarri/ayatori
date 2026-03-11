@@ -168,6 +168,12 @@ impl FinalizeWithSuccessTask {
 #[derive(Debug, Clone)]
 pub struct FinalizeWithStallTask(Tag);
 
+impl FinalizeWithStallTask {
+    pub(crate) fn stalled_tag(&self) -> &Tag {
+        &self.0
+    }
+}
+
 #[derive(Debug)]
 pub enum Task<SP: SessionParameters> {
     Send(SendTask<SP>),

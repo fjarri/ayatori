@@ -96,9 +96,9 @@ fn happy_path() {
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    let value = results.outputs[&ids[0]];
-    assert_eq!(results.outputs[&ids[1]], value);
-    assert_eq!(results.outputs[&ids[2]], value);
+    let value = results.reports[&ids[0]].success_ref().unwrap();
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
 }
 
 #[test]
@@ -124,14 +124,10 @@ fn provable_error() {
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    assert_eq!(results.outputs[&ids[0]], 4);
-    assert!(!results.outputs.contains_key(&ids[1]));
-    assert!(!results.outputs.contains_key(&ids[2]));
-
-    assert!(results.reports.contains_key(&ids[0]));
+    assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &4);
     assert!(results.reports[&ids[0]].provable_errors.is_empty());
 
-    assert!(results.reports.contains_key(&ids[1]));
+    assert!(results.reports[&ids[1]].is_unfinishable());
     assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
     assert!(
         results.reports[&ids[1]].provable_errors[&ids[0]]
@@ -139,7 +135,7 @@ fn provable_error() {
             .is_ok()
     );
 
-    assert!(results.reports.contains_key(&ids[2]));
+    assert!(results.reports[&ids[2]].is_unfinishable());
     assert!(results.reports[&ids[2]].provable_errors.contains_key(&ids[0]));
     assert!(
         results.reports[&ids[2]].provable_errors[&ids[0]]

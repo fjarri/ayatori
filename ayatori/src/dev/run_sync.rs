@@ -20,7 +20,6 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         .keys()
         .map(|id| (id.clone(), Vec::<Message<SP>>::new()))
         .collect::<BTreeMap<_, _>>();
-    let mut results = BTreeMap::new();
     let mut reports = BTreeMap::new();
 
     while !sessions.is_empty() {
@@ -93,28 +92,23 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
             let session = sessions
                 .remove(&id)
                 .ok_or_else(|| LocalError::new("A session for {id:?} was not found"))?;
-            let (result, report) = session.finalize_with_success(token)?;
-            results.insert(id.clone(), result);
+            let report = session.finalize_with_success(token)?;
             reports.insert(id.clone(), report);
         }
 
-        for (id, _token) in finished_with_stall {
+        for (id, token) in finished_with_stall {
             let session = sessions
                 .remove(&id)
                 .ok_or_else(|| LocalError::new("A session for {id:?} was not found"))?;
-            let report = session.make_report();
+            let report = session.finalize_with_stalled(token);
             reports.insert(id.clone(), report);
         }
     }
 
-    Ok(ExecutionResult {
-        outputs: results,
-        reports,
-    })
+    Ok(ExecutionResult { reports })
 }
 
 #[derive(Debug)]
 pub struct ExecutionResult<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    pub outputs: BTreeMap<SP::Verifier, P::Output>,
     pub reports: BTreeMap<SP::Verifier, SessionReport<SP, P>>,
 }

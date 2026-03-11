@@ -124,7 +124,7 @@ fn happy_path() {
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    let value = results.outputs[&ids[0]];
-    assert_eq!(results.outputs[&ids[1]], value);
-    assert_eq!(results.outputs[&ids[2]], value);
+    let value = results.reports[&ids[0]].success_ref().unwrap();
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
 }

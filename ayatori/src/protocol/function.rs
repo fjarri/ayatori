@@ -64,7 +64,7 @@ impl<SP: SessionParameters> ThirdPartyError<SP> {
     }
 }
 
-macro_rules! define_function_type {
+macro_rules! define_function_type_erased {
     ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> $error_type:ty ) => {
         #[derive_where::derive_where(Clone)]
         pub(crate) struct $type_name<$SP: SessionParameters> {
@@ -86,16 +86,6 @@ macro_rules! define_function_type {
         }
 
         impl<$SP: SessionParameters> $type_name<$SP> {
-            pub fn new<Ret: Erasable>(
-                function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>
-            ) -> Self {
-                let name = core::any::type_name_of_val(&function).to_string();
-                Self::new_pre_erased(
-                    name,
-                    move |$($arg_name: $arg_type),*| function($($arg_name),*).map(Value::new)
-                )
-            }
-
             pub fn new_pre_erased(
                 name: impl Into<String>,
                 function: impl 'static + Fn($($arg_type),*) -> Result<Value, $error_type>,
@@ -109,6 +99,25 @@ macro_rules! define_function_type {
 
             pub fn call(&self, $($arg_name: $arg_type),*) -> Result<Value, $error_type> {
                 (self.function)($($arg_name),*)
+            }
+        }
+    }
+}
+
+macro_rules! define_function_type {
+    ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> $error_type:ty ) => {
+
+        define_function_type_erased!($type_name<$SP>, ($($arg_name: $arg_type),*) -> $error_type);
+
+        impl<$SP: SessionParameters> $type_name<$SP> {
+            pub fn new<Ret: Erasable>(
+                function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>
+            ) -> Self {
+                let name = core::any::type_name_of_val(&function).to_string();
+                Self::new_pre_erased(
+                    name,
+                    move |$($arg_name: $arg_type),*| function($($arg_name),*).map(Value::new)
+                )
             }
         }
     }
@@ -134,7 +143,7 @@ define_function_type!(
     (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>) -> LocalError
 );
 
-define_function_type!(
+define_function_type_erased!(
     InfallibleArrayFunctionWithSigner<SP>,
     (rng: &mut dyn CryptoRngCore, signer: &SP::Signer, id: &SP::Verifier, args: Args<SP>) -> LocalError
 );

@@ -33,10 +33,6 @@ impl<Id: PartyId> Storage<Id> {
         }
     }
 
-    pub fn contains(&self, tag: &Tag) -> bool {
-        self.scalars.contains_key(tag)
-    }
-
     pub fn get(&self, tag: &Tag) -> Result<Value, LocalError> {
         Ok(self
             .scalars

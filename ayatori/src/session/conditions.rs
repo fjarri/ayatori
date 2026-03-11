@@ -45,14 +45,11 @@ impl<Id: PartyId> Condition<Id> {
 
     pub fn is_satisfiable(&self, banned_ids: &BTreeSet<Id>) -> bool {
         for leaf in self.all_of.iter() {
-            match leaf {
-                // TODO (#20): this will get more complicated when threshold is involved
-                LeafCondition::Array { .. } => {
-                    if !banned_ids.is_empty() {
-                        return false;
-                    }
-                }
-                _ => {}
+            // TODO (#20): this will get more complicated when threshold is involved
+            if let LeafCondition::Array { .. } = leaf
+                && !banned_ids.is_empty()
+            {
+                return false;
             }
         }
         true

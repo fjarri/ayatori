@@ -6,7 +6,6 @@ use alloc::{
 };
 use core::{fmt::Debug, marker::PhantomData};
 
-use serde::{Deserialize, Serialize};
 use signature::Keypair;
 
 use super::{
@@ -16,8 +15,8 @@ use super::{
     session_id::SessionId,
     storage::Storage,
     task::{
-        FinalizeWithSuccessTask, PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult,
-        TaskResultEnum,
+        FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingResult, PreprocessingResultEnum,
+        PreprocessingTask, Task, TaskResult, TaskResultEnum,
     },
 };
 use crate::{
@@ -39,7 +38,6 @@ pub(crate) struct SessionData<SP: SessionParameters> {
     pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
 }
 
-// TODO: do we need to be generic over P here?
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
@@ -195,20 +193,29 @@ where
             .insert(guilty_party, format!("Error when calculating {tag}"));
     }
 
-    pub fn make_report(self) -> SessionReport<SP, P> {
+    pub fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
         SessionReport::<SP, P> {
+            outcome,
             provable_errors: self.provable_errors,
             attributable_errors: self.attributable_errors,
         }
     }
 
-    pub fn finalize_with_success(
-        self,
-        task: FinalizeWithSuccessTask,
-    ) -> Result<(P::Output, SessionReport<SP, P>), LocalError> {
+    pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, LocalError> {
         let value = self.storage.get(task.output_tag())?;
         let result = value.downcast::<P::Output>()?;
-        Ok((result, self.make_report()))
+        Ok(self.make_report(SessionOutcome::Success(result)))
+    }
+
+    pub fn finalize_with_stalled(self, task: FinalizeWithStallTask) -> SessionReport<SP, P> {
+        self.make_report(SessionOutcome::Unfinishable(format!(
+            "Stalled at {}",
+            task.stalled_tag()
+        )))
+    }
+
+    pub fn terminate(self) -> SessionReport<SP, P> {
+        self.make_report(SessionOutcome::ManuallyTerminated)
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
@@ -430,8 +437,38 @@ pub struct DuplicateMessagesError<SP: SessionParameters> {
     pub second: MessageId<SP>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SessionReport<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    pub outcome: SessionOutcome<SP, P>,
     pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     pub attributable_errors: BTreeMap<SP::Verifier, String>,
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
+    pub fn success(self) -> Option<P::Output> {
+        if let SessionOutcome::Success(output) = self.outcome {
+            Some(output)
+        } else {
+            None
+        }
+    }
+
+    pub fn success_ref(&self) -> Option<&P::Output> {
+        if let SessionOutcome::Success(output) = &self.outcome {
+            Some(output)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_unfinishable(&self) -> bool {
+        matches!(self.outcome, SessionOutcome::Unfinishable(..))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    Success(P::Output),
+    ManuallyTerminated,
+    Unfinishable(String),
 }

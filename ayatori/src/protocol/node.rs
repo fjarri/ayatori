@@ -185,7 +185,6 @@ impl<SP: SessionParameters> Node<SP> {
     ///
     /// (In other words, walks the dependency tree depth-first).
     pub(crate) fn flattened(&self) -> Vec<Self> {
-        // TODO: the arguments `terminate_at` and `dependencies` may be unused
         let mut nodes_to_process = vec![self.get_strong_ref()];
         let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
