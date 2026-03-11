@@ -112,85 +112,67 @@ impl<SP: SessionParameters> Node<SP> {
         Err(LocalError::new(format!("Node {tag} was not found")))
     }
 
-    pub(crate) fn reproducibility(&self) -> Reproducibility {
-        // TODO: get rid of recursive calls
-        match self.kind() {
-            NodeKind::ComputeScalar { function, args, .. } => {
-                if !function.is_reproducible() {
-                    return Reproducibility::NotAvailable;
-                }
-
-                let mut arguments = BTreeSet::<String>::new();
-                let mut messages = BTreeSet::<FullName>::new();
-                for arg in args.values() {
-                    match arg.reproducibility() {
-                        Reproducibility::Available {
-                            arguments: arg_arguments,
-                            messages: arg_messages,
-                        } => {
-                            arguments.extend(arg_arguments);
-                            messages.extend(arg_messages);
-                        }
-                        Reproducibility::NotAvailable => return Reproducibility::NotAvailable,
-                    }
-                }
-                Reproducibility::Available { arguments, messages }
+    fn is_local(&self) -> bool {
+        for node in self.flattened_args() {
+            if matches!(node.kind(), NodeKind::Receive { .. }) {
+                return false;
             }
-            NodeKind::ComputeArray { function, args, .. } => {
-                if !function.is_reproducible() {
-                    return Reproducibility::NotAvailable;
-                }
-
-                let mut arguments = BTreeSet::<String>::new();
-                let mut messages = BTreeSet::<FullName>::new();
-                for arg in args.values() {
-                    match arg.reproducibility() {
-                        Reproducibility::Available {
-                            arguments: arg_arguments,
-                            messages: arg_messages,
-                        } => {
-                            arguments.extend(arg_arguments);
-                            messages.extend(arg_messages);
-                        }
-                        Reproducibility::NotAvailable => return Reproducibility::NotAvailable,
-                    }
-                }
-                Reproducibility::Available { arguments, messages }
-            }
-            NodeKind::DirectMessage { .. } => {
-                // We can always reproduce the result of this, since it is an infallible `()`.
-                Reproducibility::Available {
-                    arguments: BTreeSet::new(),
-                    messages: BTreeSet::new(),
-                }
-            }
-            NodeKind::Collect { .. } => {
-                // TODO: the collect nodes that only depend on locally created values are reproducible,
-                // but that's a rare case, and it requires propagating/calculating the "locality" property.
-                Reproducibility::NotAvailable
-            }
-            NodeKind::Receive { message_name, .. } => Reproducibility::Available {
-                arguments: BTreeSet::new(),
-                messages: [message_name.clone()].into(),
-            },
-            NodeKind::ScalarArgument { name, .. } => Reproducibility::Available {
-                arguments: [name.clone()].into(),
-                messages: BTreeSet::new(),
-            },
         }
+        true
+    }
+
+    pub(crate) fn reproducibility(&self) -> Reproducibility {
+        let mut arguments = BTreeSet::<String>::new();
+        let mut messages = BTreeSet::<FullName>::new();
+
+        for node in self.flattened_args() {
+            match node.kind() {
+                NodeKind::ComputeScalar { function, .. } => {
+                    if !function.is_reproducible() {
+                        return Reproducibility::NotAvailable;
+                    }
+                }
+                NodeKind::ComputeArray { function, .. } => {
+                    if !function.is_reproducible() {
+                        return Reproducibility::NotAvailable;
+                    }
+                }
+                // We can always reproduce the result of this, since it is an infallible `()`.
+                NodeKind::DirectMessage { .. } => {}
+                NodeKind::Collect { .. } => {
+                    // If a collection does not entirely depend on local data,
+                    // it will need messages from different nodes to be reproduced.
+                    if !node.is_local() {
+                        return Reproducibility::NotAvailable;
+                    }
+                }
+                NodeKind::Receive { message_name, .. } => {
+                    messages.insert(message_name.clone());
+                }
+                NodeKind::ScalarArgument { name, .. } => {
+                    arguments.insert(name.clone());
+                }
+            }
+        }
+
+        Reproducibility::Available { arguments, messages }
     }
 
     /// Returns the list of nodes consisting of `self` and all its subtree
     /// sorted in such a way that for every node all its dependencies preceed it.
     ///
     /// (In other words, walks the dependency tree depth-first).
-    pub(crate) fn flattened(&self) -> Vec<Self> {
+    fn flattened_inner(&self, args_only: bool) -> Vec<Self> {
         let mut nodes_to_process = vec![self.get_strong_ref()];
         let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
 
         while let Some(node) = nodes_to_process.pop() {
-            let all_dependencies = node.dependencies().iter().chain(node.kind().args());
+            let all_dependencies = if args_only {
+                node.kind().args()
+            } else {
+                Box::new(node.dependencies().iter().chain(node.kind().args()))
+            };
             let unprocessed_dependencies = all_dependencies
                 .filter_map(|dependency| {
                     let id = dependency.id();
@@ -212,6 +194,14 @@ impl<SP: SessionParameters> Node<SP> {
         }
 
         flat_nodes
+    }
+
+    pub(crate) fn flattened(&self) -> Vec<Self> {
+        self.flattened_inner(false)
+    }
+
+    pub(crate) fn flattened_args(&self) -> Vec<Self> {
+        self.flattened_inner(true)
     }
 
     pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
