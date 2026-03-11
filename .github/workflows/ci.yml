@@ -66,7 +66,7 @@ jobs:
         with:
           mdbook-version: 'latest'
       - name: Install mdbook-rustdoc-links
-        run: cargo install mdbook-rustdoc-links
+        run: cargo install -f mdbook-rustdoc-links
       - name: Build mdBook
         run: mdbook build book
 
