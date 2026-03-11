@@ -49,7 +49,6 @@ impl From<LocalError> for VerificationError {
 }
 
 fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::Output<D>, LocalError> {
-    // TODO: should we just have `expect` here?
     let value_len =
         u64::try_from(value.as_ref().len()).map_err(|_| LocalError::new("Message size exceeds 2^64 bytes"))?;
     Ok(D::new_with_prefix(b"SerializedValueDigest")
@@ -78,8 +77,6 @@ fn hash_value_and_metadata<SP: SessionParameters>(
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedValue<SP: SessionParameters> {
     signature: SP::Signature,
-    // TODO: could be a part of the metadata and thus signed too,
-    // but I don't think we get any additional security from it.
     source: SP::Verifier,
     metadata: ValueMetadata<SP>,
     value: SerializedValue,

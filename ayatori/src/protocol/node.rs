@@ -100,11 +100,8 @@ impl<SP: SessionParameters> Node<SP> {
         s
     }
 
-    pub(crate) fn get_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
-        // TODO: we should clear the dependencies from all nodes, too,
-        // since we don't need those nodes for evidence verification.
-        // And rename it to something more specific.
-        for node in self.flattened() {
+    pub(crate) fn get_reproduction_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
+        for node in self.flattened_args() {
             if node.store_in() == tag {
                 return Ok(node.get_strong_ref());
             }
@@ -219,8 +216,7 @@ impl<SP: SessionParameters> Node<SP> {
         replacement_nodes.remove(&root_id).expect("The root node was processed")
     }
 
-    // TODO: change name to `with_*`
-    pub(crate) fn substitute_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
+    pub(crate) fn with_substituted_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
         let root_id = self.id();
         let mut replacement_nodes = BTreeMap::new();
 

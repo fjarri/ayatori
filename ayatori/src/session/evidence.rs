@@ -133,8 +133,12 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
     }
 
     pub fn verify(&self, shared_data: &P::SharedData) -> Result<(), EvidenceError> {
-        let mut session =
-            Session::<SP, P>::new_subtree(self.session_id.clone(), &self.failed_at, &self.reported_by, shared_data)?;
+        let mut session = Session::<SP, P>::new_with_reproduction_subtree(
+            self.session_id.clone(),
+            &self.failed_at,
+            &self.reported_by,
+            shared_data,
+        )?;
 
         for (idx, signed_value) in self.signed_values.values().enumerate() {
             let message_id = MessageId::from_usize(idx);

@@ -111,13 +111,13 @@ where
         Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
     }
 
-    pub(crate) fn new_subtree(
+    pub(crate) fn new_with_reproduction_subtree(
         id: SessionId<SP>,
         subtree_root: &Tag,
         verifier: &SP::Verifier,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
-        let output_node = make_tree::<SP, P>(verifier, shared_data)?.get_subtree(subtree_root)?;
+        let output_node = make_tree::<SP, P>(verifier, shared_data)?.get_reproduction_subtree(subtree_root)?;
         Self::new_inner(id, None, verifier, output_node, PrivateInputs::new(), shared_data)
     }
 

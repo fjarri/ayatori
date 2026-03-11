@@ -398,6 +398,6 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     let output = P::build(my_id, build_data, arg_nodes)?;
     let prefixed = output.with_added_prefix(prefix);
     let bound_args = signature.bind(args)?;
-    let with_args = prefixed.substitute_arguments(bound_args)?;
+    let with_args = prefixed.with_substituted_arguments(bound_args)?;
     Ok(with_args)
 }
