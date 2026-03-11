@@ -21,6 +21,7 @@ pub enum Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
+    // TODO: make session ID and guilty party common for all evidence objects.
     pub fn guilty_party(&self) -> &SP::Verifier {
         match self {
             Self::SenderError(error) => error.guilty_party(),
@@ -233,6 +234,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
     }
 
     pub fn verify(&self) -> Result<(), EvidenceError> {
+        // TODO: support third party error verification.
         todo!()
     }
 }

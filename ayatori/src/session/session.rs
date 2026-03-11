@@ -22,8 +22,8 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        ArgNodes, Args, ArrayFunction, ExecutableProtocol, FullName, PrivateInputs, ScalarFunction, SessionParameters,
-        Tag, Value,
+        ArgNodes, Args, ArrayFunction, ExecutableProtocol, FullName, Node, PrivateInputs, ScalarFunction,
+        SessionParameters, Tag, Value,
     },
 };
 
@@ -50,28 +50,33 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     phantom: PhantomData<P>,
 }
 
+fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<Node<SP>, LocalError>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    let build_data = P::make_build_data(shared_data);
+    let signature = P::signature();
+    let arg_nodes = ArgNodes::new(&signature);
+    P::build(verifier, &build_data, arg_nodes)
+}
+
 impl<SP, P> Session<SP, P>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
 {
-    pub fn new(
+    fn new_inner(
         id: SessionId<SP>,
-        signer: SP::Signer,
-        private_data: &P::PrivateData,
+        signer: Option<SP::Signer>,
+        verifier: &SP::Verifier,
+        output_node: Node<SP>,
+        private_inputs: PrivateInputs,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
-        let verifier = signer.verifying_key();
-
-        let build_data = P::make_build_data(shared_data);
-        let signature = P::signature();
-        let arg_nodes = ArgNodes::new(&signature);
-        let output_node = P::build(&signer.verifying_key(), &build_data, arg_nodes)?;
-
         let participants = P::all_participants(shared_data);
-        let local_participants = BTreeSet::from([signer.verifying_key()]);
+        let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
-        let private_inputs = P::make_private_inputs(private_data);
 
         let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
         let expected_messages = ruleset.expected_messages().clone();
@@ -85,13 +90,25 @@ where
         Ok(Self {
             ruleset,
             storage,
-            signer: Some(Arc::new(signer)),
-            verifier,
+            signer: signer.map(Arc::new),
+            verifier: verifier.clone(),
             data,
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
             phantom: PhantomData,
         })
+    }
+
+    pub fn new(
+        id: SessionId<SP>,
+        signer: SP::Signer,
+        private_data: &P::PrivateData,
+        shared_data: &P::SharedData,
+    ) -> Result<Self, LocalError> {
+        let verifier = signer.verifying_key();
+        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        let private_inputs = P::make_private_inputs(private_data);
+        Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
     }
 
     pub(crate) fn new_subtree(
@@ -100,39 +117,8 @@ where
         verifier: &SP::Verifier,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
-        // TODO: extract common code with new()
-
-        let build_data = P::make_build_data(shared_data);
-        let signature = P::signature();
-        let arg_nodes = ArgNodes::new(&signature);
-        let output_node = P::build(verifier, &build_data, arg_nodes)?.get_subtree(subtree_root)?;
-
-        let participants = P::all_participants(shared_data);
-        let local_participants = BTreeSet::from([verifier.clone()]);
-
-        let private_inputs = PrivateInputs::new();
-        let public_inputs = P::make_public_inputs(shared_data);
-
-        // TODO: we only need rules leading to `failed_at[guilty_party]`, not the whole `failed_at` array.
-        let ruleset = Ruleset::new(&output_node, &BTreeSet::new())?;
-        let expected_messages = ruleset.expected_messages().clone();
-        let storage = Storage::new(public_inputs, private_inputs);
-        let data = Arc::new(SessionData {
-            id,
-            participants,
-            local_participants,
-            expected_messages,
-        });
-        Ok(Self {
-            ruleset,
-            storage,
-            signer: None,
-            verifier: verifier.clone(),
-            data,
-            provable_errors: BTreeMap::new(),
-            attributable_errors: BTreeMap::new(),
-            phantom: PhantomData,
-        })
+        let output_node = make_tree::<SP, P>(&verifier, shared_data)?.get_subtree(subtree_root)?;
+        Self::new_inner(id, None, verifier, output_node, PrivateInputs::new(), shared_data)
     }
 
     #[cfg(any(test, feature = "dev"))]
@@ -144,38 +130,10 @@ where
         replacement: Replacement<SP>,
     ) -> Result<Self, LocalError> {
         let verifier = signer.verifying_key();
-
-        let build_data = P::make_build_data(shared_data);
-        let signature = P::signature();
-        let arg_nodes = ArgNodes::new(&signature);
-        let output_node = P::build(&signer.verifying_key(), &build_data, arg_nodes)?;
-
+        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
         let output_node = replacement.apply(output_node)?;
-
-        let participants = P::all_participants(shared_data);
-        let local_participants = BTreeSet::from([signer.verifying_key()]);
-        let public_inputs = P::make_public_inputs(shared_data);
         let private_inputs = P::make_private_inputs(private_data);
-
-        let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
-        let expected_messages = ruleset.expected_messages().clone();
-        let storage = Storage::new(public_inputs, private_inputs);
-        let data = Arc::new(SessionData {
-            id,
-            participants,
-            local_participants,
-            expected_messages,
-        });
-        Ok(Self {
-            ruleset,
-            storage,
-            signer: Some(Arc::new(signer)),
-            verifier,
-            data,
-            provable_errors: BTreeMap::new(),
-            attributable_errors: BTreeMap::new(),
-            phantom: PhantomData,
-        })
+        Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
     }
 
     pub fn verifier(&self) -> &SP::Verifier {
