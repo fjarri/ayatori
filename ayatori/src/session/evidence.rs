@@ -14,67 +14,78 @@ use crate::error::LocalError;
 use crate::protocol::{ExecutableProtocol, SerializedValue, SessionParameters, Tag};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    SenderError(SenderErrorEvidence<SP, P>),
-    ConflictingMessages(ConflictingMessagesEvidence<SP>),
-    ThirdPartyError(ThirdPartyErrorEvidence<SP, P>),
+pub struct Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    session_id: SessionId<SP>,
+    guilty_party: SP::Verifier,
+    evidence: EvidenceEnum<SP, P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
-    // TODO: make session ID and guilty party common for all evidence objects.
-    pub fn guilty_party(&self) -> &SP::Verifier {
-        match self {
-            Self::SenderError(error) => error.guilty_party(),
-            Self::ConflictingMessages(error) => error.guilty_party(),
-            Self::ThirdPartyError(error) => error.guilty_party(),
-        }
-    }
-
-    // TODO: should return some kind of a VerificationResult
-    pub fn verify(&self, shared_data: &P::SharedData) -> Result<(), EvidenceError> {
-        match self {
-            Self::SenderError(evidence) => evidence.verify(shared_data),
-            Self::ConflictingMessages(evidence) => evidence.verify(),
-            Self::ThirdPartyError(evidence) => evidence.verify(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConflictingMessagesEvidence<SP: SessionParameters> {
-    guilty_party: SP::Verifier,
-    session_id: SessionId<SP>,
-    first: SignedValue<SP>,
-    second: SignedValue<SP>,
-}
-
-impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
-    pub(crate) fn new(
-        session_id: &SessionId<SP>,
-        guilty_party: &SP::Verifier,
-        first: &VerifiedValue<SP>,
-        second: &VerifiedValue<SP>,
-    ) -> Self {
+    pub(crate) fn new(session_id: &SessionId<SP>, guilty_party: &SP::Verifier, evidence: EvidenceEnum<SP, P>) -> Self {
         Self {
             session_id: session_id.clone(),
             guilty_party: guilty_party.clone(),
-            first: first.clone().unverify(),
-            second: second.clone().unverify(),
+            evidence,
         }
+    }
+
+    pub fn session_id(&self) -> &SessionId<SP> {
+        &self.session_id
     }
 
     pub fn guilty_party(&self) -> &SP::Verifier {
         &self.guilty_party
     }
 
-    pub fn verify(&self) -> Result<(), EvidenceError> {
-        if &self.guilty_party != self.first.source() {
+    pub fn verify(&self, shared_data: &P::SharedData) -> Result<(), EvidenceError> {
+        self.evidence.verify(&self.session_id, &self.guilty_party, shared_data)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum EvidenceEnum<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    SenderError(SenderErrorEvidence<SP, P>),
+    ConflictingMessages(ConflictingMessagesEvidence<SP>),
+    ThirdPartyError(ThirdPartyErrorEvidence<SP, P>),
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
+    pub fn verify(
+        &self,
+        session_id: &SessionId<SP>,
+        guilty_party: &SP::Verifier,
+        shared_data: &P::SharedData,
+    ) -> Result<(), EvidenceError> {
+        match self {
+            Self::SenderError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
+            Self::ConflictingMessages(evidence) => evidence.verify(session_id, guilty_party),
+            Self::ThirdPartyError(evidence) => evidence.verify(session_id, guilty_party),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ConflictingMessagesEvidence<SP: SessionParameters> {
+    first: SignedValue<SP>,
+    second: SignedValue<SP>,
+}
+
+impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
+    pub(crate) fn new(first: &VerifiedValue<SP>, second: &VerifiedValue<SP>) -> Self {
+        Self {
+            first: first.clone().unverify(),
+            second: second.clone().unverify(),
+        }
+    }
+
+    pub fn verify(&self, session_id: &SessionId<SP>, guilty_party: &SP::Verifier) -> Result<(), EvidenceError> {
+        if guilty_party != self.first.source() {
             return Err(EvidenceError::new(
                 "First message's source does not match `guilty_party`",
             ));
         }
 
-        if &self.guilty_party != self.second.source() {
+        if guilty_party != self.second.source() {
             return Err(EvidenceError::new(
                 "Second message's source does not match `guilty_party`",
             ));
@@ -84,7 +95,7 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
             return Err(EvidenceError::new("Message metadatas differ"));
         }
 
-        if self.first.metadata().session_id() != &self.session_id {
+        if self.first.metadata().session_id() != session_id {
             return Err(EvidenceError::new("Message's session ID does not match the one stored"));
         }
 
@@ -100,26 +111,16 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    guilty_party: SP::Verifier,
+pub(crate) struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: Tag,
-    session_id: SessionId<SP>,
     signed_values: Vec<SignedValue<SP>>,
     phantom: PhantomData<P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P> {
-    pub(crate) fn new(
-        session_id: &SessionId<SP>,
-        guilty_party: &SP::Verifier,
-        reported_by: &SP::Verifier,
-        failed_at: &Tag,
-        signed_values: Vec<SignedValue<SP>>,
-    ) -> Self {
+    pub fn new(reported_by: &SP::Verifier, failed_at: &Tag, signed_values: Vec<SignedValue<SP>>) -> Self {
         Self {
-            session_id: session_id.clone(),
-            guilty_party: guilty_party.clone(),
             reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
             signed_values,
@@ -127,19 +128,23 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
         }
     }
 
-    pub fn guilty_party(&self) -> &SP::Verifier {
-        &self.guilty_party
-    }
-
-    pub fn verify(&self, shared_data: &P::SharedData) -> Result<(), EvidenceError> {
+    pub fn verify(
+        &self,
+        session_id: &SessionId<SP>,
+        guilty_party: &SP::Verifier,
+        shared_data: &P::SharedData,
+    ) -> Result<(), EvidenceError> {
         let mut session = Session::<SP, P>::new_with_reproduction_subtree(
-            self.session_id.clone(),
+            session_id.clone(),
             &self.failed_at,
             &self.reported_by,
             shared_data,
         )?;
 
         for (idx, signed_value) in self.signed_values.iter().enumerate() {
+            if signed_value.source() != guilty_party {
+                return Err(EvidenceError::new("The message source is not that of the guilty party"));
+            }
             let message_id = MessageId::from_usize(idx);
             let task = session.make_preprocessing_task(&message_id, signed_value.clone());
             let result = task.execute()?;
@@ -178,6 +183,28 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    failed_at: Tag,
+    associated_data: SerializedValue,
+    phantom: PhantomData<(SP, P)>,
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
+    pub fn new(failed_at: &Tag, associated_data: SerializedValue) -> Self {
+        Self {
+            failed_at: failed_at.clone(),
+            associated_data,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn verify(&self, _session_id: &SessionId<SP>, _guilty_party: &SP::Verifier) -> Result<(), EvidenceError> {
+        // TODO (#59): support third party error verification.
+        todo!()
+    }
+}
+
 #[derive(displaydoc::Display, Debug, Clone)]
 #[displaydoc("Local error: {0}")]
 pub struct EvidenceError(String);
@@ -204,40 +231,5 @@ impl From<VerificationError> for EvidenceError {
 impl<SP: SessionParameters> From<PreprocessingError<SP>> for EvidenceError {
     fn from(source: PreprocessingError<SP>) -> Self {
         EvidenceError::new(format!("Preprocessing error: {source:?}"))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    guilty_party: SP::Verifier,
-    failed_at: Tag,
-    session_id: SessionId<SP>,
-    associated_data: SerializedValue,
-    phantom: PhantomData<P>,
-}
-
-impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
-    pub(crate) fn new(
-        session_id: &SessionId<SP>,
-        guilty_party: &SP::Verifier,
-        failed_at: &Tag,
-        associated_data: SerializedValue,
-    ) -> Self {
-        Self {
-            session_id: session_id.clone(),
-            guilty_party: guilty_party.clone(),
-            failed_at: failed_at.clone(),
-            associated_data,
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn guilty_party(&self) -> &SP::Verifier {
-        &self.guilty_party
-    }
-
-    pub fn verify(&self) -> Result<(), EvidenceError> {
-        // TODO (#59): support third party error verification.
-        todo!()
     }
 }

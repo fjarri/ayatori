@@ -10,7 +10,7 @@ use core::{fmt::Debug, marker::PhantomData};
 use signature::Keypair;
 
 use super::{
-    evidence::{ConflictingMessagesEvidence, Evidence, SenderErrorEvidence, ThirdPartyErrorEvidence},
+    evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
     ruleset::{Action, ActionGroup, OnError, Ruleset},
     session_id::SessionId,
@@ -291,13 +291,11 @@ where
                     if typed_existing_value.metadata() != typed_received_value.metadata()
                         || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
                     {
-                        let evidence = Evidence::ConflictingMessages(ConflictingMessagesEvidence::new(
-                            &self.data.id,
-                            &id,
+                        let evidence = EvidenceEnum::ConflictingMessages(ConflictingMessagesEvidence::new(
                             typed_existing_value,
                             typed_received_value,
                         ));
-                        self.register_provable_error(evidence);
+                        self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
                         return Ok(());
                     }
 
@@ -349,14 +347,9 @@ where
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
-                    let evidence = Evidence::SenderError(SenderErrorEvidence::new(
-                        &self.data.id,
-                        &id,
-                        &self.verifier,
-                        &store_in,
-                        signed_values,
-                    ));
-                    self.register_provable_error(evidence);
+                    let evidence =
+                        EvidenceEnum::SenderError(SenderErrorEvidence::new(&self.verifier, &store_in, signed_values));
+                    self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
                 }
             },
             TaskResultEnum::ThirdPartyError {
@@ -364,13 +357,8 @@ where
                 id,
                 associated_data,
             } => {
-                let evidence = Evidence::ThirdPartyError(ThirdPartyErrorEvidence::new(
-                    &self.data.id,
-                    &id,
-                    &store_in,
-                    associated_data,
-                ));
-                self.register_provable_error(evidence);
+                let evidence = EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(&store_in, associated_data));
+                self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
             }
         }
         Ok(())
