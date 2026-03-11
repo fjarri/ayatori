@@ -117,7 +117,7 @@ where
         verifier: &SP::Verifier,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
-        let output_node = make_tree::<SP, P>(&verifier, shared_data)?.get_subtree(subtree_root)?;
+        let output_node = make_tree::<SP, P>(verifier, shared_data)?.get_subtree(subtree_root)?;
         Self::new_inner(id, None, verifier, output_node, PrivateInputs::new(), shared_data)
     }
 
