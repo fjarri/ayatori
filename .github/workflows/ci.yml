@@ -54,6 +54,7 @@ jobs:
           override: true
           profile: minimal
       - name: Cache Cargo registry and git
+        id: cache-dependencies
         uses: actions/cache@v5
         with:
           path: |
@@ -66,7 +67,8 @@ jobs:
         with:
           mdbook-version: 'latest'
       - name: Install mdbook-rustdoc-links
-        run: cargo install -f mdbook-rustdoc-links
+        if: steps.cache-dependencies.outputs.cache-hit != 'true'
+        run: cargo install mdbook-rustdoc-links
       - name: Build mdBook
         run: mdbook build book
 
