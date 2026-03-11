@@ -326,6 +326,7 @@ where
                         || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
                     {
                         let evidence = Evidence::ConflictingMessages(ConflictingMessagesEvidence::new(
+                            &self.data.id,
                             &id,
                             typed_existing_value,
                             typed_received_value,

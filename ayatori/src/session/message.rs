@@ -125,6 +125,11 @@ impl<SP: SessionParameters> SignedValue<SP> {
         self.verify_inner().is_ok()
     }
 
+    pub(crate) fn verify_and_unpack(self) -> Result<SerializedValue, VerificationError> {
+        self.verify_inner()?;
+        Ok(self.value)
+    }
+
     pub fn verify(self, message_id: &MessageId<SP>) -> Result<VerifiedValue<SP>, VerificationError> {
         self.verify_inner()?;
         Ok(VerifiedValue {

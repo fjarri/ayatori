@@ -19,10 +19,6 @@ enum ReplacementEnum<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Replacement<SP> {
-    pub fn new() -> Self {
-        todo!()
-    }
-
     pub fn compute_scalar<F, Ret>(name: &str, function: F) -> Self
     where
         Ret: Erasable,

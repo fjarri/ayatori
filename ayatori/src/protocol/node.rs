@@ -249,6 +249,7 @@ impl<SP: SessionParameters> Node<SP> {
         Ok(replacement_nodes.remove(&root_id).expect("The root node was processed"))
     }
 
+    #[cfg(any(test, feature = "dev"))]
     pub(crate) fn with_replaced_subnode(&self, old_subnode: &Self, new_subnode: &Self) -> Self {
         let root_id = self.id();
         let mut replacement_nodes = BTreeMap::new();
