@@ -24,7 +24,6 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           override: true
@@ -39,7 +38,6 @@ jobs:
         with:
           toolchain: nightly
           override: true
-          profile: minimal
       # We need `no-deps` here because `generic-array` we depend on has some obsolete attributes.
       # Can be removed when we update to `signature=3`
       - name: Build docs
@@ -55,7 +53,7 @@ jobs:
         with:
           toolchain: stable
           override: true
-          profile: minimal
+          components: rust-analyzer
       - name: Cache Cargo registry and git
         id: cache-dependencies
         uses: actions/cache@v5
@@ -83,7 +81,6 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: stable
           target: x86_64-unknown-linux-gnu
           override: true
@@ -109,7 +106,6 @@ jobs:
           toolchain: stable
           components: clippy
           override: true
-          profile: minimal
       - run: cargo clippy --all --all-features --tests --benches -- -D warnings
 
   rustfmt:
@@ -120,7 +116,6 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt
-          profile: minimal
           override: true
       - uses: actions-rs/cargo@v1
         with:
@@ -135,7 +130,6 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt
-          profile: minimal
           override: true
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
