@@ -5,25 +5,26 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     error::LocalError,
     protocol::{ExecutableProtocol, SessionParameters},
-    session::{Message, PreprocessingError, Session, Task},
+    session::{Message, PreprocessingError, Session, SessionReport, Task},
 };
 
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
-) -> Result<BTreeMap<SP::Verifier, P::Output>, LocalError> {
+) -> Result<ExecutionResult<SP, P>, LocalError> {
     let mut sessions = sessions
         .into_iter()
-        .map(|session| (session.verifier(), session))
+        .map(|session| (session.verifier().clone(), session))
         .collect::<BTreeMap<_, _>>();
     let mut messages = sessions
         .keys()
         .map(|id| (id.clone(), Vec::<Message<SP>>::new()))
         .collect::<BTreeMap<_, _>>();
-    let mut results = BTreeMap::new();
+    let mut reports = BTreeMap::new();
 
     while !sessions.is_empty() {
-        let mut finished = Vec::new();
+        let mut finished_with_success = Vec::new();
+        let mut finished_with_stall = Vec::new();
         let mut task_processed = false;
 
         for (id, session) in &mut sessions {
@@ -43,9 +44,6 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                         // TODO (#40): record this for the final report instead of terminating straight away
                         Err(PreprocessingError::InvalidMessage(error)) => {
                             return Err(LocalError::new(format!("Invalid message: {error:?}")));
-                        }
-                        Err(PreprocessingError::ConflictingMessages(error)) => {
-                            return Err(LocalError::new(format!("Conflicting messages: {error:?}",)));
                         }
                         Err(PreprocessingError::DuplicateMessages(error)) => {
                             return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
@@ -73,9 +71,11 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                             .push(message);
                         session.add_result(result)?;
                     }
-                    Task::Finalize(task) => {
-                        results.insert(id.clone(), task.value()?);
-                        finished.push(id.clone());
+                    Task::FinalizeWithSuccess(token) => {
+                        finished_with_success.push((id.clone(), token));
+                    }
+                    Task::FinalizeWithStall(token) => {
+                        finished_with_stall.push((id.clone(), token));
                     }
                 }
                 task_processed = true;
@@ -88,10 +88,27 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
             ));
         }
 
-        for id in finished {
-            sessions.remove(&id);
+        for (id, token) in finished_with_success {
+            let session = sessions
+                .remove(&id)
+                .ok_or_else(|| LocalError::new("A session for {id:?} was not found"))?;
+            let report = session.finalize_with_success(token)?;
+            reports.insert(id.clone(), report);
+        }
+
+        for (id, token) in finished_with_stall {
+            let session = sessions
+                .remove(&id)
+                .ok_or_else(|| LocalError::new("A session for {id:?} was not found"))?;
+            let report = session.finalize_with_stalled(token);
+            reports.insert(id.clone(), report);
         }
     }
 
-    Ok(results)
+    Ok(ExecutionResult { reports })
+}
+
+#[derive(Debug)]
+pub struct ExecutionResult<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    pub reports: BTreeMap<SP::Verifier, SessionReport<SP, P>>,
 }

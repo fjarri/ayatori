@@ -77,8 +77,6 @@ fn hash_value_and_metadata<SP: SessionParameters>(
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedValue<SP: SessionParameters> {
     signature: SP::Signature,
-    // TODO: could be a part of the metadata and thus signed too,
-    // but I don't think we get any additional security from it.
     source: SP::Verifier,
     metadata: ValueMetadata<SP>,
     value: SerializedValue,
@@ -123,6 +121,11 @@ impl<SP: SessionParameters> SignedValue<SP> {
 
     pub fn is_signature_correct(&self) -> bool {
         self.verify_inner().is_ok()
+    }
+
+    pub(crate) fn verify_and_unpack(self) -> Result<SerializedValue, VerificationError> {
+        self.verify_inner()?;
+        Ok(self.value)
     }
 
     pub fn verify(self, message_id: &MessageId<SP>) -> Result<VerifiedValue<SP>, VerificationError> {
@@ -280,6 +283,10 @@ impl<SP: SessionParameters> MessageId<SP> {
         let mut buffer = digest::Output::<SP::Digest>::default();
         rng.fill_bytes(&mut buffer);
         Self(buffer)
+    }
+
+    pub(crate) fn from_usize(id: usize) -> Self {
+        Self(SP::Digest::new().chain_update(id.to_be_bytes()).finalize())
     }
 }
 

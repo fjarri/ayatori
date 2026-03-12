@@ -4,22 +4,32 @@ use core::fmt::Debug;
 use signature::rand_core::CryptoRngCore;
 
 use super::message::{Message, MessageId, SignedValue, VerificationError};
-use super::session::SessionData;
+use super::{ruleset::OnError, session::SessionData};
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ComputeError, ComputeErrorEnum, Erasable, SessionParameters, Tag, Value, WrappedArrayFunction,
-        WrappedArrayFunctionPrivate, WrappedScalarFunction, WrappedScalarFunctionPrivate,
+        Args, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleArrayFunctionWithSigner,
+        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, SenderAttributableArrayFunction, SenderError,
+        SenderErrorEnum, SerializedValue, SessionParameters, Tag, ThirdPartyAttributableArrayFunction, ThirdPartyError,
+        ThirdPartyErrorEnum, Value,
     },
 };
 
 #[derive(Debug)]
 enum ComputeFunction<SP: SessionParameters> {
-    Scalar {
-        function: WrappedScalarFunction<SP>,
+    ScalarInfallible {
+        function: InfallibleScalarFunction<SP>,
     },
-    Array {
-        function: WrappedArrayFunction<SP>,
+    ArrayInfallible {
+        function: InfallibleArrayFunction<SP>,
+        id: SP::Verifier,
+    },
+    ArraySenderAttributable {
+        function: SenderAttributableArrayFunction<SP>,
+        id: SP::Verifier,
+    },
+    ArrayThirdPartyAttributable {
+        function: ThirdPartyAttributableArrayFunction<SP>,
         id: SP::Verifier,
     },
 }
@@ -29,39 +39,51 @@ pub struct ComputeTask<SP: SessionParameters> {
     store_in: Tag,
     function: ComputeFunction<SP>,
     args: Args<SP>,
+    on_error: OnError,
 }
 
 impl<SP: SessionParameters> ComputeTask<SP> {
+    pub(crate) fn store_in(&self) -> &Tag {
+        &self.store_in
+    }
+
     pub fn compute(self) -> Result<TaskResult<SP::Verifier>, LocalError> {
         let store_in = self.store_in.clone();
         match self.function {
-            ComputeFunction::Scalar { function } => {
-                let result = match function.call(self.args) {
+            ComputeFunction::ScalarInfallible { function } => {
+                let result = function.call(self.args)?;
+                Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
+            }
+            ComputeFunction::ArrayInfallible { function, id } => {
+                let result = function.call(&id, self.args)?;
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+            }
+            ComputeFunction::ArraySenderAttributable { function, id } => {
+                let result = match function.call(&id, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
+                    Err(SenderError(SenderErrorEnum::Local(error))) => return Err(error),
+                    Err(SenderError(SenderErrorEnum::Error)) => {
+                        return Ok(TaskResult(TaskResultEnum::SenderError {
                             store_in,
+                            id,
+                            on_error: self.on_error,
                         }));
                     }
                 };
-                Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
             }
-            ComputeFunction::Array { function, id } => {
+            ComputeFunction::ArrayThirdPartyAttributable { function, id } => {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
+                    Err(ThirdPartyError(ThirdPartyErrorEnum::Local(error))) => return Err(error),
+                    Err(ThirdPartyError(ThirdPartyErrorEnum::Error {
+                        guilty_party,
+                        associated_data,
+                    })) => {
+                        return Ok(TaskResult(TaskResultEnum::ThirdPartyError {
                             store_in,
+                            id: guilty_party,
+                            associated_data,
                         }));
                     }
                 };
@@ -73,11 +95,16 @@ impl<SP: SessionParameters> ComputeTask<SP> {
 
 #[derive(Debug)]
 enum ComputeWithRngFunction<SP: SessionParameters> {
-    Scalar {
-        function: WrappedScalarFunctionPrivate<SP>,
+    ScalarInfallible {
+        function: InfallibleScalarFunctionWithRng<SP>,
     },
-    Array {
-        function: WrappedArrayFunctionPrivate<SP>,
+    ArrayInfallible {
+        function: InfallibleArrayFunctionWithRng<SP>,
+        id: SP::Verifier,
+    },
+    ArrayInfallibleWithSigner {
+        signer: Arc<SP::Signer>,
+        function: InfallibleArrayFunctionWithSigner<SP>,
         id: SP::Verifier,
     },
 }
@@ -93,36 +120,16 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
     pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP::Verifier>, LocalError> {
         let store_in = self.store_in.clone();
         match self.function {
-            ComputeWithRngFunction::Scalar { function } => {
-                let result = match function.call(rng, self.args) {
-                    Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::UnattributableError { store_in }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
-                };
+            ComputeWithRngFunction::ScalarInfallible { function } => {
+                let result = function.call(rng, self.args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
-            ComputeWithRngFunction::Array { function, id } => {
-                let result = match function.call(rng, &id, self.args) {
-                    Ok(result) => result,
-                    Err(ComputeError(ComputeErrorEnum::Local(error))) => return Err(error),
-                    Err(ComputeError(ComputeErrorEnum::Data)) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError { store_in, id }));
-                    }
-                    Err(ComputeError(ComputeErrorEnum::ThirdParty { guilty_party, .. })) => {
-                        return Ok(TaskResult(TaskResultEnum::AttributableError {
-                            id: guilty_party,
-                            store_in,
-                        }));
-                    }
-                };
+            ComputeWithRngFunction::ArrayInfallible { function, id } => {
+                let result = function.call(rng, &id, self.args)?;
+                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+            }
+            ComputeWithRngFunction::ArrayInfallibleWithSigner { signer, function, id } => {
+                let result = function.call(rng, &signer, &id, self.args)?;
                 Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
             }
         }
@@ -149,14 +156,21 @@ impl<SP: SessionParameters> SendTask<SP> {
     }
 }
 
-#[derive(Debug)]
-pub struct FinalizeTask {
-    outcome: Value,
+#[derive(Debug, Clone)]
+pub struct FinalizeWithSuccessTask(Tag);
+
+impl FinalizeWithSuccessTask {
+    pub(crate) fn output_tag(&self) -> &Tag {
+        &self.0
+    }
 }
 
-impl FinalizeTask {
-    pub fn value<T: Clone + Erasable>(self) -> Result<T, LocalError> {
-        self.outcome.downcast::<T>()
+#[derive(Debug, Clone)]
+pub struct FinalizeWithStallTask(Tag);
+
+impl FinalizeWithStallTask {
+    pub(crate) fn stalled_tag(&self) -> &Tag {
+        &self.0
     }
 }
 
@@ -165,12 +179,17 @@ pub enum Task<SP: SessionParameters> {
     Send(SendTask<SP>),
     Compute(ComputeTask<SP>),
     ComputeWithRng(ComputeWithRngTask<SP>),
-    Finalize(FinalizeTask),
+    FinalizeWithSuccess(FinalizeWithSuccessTask),
+    FinalizeWithStall(FinalizeWithStallTask),
 }
 
 impl<SP: SessionParameters> Task<SP> {
-    pub(crate) fn finalize(value: Value) -> Self {
-        Self::Finalize(FinalizeTask { outcome: value })
+    pub(crate) fn finalize_with_success(tag: Tag) -> Self {
+        Self::FinalizeWithSuccess(FinalizeWithSuccessTask(tag))
+    }
+
+    pub(crate) fn finalize_with_stall(tag: Tag) -> Self {
+        Self::FinalizeWithStall(FinalizeWithStallTask(tag))
     }
 
     pub(crate) fn send(store_in: Tag, destination: SP::Verifier, signed_value: Value) -> Self {
@@ -181,49 +200,103 @@ impl<SP: SessionParameters> Task<SP> {
         })
     }
 
-    pub(crate) fn compute_scalar(store_in: Tag, function: WrappedScalarFunction<SP>, args: Args<SP>) -> Self {
-        Self::Compute(ComputeTask {
-            store_in,
-            function: ComputeFunction::Scalar { function },
-            args,
-        })
-    }
-
-    pub(crate) fn compute_scalar_with_rng(
+    pub(crate) fn compute_scalar_infallible(
         store_in: Tag,
-        function: WrappedScalarFunctionPrivate<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::ComputeWithRng(ComputeWithRngTask {
-            store_in,
-            function: ComputeWithRngFunction::Scalar { function },
-            args,
-        })
-    }
-
-    pub(crate) fn compute_array_elem(
-        store_in: Tag,
-        id: SP::Verifier,
-        function: WrappedArrayFunction<SP>,
+        function: InfallibleScalarFunction<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::Compute(ComputeTask {
             store_in,
-            function: ComputeFunction::Array { id, function },
+            function: ComputeFunction::ScalarInfallible { function },
             args,
+            on_error: OnError::Escalate,
         })
     }
 
-    pub(crate) fn compute_array_elem_with_rng(
+    pub(crate) fn compute_scalar_infallible_with_rng(
         store_in: Tag,
-        id: SP::Verifier,
-        function: WrappedArrayFunctionPrivate<SP>,
+        function: InfallibleScalarFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
             store_in,
-            function: ComputeWithRngFunction::Array { id, function },
+            function: ComputeWithRngFunction::ScalarInfallible { function },
             args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_infallible(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: InfallibleArrayFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::Compute(ComputeTask {
+            store_in,
+            function: ComputeFunction::ArrayInfallible { id, function },
+            args,
+            on_error: OnError::Escalate,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_infallible_with_rng(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: InfallibleArrayFunctionWithRng<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::ComputeWithRng(ComputeWithRngTask {
+            store_in,
+            function: ComputeWithRngFunction::ArrayInfallible { id, function },
+            args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_infallible_with_signer(
+        store_in: Tag,
+        signer: &Arc<SP::Signer>,
+        id: SP::Verifier,
+        function: InfallibleArrayFunctionWithSigner<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::ComputeWithRng(ComputeWithRngTask {
+            store_in,
+            function: ComputeWithRngFunction::ArrayInfallibleWithSigner {
+                signer: signer.clone(),
+                id,
+                function,
+            },
+            args,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_sender_attributable(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: SenderAttributableArrayFunction<SP>,
+        args: Args<SP>,
+        on_error: OnError,
+    ) -> Self {
+        Self::Compute(ComputeTask {
+            store_in,
+            function: ComputeFunction::ArraySenderAttributable { id, function },
+            args,
+            on_error,
+        })
+    }
+
+    pub(crate) fn compute_array_elem_third_party_attributable(
+        store_in: Tag,
+        id: SP::Verifier,
+        function: ThirdPartyAttributableArrayFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::Compute(ComputeTask {
+            store_in,
+            function: ComputeFunction::ArrayThirdPartyAttributable { id, function },
+            args,
+            // TODO (#59): support third party attributable failures
+            on_error: OnError::Escalate,
         })
     }
 }
@@ -232,6 +305,10 @@ impl<SP: SessionParameters> Task<SP> {
 pub struct TaskResult<Id>(TaskResultEnum<Id>);
 
 impl<Id> TaskResult<Id> {
+    pub(crate) fn as_enum(&self) -> &TaskResultEnum<Id> {
+        &self.0
+    }
+
     pub(crate) fn into_enum(self) -> TaskResultEnum<Id> {
         self.0
     }
@@ -239,11 +316,29 @@ impl<Id> TaskResult<Id> {
 
 #[derive(Debug)]
 pub(crate) enum TaskResultEnum<Id> {
-    Send { store_in: Tag, destination: Id },
-    Compute { store_in: Tag, result: Value },
-    ComputeArray { store_in: Tag, id: Id, result: Value },
-    UnattributableError { store_in: Tag },
-    AttributableError { store_in: Tag, id: Id },
+    Send {
+        store_in: Tag,
+        destination: Id,
+    },
+    Compute {
+        store_in: Tag,
+        result: Value,
+    },
+    ComputeArray {
+        store_in: Tag,
+        id: Id,
+        result: Value,
+    },
+    SenderError {
+        store_in: Tag,
+        id: Id,
+        on_error: OnError,
+    },
+    ThirdPartyError {
+        store_in: Tag,
+        id: Id,
+        associated_data: SerializedValue,
+    },
 }
 
 #[derive(Debug)]
@@ -271,10 +366,12 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         // In case of a failure all we can do is report the message ID and let the user deal with it
         // if their transport protocol allows it.
 
+        // TODO (#60): reject messages from already banned nodes
+
         let source = self.signed_value.source().clone();
 
         // Check that the value is from one of the session participants.
-        // If it isnot, even if we detect something provably wrong with it,
+        // If it is not, even if we detect something provably wrong with it,
         // the proof will be useless.
         if !self.session_data.participants.contains(self.signed_value.source()) {
             return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
@@ -320,7 +417,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             }
         };
 
-        let store_in = Tag::signed_remote(verified_value.metadata().full_name());
+        let store_in = Tag::signed_remote_with_full_name(verified_value.metadata().full_name());
         let value = Value::new(verified_value);
 
         Ok(PreprocessingResult(PreprocessingResultEnum::Success {

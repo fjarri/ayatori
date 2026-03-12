@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest};
 
 use super::{
-    args::{PrivateInputs, ProtocolArgs, ProtocolSignature, PublicInputs},
+    args::{ArgNodes, PrivateInputs, ProtocolSignature, PublicInputs},
     node::Node,
     value::Erasable,
 };
@@ -56,11 +56,12 @@ pub trait SessionParameters: 'static {
 pub trait ExecutableProtocol<SP: SessionParameters>: Debug + ComposableProtocol<SP> {
     type SharedData;
     type PrivateData;
-    // TODO: we may not need `Clone` here
+    // The `Clone` bound is necessary to downcast the erased value to a typed one when the session is ready to finalize;
+    // we cannot guarantee that there is only one reference to it at that point.
     type Output: Clone + Erasable;
 
-    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs<SP>;
-    fn make_private_inputs(private_data: &Self::PrivateData) -> PrivateInputs<SP>;
+    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs;
+    fn make_private_inputs(private_data: &Self::PrivateData) -> PrivateInputs;
     fn make_build_data(shared_data: &Self::SharedData) -> <Self as ComposableProtocol<SP>>::BuildData;
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier>;
 }
@@ -70,9 +71,5 @@ pub trait ComposableProtocol<SP: SessionParameters>: Debug {
 
     fn signature() -> ProtocolSignature;
 
-    fn build(
-        my_id: &SP::Verifier,
-        build_data: &Self::BuildData,
-        inputs: ProtocolArgs<SP>,
-    ) -> Result<Node<SP>, LocalError>;
+    fn build(my_id: &SP::Verifier, build_data: &Self::BuildData, inputs: ArgNodes<SP>) -> Result<Node<SP>, LocalError>;
 }

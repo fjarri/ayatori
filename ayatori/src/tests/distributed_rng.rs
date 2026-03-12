@@ -14,32 +14,28 @@ use signature::{
 #[derive(Debug)]
 struct DistributedRNG;
 
-fn sample_value<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, ComputeError<SP>> {
+fn sample_value<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, LocalError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn sample_nonce<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, ComputeError<SP>> {
+fn sample_nonce<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, LocalError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn commit_to_value<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError<SP>> {
+fn commit_to_value<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
     let b = args.get::<u64>("b")?;
     let r = args.get::<u64>("r")?;
     Ok(b + r)
 }
 
-fn verify_commitment<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) -> Result<(), ComputeError<SP>> {
+fn verify_commitment<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) -> Result<(), SenderError> {
     let b = args.get::<u64>("b")?;
     let r = args.get::<u64>("r")?;
     let c = args.get::<u64>("c")?;
-    if b + r == *c {
-        Ok(())
-    } else {
-        Err(ComputeError::sender())
-    }
+    if b + r == *c { Ok(()) } else { Err(SenderError::new()) }
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, ComputeError<SP>> {
+fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
     let bs = args.get_map::<u64>("b")?;
     Ok(bs.values().copied().sum())
 }
@@ -49,11 +45,11 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = u64;
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
         PrivateInputs::new()
     }
 
-    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs<SP> {
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs {
         PublicInputs::new()
     }
 
@@ -76,15 +72,15 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
     fn build(
         _my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        _inputs: ProtocolArgs<SP>,
+        _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_b = ProtocolMessage::new::<u64>("b");
         let message_r = ProtocolMessage::new::<u64>("r");
         let message_c = ProtocolMessage::new::<u64>("c");
 
         let all_parties = build_data;
-        let my_b = compute_scalar_private("my_b", sample_value, &[])?;
-        let my_r = compute_scalar_private("my_r", sample_nonce, &[])?;
+        let my_b = compute_scalar_with_rng("my_b", sample_value, &[])?;
+        let my_r = compute_scalar_with_rng("my_r", sample_nonce, &[])?;
         let my_c = compute_scalar("my_c", commit_to_value, &[("b", &my_b), ("r", &my_r)])?;
         let c_broadcasted = broadcast(&message_c, &my_c, all_parties)?;
         let c = receive(&message_c, all_parties)?;
@@ -93,7 +89,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
         let r_broadcasted = broadcast(&message_r, &my_r, all_parties)?.with_dependencies(&[&all_c]);
         let b = receive(&message_b, all_parties)?;
         let r = receive(&message_r, all_parties)?;
-        let hash_correct = verify("hash_correct", verify_commitment, &[("c", &c), ("b", &b), ("r", &r)])?;
+        let hash_correct = compute_array_sender_fallible(
+            "hash_correct",
+            verify_commitment,
+            all_parties,
+            &[("c", &c), ("b", &b), ("r", &r)],
+        )?;
         let all_hash_correct = collect(&hash_correct)?.with_dependencies(&[&b_broadcasted, &r_broadcasted]);
         let all_b = collect(&b)?.with_dependencies(&[&b_broadcasted]);
         Ok(compute_scalar("output", gen_output, &[("b", &all_b)])?.with_dependencies(&[&all_hash_correct]))
@@ -101,7 +102,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
 }
 
 #[test]
-fn run_protocol() {
+fn happy_path() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let party_group = PartyGroup::new(&ids);
@@ -123,7 +124,7 @@ fn run_protocol() {
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    let value = results[&ids[0]];
-    assert_eq!(results[&ids[1]], value);
-    assert_eq!(results[&ids[2]], value);
+    let value = results.reports[&ids[0]].success_ref().unwrap();
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
 }

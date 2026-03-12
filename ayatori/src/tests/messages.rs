@@ -21,25 +21,25 @@ struct Message2<Id>(Id, Id);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message3<Id>(Id, Id);
 
-fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError<SP>> {
+fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
     Ok(Message1(args.my_id().clone()))
 }
 
 fn make_array_elem<SP: SessionParameters>(
     id: &SP::Verifier,
     args: Args<SP>,
-) -> Result<Message2<SP::Verifier>, ComputeError<SP>> {
+) -> Result<Message2<SP::Verifier>, LocalError> {
     Ok(Message2(args.my_id().clone(), id.clone()))
 }
 
 fn make_array_elem_sans_me<SP: SessionParameters>(
     id: &SP::Verifier,
     args: Args<SP>,
-) -> Result<Message3<SP::Verifier>, ComputeError<SP>> {
+) -> Result<Message3<SP::Verifier>, LocalError> {
     Ok(Message3(args.my_id().clone(), id.clone()))
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError<SP>> {
+fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), LocalError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -66,11 +66,11 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
         PrivateInputs::new()
     }
 
-    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs<SP> {
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs {
         PublicInputs::new()
     }
 
@@ -93,7 +93,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     fn build(
         my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        _inputs: ProtocolArgs<SP>,
+        _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
@@ -121,7 +121,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 }
 
 #[test]
-fn run_messages_protocol() {
+fn happy_path() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let party_group = PartyGroup::new(&ids);

@@ -196,10 +196,7 @@ impl<F: WireFormat> Debug for SerdeAdapter<F> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct SerializedValue(
-    // TODO: would be nice to store it as is if the serializer is human-readable
-    #[serde(with = "SliceLike::<Hex>")] Box<[u8]>,
-);
+pub(crate) struct SerializedValue(#[serde(with = "SliceLike::<Hex>")] Box<[u8]>);
 
 impl SerializedValue {
     pub fn new(data: Box<[u8]>) -> Self {

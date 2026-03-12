@@ -15,7 +15,7 @@ use crate::{
 
 fn prepare_echo_pack<SP: SessionParameters>(
     args: Args<SP>,
-) -> Result<BTreeMap<SP::Verifier, SignedHash<SP>>, ComputeError<SP>> {
+) -> Result<BTreeMap<SP::Verifier, SignedHash<SP>>, LocalError> {
     let values = args.get_map::<VerifiedValue<SP>>("values_verified_map")?;
     let cloned = values
         .iter()
@@ -24,7 +24,7 @@ fn prepare_echo_pack<SP: SessionParameters>(
     Ok(cloned)
 }
 
-fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), ComputeError<SP>> {
+fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), SenderError> {
     let all_ids = args.get::<BTreeSet<SP::Verifier>>("all_ids")?;
 
     // The messages we received from all nodes
@@ -38,16 +38,16 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
     // Check that all the parties are present in the `echos_map`
     let ids_received = echoed.keys().cloned().collect::<BTreeSet<_>>();
     if &ids_received != all_ids {
-        return Err(ComputeError::sender());
+        return Err(SenderError::new());
     }
 
     // Check that the messages are correctly signed and have correct metadata
     for (from, message) in echoed.iter() {
         if from != message.source() {
-            return Err(ComputeError::sender());
+            return Err(SenderError::new());
         }
         if id != message.metadata().destination() {
-            return Err(ComputeError::sender());
+            return Err(SenderError::new());
         }
 
         let ethalon = received
@@ -55,17 +55,29 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
             .expect("we checked that the ID is present in the message map");
 
         if ethalon.metadata().full_name() != message.metadata().full_name() {
-            return Err(ComputeError::sender());
+            return Err(SenderError::new());
         }
 
         if ethalon.metadata().session_id() != message.metadata().session_id() {
-            return Err(ComputeError::sender());
+            return Err(SenderError::new());
         }
 
         if !message.is_signature_correct() {
-            return Err(ComputeError::sender());
+            return Err(SenderError::new());
         }
     }
+
+    Ok(())
+}
+
+fn verify_echo_contents<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) -> Result<(), ThirdPartyError<SP>> {
+    // The messages we received from all nodes
+    // Their validity (correct metadata and contents) is checked elsewhere,
+    // so here we assumed they are correct.
+    let received = args.get_map::<VerifiedValue<SP>>("received")?;
+
+    // The echoed messages we received from `id`
+    let echoed = args.get::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echoed")?;
 
     // Check that the payload and metadata is the same (except for the `destination` part, which will differ)
     for (from, message) in echoed.iter() {
@@ -75,7 +87,7 @@ fn verify_echos_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>
 
         if !ethalon.payload_hash_matches(message)? {
             let associated_data = ((*ethalon).clone().unverify(), message);
-            return Err(ComputeError::third_party(from, associated_data)?);
+            return Err(ThirdPartyError::new(from, associated_data)?);
         }
     }
 
@@ -95,7 +107,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
     fn build(
         _my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        inputs: ProtocolArgs<SP>,
+        inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let (message, all_parties) = build_data;
         let my_value = inputs.get("value")?;
@@ -120,19 +132,29 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let echo_pack = receive(&message_echo, all_parties)?;
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
-        let echos_correct = verify(
-            "echos_correct",
-            verify_echos_correct,
+        let echo_packs_correct = compute_array_sender_fallible(
+            "echo_packs_correct",
+            verify_echo_pack_correct,
+            all_parties,
             &[
                 ("all_ids", &all_ids),
                 ("received", &all_values_verified),
                 ("echoed", &echo_pack),
             ],
         )?;
-        let all_echos_correct = collect(&echos_correct)?;
+        let echo_contents_correct = compute_array_third_party_fallible(
+            "echo_contents_correct",
+            verify_echo_contents,
+            all_parties,
+            &[("received", &all_values_verified), ("echoed", &echo_pack)],
+        )?;
+
+        let all_echo_packs_correct = collect(&echo_packs_correct)?;
+        let all_echo_contents_correct = collect(&echo_contents_correct)?;
         let output = alias("output", &values).with_dependencies(&[
             &value_broadcasted,
-            &all_echos_correct,
+            &all_echo_packs_correct,
+            &all_echo_contents_correct,
             &echo_pack_broadcasted,
         ]);
 
@@ -146,11 +168,11 @@ struct TestProtocol;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message1<Id>(Id);
 
-fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, ComputeError<SP>> {
+fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
     Ok(Message1(args.my_id().clone()))
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), ComputeError<SP>> {
+fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), LocalError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -164,11 +186,11 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = ();
 
-    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs<SP> {
+    fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
         PrivateInputs::new()
     }
 
-    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs<SP> {
+    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs {
         PublicInputs::new()
     }
 
@@ -191,7 +213,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     fn build(
         my_id: &SP::Verifier,
         build_data: &Self::BuildData,
-        _inputs: ProtocolArgs<SP>,
+        _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
 
@@ -213,7 +235,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 }
 
 #[test]
-fn run_echo_protocol() {
+fn happy_path() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
     let party_group = PartyGroup::new(&ids);

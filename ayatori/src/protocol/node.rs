@@ -11,16 +11,25 @@ use alloc::{
 use core::fmt::Debug;
 
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 
 use super::{
+    args::BoundProtocolArgs,
     function::{ArrayFunction, ScalarFunction},
     party::PartyGroup,
     tag::{FullName, Tag},
     traits::SessionParameters,
-    value::{Erasable, SerdeAdapter},
+    value::SerdeAdapter,
 };
 use crate::error::LocalError;
+
+#[derive(Debug)]
+pub(crate) enum Reproducibility {
+    Available {
+        arguments: BTreeSet<String>,
+        messages: BTreeSet<FullName>,
+    },
+    NotAvailable,
+}
 
 // `Node` intentionally does not implement `Clone` - our clones are shallow, which may be confusing for the user.
 #[derive(Debug)]
@@ -71,48 +80,100 @@ impl<SP: SessionParameters> Node<SP> {
         self.0.kind()
     }
 
-    pub(crate) fn all_dependencies(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
-        self.0.all_dependencies()
-    }
-
     fn unwrap_or_shallow_clone(self) -> TypedNode<SP> {
         Arc::try_unwrap(self.0).unwrap_or_else(|arc| arc.shallow_clone())
     }
 
-    pub(crate) fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Node<SP> {
+    fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Node<SP> {
         Self::new_typed(self.unwrap_or_shallow_clone().with_replacements(replacements))
     }
 
-    pub(crate) fn shallow_with_added_prefix(self, prefix: &str) -> Self {
+    fn shallow_with_added_prefix(self, prefix: &str) -> Self {
         Self::new_typed(self.unwrap_or_shallow_clone().with_added_prefix(prefix))
     }
 
     pub fn display_tree(&self) -> String {
         let mut s = String::new();
-        for node in self.flattened(None) {
+        for node in self.flattened() {
             writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
         }
         s
+    }
+
+    pub(crate) fn get_reproduction_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
+        for node in self.flattened() {
+            if node.store_in() == tag {
+                return Ok(node.tree_without_dependencies());
+            }
+        }
+        Err(LocalError::new(format!("Node {tag} was not found")))
+    }
+
+    fn is_local(&self) -> bool {
+        for node in self.flattened_args() {
+            if matches!(node.kind(), NodeKind::Receive { .. }) {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub(crate) fn reproducibility(&self) -> Reproducibility {
+        let mut arguments = BTreeSet::<String>::new();
+        let mut messages = BTreeSet::<FullName>::new();
+
+        for node in self.flattened_args() {
+            match node.kind() {
+                NodeKind::ComputeScalar { function, .. } => {
+                    if !function.is_reproducible() {
+                        return Reproducibility::NotAvailable;
+                    }
+                }
+                NodeKind::ComputeArray { function, .. } => {
+                    if !function.is_reproducible() {
+                        return Reproducibility::NotAvailable;
+                    }
+                }
+                // We can always reproduce the result of this, since it is an infallible `()`.
+                NodeKind::DirectMessage { .. } => {}
+                NodeKind::Collect { .. } => {
+                    // If a collection does not entirely depend on local data,
+                    // it will need messages from different nodes to be reproduced.
+                    if !node.is_local() {
+                        return Reproducibility::NotAvailable;
+                    }
+                }
+                NodeKind::Receive { message_name, .. } => {
+                    messages.insert(message_name.clone());
+                }
+                NodeKind::ScalarArgument { name, .. } => {
+                    arguments.insert(name.clone());
+                }
+            }
+        }
+
+        Reproducibility::Available { arguments, messages }
     }
 
     /// Returns the list of nodes consisting of `self` and all its subtree
     /// sorted in such a way that for every node all its dependencies preceed it.
     ///
     /// (In other words, walks the dependency tree depth-first).
-    pub(crate) fn flattened(&self, terminate_at: Option<&[Self]>) -> Vec<Self> {
+    fn flattened_inner(&self, args_only: bool) -> Vec<Self> {
         let mut nodes_to_process = vec![self.get_strong_ref()];
         let mut nodes_processed = BTreeSet::new();
         let mut flat_nodes = Vec::new();
-        let terminate_at_ids = terminate_at
-            .map(|nodes| nodes.iter().map(|node| node.id()).collect::<BTreeSet<_>>())
-            .unwrap_or_default();
 
         while let Some(node) = nodes_to_process.pop() {
-            let unprocessed_dependencies = node
-                .all_dependencies()
+            let all_dependencies = if args_only {
+                node.kind().args()
+            } else {
+                Box::new(node.dependencies().iter().chain(node.kind().args()))
+            };
+            let unprocessed_dependencies = all_dependencies
                 .filter_map(|dependency| {
                     let id = dependency.id();
-                    if nodes_processed.contains(&id) || terminate_at_ids.contains(&id) {
+                    if nodes_processed.contains(&id) {
                         None
                     } else {
                         Some(dependency.get_strong_ref())
@@ -132,18 +193,77 @@ impl<SP: SessionParameters> Node<SP> {
         flat_nodes
     }
 
-    pub(crate) fn with_added_prefix(&self, prefix: &str, terminate_at: Vec<Self>) -> Self {
-        let root_id = self.id();
-        let mut replacement_nodes = terminate_at
-            .iter()
-            .map(|node| (node.id(), node.get_strong_ref()))
-            .collect::<BTreeMap<_, _>>();
+    pub(crate) fn flattened(&self) -> Vec<Self> {
+        self.flattened_inner(false)
+    }
 
-        for node in self.flattened(Some(&terminate_at)) {
+    pub(crate) fn flattened_args(&self) -> Vec<Self> {
+        self.flattened_inner(true)
+    }
+
+    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
+        let root_id = self.id();
+        let mut replacement_nodes = BTreeMap::new();
+
+        for node in self.flattened() {
             let old_id = node.id();
             let new_node = node
                 .with_replacements(&replacement_nodes)
                 .shallow_with_added_prefix(prefix);
+            replacement_nodes.insert(old_id, new_node);
+        }
+
+        replacement_nodes.remove(&root_id).expect("The root node was processed")
+    }
+
+    fn without_dependencies(self) -> Self {
+        Self::new_typed(self.unwrap_or_shallow_clone().without_dependencies())
+    }
+
+    fn tree_without_dependencies(&self) -> Self {
+        let root_id = self.id();
+        let mut replacement_nodes = BTreeMap::new();
+
+        for node in self.flattened_args() {
+            let old_id = node.id();
+            let new_node = node.without_dependencies().with_replacements(&replacement_nodes);
+            replacement_nodes.insert(old_id, new_node);
+        }
+
+        replacement_nodes.remove(&root_id).expect("The root node was processed")
+    }
+
+    pub(crate) fn with_substituted_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
+        let root_id = self.id();
+        let mut replacement_nodes = BTreeMap::new();
+
+        for node in self.flattened() {
+            let old_id = node.id();
+
+            let new_node = if let NodeKind::ScalarArgument { name } = node.kind() {
+                arguments.get(name)?.get_strong_ref()
+            } else {
+                node.with_replacements(&replacement_nodes)
+            };
+            replacement_nodes.insert(old_id, new_node);
+        }
+
+        Ok(replacement_nodes.remove(&root_id).expect("The root node was processed"))
+    }
+
+    #[cfg(any(test, feature = "dev"))]
+    pub(crate) fn with_replaced_subnode(&self, old_subnode: &Self, new_subnode: &Self) -> Self {
+        let root_id = self.id();
+        let mut replacement_nodes = BTreeMap::new();
+
+        for node in self.flattened() {
+            let old_id = node.id();
+
+            let new_node = if node.id() == old_subnode.id() {
+                new_subnode.get_strong_ref()
+            } else {
+                node.with_replacements(&replacement_nodes)
+            };
             replacement_nodes.insert(old_id, new_node);
         }
 
@@ -165,7 +285,7 @@ struct TypedNode<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> TypedNode<SP> {
-    pub fn new(store_in: Tag, kind: NodeKind<SP>) -> Self {
+    fn new(store_in: Tag, kind: NodeKind<SP>) -> Self {
         Self {
             store_in,
             kind,
@@ -173,24 +293,24 @@ impl<SP: SessionParameters> TypedNode<SP> {
         }
     }
 
-    pub fn store_in(&self) -> &Tag {
+    fn store_in(&self) -> &Tag {
         &self.store_in
     }
 
-    pub fn dependencies(&self) -> &[Node<SP>] {
+    fn dependencies(&self) -> &[Node<SP>] {
         &self.dependencies
     }
 
-    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
+    fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         self.kind.group()
     }
 
-    pub fn kind(&self) -> &NodeKind<SP> {
+    fn kind(&self) -> &NodeKind<SP> {
         &self.kind
     }
 
     #[must_use]
-    pub fn with_dependencies(self, dependencies: &[&Node<SP>]) -> Self {
+    fn with_dependencies(self, dependencies: &[&Node<SP>]) -> Self {
         let mut new_node = self;
         new_node
             .dependencies
@@ -198,14 +318,20 @@ impl<SP: SessionParameters> TypedNode<SP> {
         new_node
     }
 
+    fn without_dependencies(self) -> Self {
+        let mut new_node = self;
+        new_node.dependencies = Vec::new();
+        new_node
+    }
+
     #[must_use]
-    pub fn with_store_in(self, name: &str) -> Self {
+    fn with_store_in(self, name: &str) -> Self {
         let mut new_node = self;
         new_node.store_in = new_node.store_in.with_name(name);
         new_node
     }
 
-    pub fn shallow_clone(&self) -> Self {
+    fn shallow_clone(&self) -> Self {
         Self {
             store_in: self.store_in.clone(),
             dependencies: nodes_to_owned(self.dependencies.iter()),
@@ -213,20 +339,18 @@ impl<SP: SessionParameters> TypedNode<SP> {
         }
     }
 
-    pub fn all_dependencies(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
-        Box::new(self.dependencies.iter().chain(self.kind.all_dependencies()))
-    }
-
-    pub fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Self {
+    fn with_replacements(self, replacements: &BTreeMap<usize, Node<SP>>) -> Self {
         let mut new_node = self;
         maybe_replace_slice(&mut new_node.dependencies, replacements);
         new_node.kind.replace(replacements);
         new_node
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
+    fn with_added_prefix(self, prefix: &str) -> Self {
         let mut new_node = self;
-        new_node.store_in = new_node.store_in.with_added_prefix(prefix);
+        if !matches!(new_node.kind, NodeKind::ScalarArgument { .. }) {
+            new_node.store_in = new_node.store_in.with_added_prefix(prefix);
+        }
         new_node.kind = new_node.kind.with_added_prefix(prefix);
         new_node
     }
@@ -250,37 +374,6 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 }
 
 #[derive(Debug)]
-#[derive_where::derive_where(Clone)]
-pub struct ProtocolMessage<SP: SessionParameters> {
-    name: FullName,
-    serde_adapter: SerdeAdapter<SP::WireFormat>,
-}
-
-impl<SP: SessionParameters> ProtocolMessage<SP> {
-    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
-        Self {
-            name: FullName::new(name),
-            serde_adapter: SerdeAdapter::new::<T>(),
-        }
-    }
-
-    pub(crate) fn full_name(&self) -> &FullName {
-        &self.name
-    }
-
-    pub(crate) fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
-        &self.serde_adapter
-    }
-
-    pub(crate) fn with_prefix(self, prefix: &str) -> Self {
-        Self {
-            name: self.name.with_added_prefix(prefix),
-            serde_adapter: self.serde_adapter,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
         function: ScalarFunction<SP>,
@@ -290,16 +383,6 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         function: ArrayFunction<SP>,
         group: PartyGroup<SP::Verifier>,
         args: BTreeMap<String, Node<SP>>,
-    },
-    Serialize {
-        data: Node<SP>,
-        group: PartyGroup<SP::Verifier>,
-        message: ProtocolMessage<SP>,
-    },
-    Deserialize {
-        data: Node<SP>,
-        group: PartyGroup<SP::Verifier>,
-        message: ProtocolMessage<SP>,
     },
     DirectMessage {
         data: Node<SP>,
@@ -311,7 +394,11 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
     },
     Receive {
         group: PartyGroup<SP::Verifier>,
-        message: ProtocolMessage<SP>,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
+    },
+    ScalarArgument {
+        name: String,
     },
 }
 
@@ -348,35 +435,25 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             }
             Self::Receive {
                 group: _group,
-                message: _message,
+                message_name: _message_name,
+                serde_adapter: _serde_adapter,
             } => write!(f, "receive()"),
-            Self::Serialize {
-                data,
-                group: _group,
-                message: _message,
-            } => write!(f, "serialize[]({})", data.store_in()),
-            Self::Deserialize {
-                data,
-                group: _group,
-                message: _message,
-            } => write!(f, "deserialize[]({})", data.store_in()),
+            Self::ScalarArgument { name } => write!(f, "argument({name})"),
         }
     }
 }
 
 impl<SP: SessionParameters> NodeKind<SP> {
-    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
+    fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         match self {
-            Self::ComputeArray { group, .. }
-            | Self::DirectMessage { group, .. }
-            | Self::Receive { group, .. }
-            | Self::Serialize { group, .. }
-            | Self::Deserialize { group, .. } => Some(group),
-            Self::Collect { .. } | Self::ComputeScalar { .. } => None,
+            Self::ComputeArray { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
+                Some(group)
+            }
+            Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
         }
     }
 
-    pub fn shallow_clone(&self) -> Self {
+    fn shallow_clone(&self) -> Self {
         match self {
             Self::ComputeScalar { function, args } => Self::ComputeScalar {
                 function: function.clone(),
@@ -395,65 +472,54 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 values: values.get_strong_ref(),
                 group: group.clone(),
             },
-            Self::Receive { group, message } => Self::Receive {
+            Self::Receive {
+                group,
+                message_name,
+                serde_adapter,
+            } => Self::Receive {
                 group: group.clone(),
-                message: message.clone(),
+                message_name: message_name.clone(),
+                serde_adapter: serde_adapter.clone(),
             },
-            Self::Serialize { data, group, message } => Self::Serialize {
-                data: data.get_strong_ref(),
-                group: group.clone(),
-                message: message.clone(),
-            },
-            Self::Deserialize { data, group, message } => Self::Deserialize {
-                data: data.get_strong_ref(),
-                group: group.clone(),
-                message: message.clone(),
-            },
+            Self::ScalarArgument { name } => Self::ScalarArgument { name: name.clone() },
         }
     }
 
-    pub fn all_dependencies(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
+    fn args(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
         match self {
             Self::ComputeScalar { args, .. } | Self::ComputeArray { args, .. } => Box::new(args.values()),
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
-            Self::Serialize { data, .. } => Box::new(core::iter::once(data)),
-            Self::Deserialize { data, .. } => Box::new(core::iter::once(data)),
             Self::DirectMessage { data, .. } => Box::new(core::iter::once(data)),
             Self::Receive { .. } => Box::new(core::iter::empty()),
+            Self::ScalarArgument { .. } => Box::new(core::iter::empty()),
         }
     }
 
-    pub fn replace(&mut self, replacements: &BTreeMap<usize, Node<SP>>) {
+    fn replace(&mut self, replacements: &BTreeMap<usize, Node<SP>>) {
         match self {
             Self::ComputeScalar { args, .. } => maybe_replace_map(args, replacements),
             Self::ComputeArray { args, .. } => maybe_replace_map(args, replacements),
             Self::Collect { values, .. } => maybe_replace(values, replacements),
-            Self::Serialize { data, .. } => maybe_replace(data, replacements),
-            Self::Deserialize { data, .. } => maybe_replace(data, replacements),
             Self::DirectMessage { data, .. } => maybe_replace(data, replacements),
-            Self::Receive { .. } => {}
+            Self::Receive { .. } | Self::ScalarArgument { .. } => {}
         }
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
+    fn with_added_prefix(self, prefix: &str) -> Self {
         match self {
             Self::ComputeScalar { .. }
             | Self::ComputeArray { .. }
             | Self::Collect { .. }
-            | Self::DirectMessage { .. } => self,
-            Self::Serialize { data, group, message } => Self::Serialize {
-                data,
+            | Self::DirectMessage { .. }
+            | Self::ScalarArgument { .. } => self,
+            Self::Receive {
                 group,
-                message: message.with_prefix(prefix),
-            },
-            Self::Deserialize { data, group, message } => Self::Deserialize {
-                data,
+                message_name,
+                serde_adapter,
+            } => Self::Receive {
+                message_name: message_name.with_added_prefix(prefix),
                 group,
-                message: message.with_prefix(prefix),
-            },
-            Self::Receive { message, group } => Self::Receive {
-                message: message.with_prefix(prefix),
-                group,
+                serde_adapter,
             },
         }
     }

@@ -1,44 +1,65 @@
 use alloc::{
-    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     format,
     string::String,
     sync::Arc,
+    vec::Vec,
 };
 use core::{fmt::Debug, marker::PhantomData};
 
 use signature::Keypair;
 
 use super::{
+    evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
-    ruleset::{Action, Ruleset},
+    ruleset::{Action, ActionGroup, OnError, Ruleset},
     session_id::SessionId,
     storage::Storage,
-    task::{PreprocessingResult, PreprocessingResultEnum, PreprocessingTask, Task, TaskResult, TaskResultEnum},
+    task::{
+        FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingResult, PreprocessingResultEnum,
+        PreprocessingTask, Task, TaskResult, TaskResultEnum,
+    },
 };
 use crate::{
     error::LocalError,
     protocol::{
-        Args, ArrayFunction, ExecutableProtocol, FullName, ProtocolArgs, ScalarFunction, SessionParameters, Value,
+        ArgNodes, Args, ArrayFunction, ExecutableProtocol, FullName, Node, PrivateInputs, ScalarFunction,
+        SessionParameters, Tag, Value,
     },
 };
+
+#[cfg(any(test, feature = "dev"))]
+use crate::dev::Replacement;
 
 #[derive(Debug)]
 pub(crate) struct SessionData<SP: SessionParameters> {
     pub(crate) id: SessionId<SP>,
-    pub(crate) signer: SP::Signer,
     pub(crate) participants: BTreeSet<SP::Verifier>,
     pub(crate) local_participants: BTreeSet<SP::Verifier>,
     pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
 }
 
-// TODO: do we need to be generic over P here?
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
+    signer: Option<Arc<SP::Signer>>,
+    verifier: SP::Verifier,
     data: Arc<SessionData<SP>>,
+    provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
+    attributable_errors: BTreeMap<SP::Verifier, String>,
     phantom: PhantomData<P>,
+}
+
+fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<Node<SP>, LocalError>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    let build_data = P::make_build_data(shared_data);
+    let signature = P::signature();
+    let arg_nodes = ArgNodes::new(&signature);
+    P::build(verifier, &build_data, arg_nodes)
 }
 
 impl<SP, P> Session<SP, P>
@@ -46,25 +67,23 @@ where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
 {
-    pub fn new(
+    fn new_inner(
         id: SessionId<SP>,
-        signer: SP::Signer,
-        private_data: &P::PrivateData,
+        signer: Option<SP::Signer>,
+        verifier: &SP::Verifier,
+        output_node: Node<SP>,
+        private_inputs: PrivateInputs,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
         let participants = P::all_participants(shared_data);
-        let local_participants = BTreeSet::from([signer.verifying_key()]);
+        let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
-        let private_inputs = P::make_private_inputs(private_data);
-        let protocol_args = ProtocolArgs::new_from_inputs(private_inputs, public_inputs)?;
-        let build_data = P::make_build_data(shared_data);
-        let output_node = P::build(&signer.verifying_key(), &build_data, protocol_args)?;
-        let ruleset = Ruleset::new(output_node)?;
+
+        let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
         let expected_messages = ruleset.expected_messages().clone();
-        let storage = Storage::new();
+        let storage = Storage::new(public_inputs, private_inputs);
         let data = Arc::new(SessionData {
             id,
-            signer,
             participants,
             local_participants,
             expected_messages,
@@ -72,28 +91,103 @@ where
         Ok(Self {
             ruleset,
             storage,
+            signer: signer.map(Arc::new),
+            verifier: verifier.clone(),
             data,
+            provable_errors: BTreeMap::new(),
+            attributable_errors: BTreeMap::new(),
             phantom: PhantomData,
         })
     }
 
-    pub fn verifier(&self) -> SP::Verifier {
-        self.data.signer.verifying_key()
+    pub fn new(
+        id: SessionId<SP>,
+        signer: SP::Signer,
+        private_data: &P::PrivateData,
+        shared_data: &P::SharedData,
+    ) -> Result<Self, LocalError> {
+        let verifier = signer.verifying_key();
+        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        let private_inputs = P::make_private_inputs(private_data);
+        Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
+    }
+
+    pub(crate) fn new_with_reproduction_subtree(
+        id: SessionId<SP>,
+        subtree_root: &Tag,
+        verifier: &SP::Verifier,
+        shared_data: &P::SharedData,
+    ) -> Result<Self, LocalError> {
+        let output_node = make_tree::<SP, P>(verifier, shared_data)?.get_reproduction_subtree(subtree_root)?;
+        Self::new_inner(id, None, verifier, output_node, PrivateInputs::new(), shared_data)
+    }
+
+    #[cfg(any(test, feature = "dev"))]
+    pub fn new_with_replacements(
+        id: SessionId<SP>,
+        signer: SP::Signer,
+        private_data: &P::PrivateData,
+        shared_data: &P::SharedData,
+        replacement: Replacement<SP>,
+    ) -> Result<Self, LocalError> {
+        let verifier = signer.verifying_key();
+        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        let output_node = replacement.apply(output_node)?;
+        let private_inputs = P::make_private_inputs(private_data);
+        Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
+    }
+
+    pub fn verifier(&self) -> &SP::Verifier {
+        &self.verifier
+    }
+
+    fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
+        self.ruleset.update_with_banned_party(evidence.guilty_party());
+        self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
+    }
+
+    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: Tag) {
+        self.ruleset.update_with_banned_party(&guilty_party);
+        self.attributable_errors
+            .insert(guilty_party, format!("Error when calculating {tag}"));
+    }
+
+    pub fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
+        SessionReport::<SP, P> {
+            outcome,
+            provable_errors: self.provable_errors,
+            attributable_errors: self.attributable_errors,
+        }
+    }
+
+    pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, LocalError> {
+        let value = self.storage.get(task.output_tag())?;
+        let result = value.downcast::<P::Output>()?;
+        Ok(self.make_report(SessionOutcome::Success(result)))
+    }
+
+    pub fn finalize_with_stalled(self, task: FinalizeWithStallTask) -> SessionReport<SP, P> {
+        self.make_report(SessionOutcome::Unfinishable(format!(
+            "Stalled at {}",
+            task.stalled_tag()
+        )))
+    }
+
+    pub fn terminate(self) -> SessionReport<SP, P> {
+        self.make_report(SessionOutcome::ManuallyTerminated)
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
-        if self.storage.contains(self.ruleset.output_tag()) {
-            return Ok(Some(Task::finalize(self.storage.get(self.ruleset.output_tag())?)));
-        }
-
-        if self.ruleset.is_empty() {
-            return Err(LocalError::new(
-                "No rules to apply, and the output value has not been set",
-            ));
-        }
-
-        loop {
-            let Some(action) = self.ruleset.pop_action() else { break };
+        while let Some(action_group) = self.ruleset.pop_action()? {
+            let action = match action_group {
+                ActionGroup::Action(action) => action,
+                ActionGroup::ReturnOutput(tag) => {
+                    return Ok(Some(Task::finalize_with_success(tag)));
+                }
+                ActionGroup::Terminate(tag) => {
+                    return Ok(Some(Task::finalize_with_stall(tag)));
+                }
+            };
 
             match action {
                 Action::Send {
@@ -116,32 +210,46 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
-                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
-                    match function {
-                        ScalarFunction::Public(function) => {
-                            return Ok(Some(Task::compute_scalar(store_in, function, args)));
+                    let args = Args::new(store_in.full_name(), &self.data, self.verifier(), arg_values)?;
+                    return Ok(Some(match function {
+                        ScalarFunction::Infallible(function) => {
+                            Task::compute_scalar_infallible(store_in, function, args)
                         }
-                        ScalarFunction::Private(function) => {
-                            return Ok(Some(Task::compute_scalar_with_rng(store_in, function, args)));
+                        ScalarFunction::InfallibleWithRng(function) => {
+                            Task::compute_scalar_infallible_with_rng(store_in, function, args)
                         }
-                    }
+                    }));
                 }
                 Action::ComputeArrayElement {
                     store_in,
                     function,
                     index,
                     args,
+                    on_error,
                 } => {
                     let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
-                    let args = Args::new(&self.data, &self.verifier(), arg_values)?;
-                    match function {
-                        ArrayFunction::Public(function) => {
-                            return Ok(Some(Task::compute_array_elem(store_in, index, function, args)));
+                    let args = Args::new(store_in.full_name(), &self.data, self.verifier(), arg_values)?;
+                    return Ok(Some(match function {
+                        ArrayFunction::Infallible(function) => {
+                            Task::compute_array_elem_infallible(store_in, index, function, args)
                         }
-                        ArrayFunction::Private(function) => {
-                            return Ok(Some(Task::compute_array_elem_with_rng(store_in, index, function, args)));
+                        ArrayFunction::InfallibleWithRng(function) => {
+                            Task::compute_array_elem_infallible_with_rng(store_in, index, function, args)
                         }
-                    }
+                        ArrayFunction::InfallibleWithSigner(function) => {
+                            let signer = self
+                                .signer
+                                .as_ref()
+                                .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
+                            Task::compute_array_elem_infallible_with_signer(store_in, signer, index, function, args)
+                        }
+                        ArrayFunction::SenderAttributable(function) => {
+                            Task::compute_array_elem_sender_attributable(store_in, index, function, args, on_error)
+                        }
+                        ArrayFunction::ThirdPartyAttributable(function) => {
+                            Task::compute_array_elem_third_party_attributable(store_in, index, function, args)
+                        }
+                    }));
                 }
                 Action::Collect { store_in, values } => {
                     self.storage.set(&store_in, self.storage.get_dict_as_value(&values)?)?;
@@ -153,11 +261,19 @@ where
         Ok(None)
     }
 
+    pub(crate) fn make_preprocessing_task(
+        &self,
+        message_id: &MessageId<SP>,
+        signed_value: SignedValue<SP>,
+    ) -> PreprocessingTask<SP> {
+        PreprocessingTask::new(&self.data, message_id.clone(), signed_value)
+    }
+
     pub fn preprocess_message(&self, message: MessageWithId<SP>) -> impl Iterator<Item = PreprocessingTask<SP>> {
         let message_id = message.id().clone();
         message
             .into_values()
-            .map(move |value| PreprocessingTask::new(&self.data, message_id.clone(), value))
+            .map(move |signed_value| self.make_preprocessing_task(&message_id, signed_value))
     }
 
     pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
@@ -175,15 +291,12 @@ where
                     if typed_existing_value.metadata() != typed_received_value.metadata()
                         || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
                     {
-                        // TODO (#7): to be packed into an evidence.
-                        return Err(PreprocessingError::ConflictingMessages(
-                            ConflictingMessagesError {
-                                guilty_party: id.clone(),
-                                first: typed_existing_value.clone().unverify(),
-                                second: typed_received_value.clone().unverify(),
-                            }
-                            .into(),
+                        let evidence = EvidenceEnum::ConflictingMessages(ConflictingMessagesEvidence::new(
+                            typed_existing_value,
+                            typed_received_value,
                         ));
+                        self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
+                        return Ok(());
                     }
 
                     // The message is a duplicate, we cannot do anything at this point.
@@ -225,28 +338,37 @@ where
                 self.storage.set_elem(&store_in, &id, result)?;
                 self.ruleset.update_with_array_element_ready(&store_in, &id);
             }
-            TaskResultEnum::AttributableError { store_in, id } => {
-                // TODO (#39): ban the node internally and carry on.
-                // For now we are returning a `LocalError` right away.
-                return Err(LocalError::new(format!(
-                    "Attributable error when calculating {store_in}[{id:?}]"
-                )));
-            }
-            TaskResultEnum::UnattributableError { store_in } => {
-                return Err(LocalError::new(format!(
-                    "Unattributable error when calculating {store_in}"
-                )));
+            TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
+                OnError::Escalate => self.register_attributable_error(id, store_in),
+                OnError::CollectEvidence(message_names) => {
+                    let mut signed_values = Vec::new();
+                    for name in message_names {
+                        let value = self.storage.get_elem(&Tag::signed_remote_with_full_name(&name), &id)?;
+                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        signed_values.push(signed_value);
+                    }
+                    let evidence =
+                        EvidenceEnum::SenderError(SenderErrorEvidence::new(&self.verifier, &store_in, signed_values));
+                    self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
+                }
+            },
+            TaskResultEnum::ThirdPartyError {
+                store_in,
+                id,
+                associated_data,
+            } => {
+                let evidence = EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(&store_in, associated_data));
+                self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
             }
         }
         Ok(())
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum PreprocessingError<SP: SessionParameters> {
     Local(LocalError),
     InvalidMessage(InvalidMessageError<SP>),
-    ConflictingMessages(Box<ConflictingMessagesError<SP>>),
     DuplicateMessages(DuplicateMessagesError<SP>),
 }
 
@@ -269,14 +391,43 @@ impl<SP: SessionParameters> From<InvalidMessageError<SP>> for PreprocessingError
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct ConflictingMessagesError<SP: SessionParameters> {
-    pub guilty_party: SP::Verifier,
-    pub first: SignedValue<SP>,
-    pub second: SignedValue<SP>,
-}
-
-#[derive_where::derive_where(Debug)]
 pub struct DuplicateMessagesError<SP: SessionParameters> {
     pub first: MessageId<SP>,
     pub second: MessageId<SP>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionReport<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    pub outcome: SessionOutcome<SP, P>,
+    pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
+    pub attributable_errors: BTreeMap<SP::Verifier, String>,
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
+    pub fn success(self) -> Option<P::Output> {
+        if let SessionOutcome::Success(output) = self.outcome {
+            Some(output)
+        } else {
+            None
+        }
+    }
+
+    pub fn success_ref(&self) -> Option<&P::Output> {
+        if let SessionOutcome::Success(output) = &self.outcome {
+            Some(output)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_unfinishable(&self) -> bool {
+        matches!(self.outcome, SessionOutcome::Unfinishable(..))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    Success(P::Output),
+    ManuallyTerminated,
+    Unfinishable(String),
 }

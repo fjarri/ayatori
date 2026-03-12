@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, format, string::String};
 use super::ruleset::Arg;
 use crate::{
     error::LocalError,
-    protocol::{PartyId, Tag, Value},
+    protocol::{PartyId, PrivateInputs, PublicInputs, Tag, Value},
 };
 
 #[derive(Debug)]
@@ -13,15 +13,24 @@ pub(crate) struct Storage<Id> {
 }
 
 impl<Id: PartyId> Storage<Id> {
-    pub fn new() -> Self {
+    pub fn new(public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Self {
+        let mut scalars = BTreeMap::new();
+        scalars.extend(
+            private_inputs
+                .into_inner()
+                .into_iter()
+                .map(|(name, value)| (Tag::computed(&name), value)),
+        );
+        scalars.extend(
+            public_inputs
+                .into_inner()
+                .into_iter()
+                .map(|(name, value)| (Tag::computed(&name), value)),
+        );
         Self {
-            scalars: BTreeMap::new(),
+            scalars,
             mappings: BTreeMap::new(),
         }
-    }
-
-    pub fn contains(&self, tag: &Tag) -> bool {
-        self.scalars.contains_key(tag)
     }
 
     pub fn get(&self, tag: &Tag) -> Result<Value, LocalError> {
