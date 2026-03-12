@@ -7,7 +7,8 @@ name: gh-pages
 on:
   # Runs on pushes targeting the default branch
   push:
-    branches: ["master"]
+    tags:
+      - 'v*' # Trigger on tags starting with v, e.g., v1.0.0
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
