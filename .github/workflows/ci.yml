@@ -74,6 +74,8 @@ jobs:
         run: cargo install mdbook-rustdoc-links
       - name: Build mdBook
         run: mdbook build book
+      - name: Run mdBook doctests
+        run: mdbook test book
 
   test-and-coverage:
     runs-on: ubuntu-latest
