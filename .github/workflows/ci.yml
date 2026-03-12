@@ -42,7 +42,10 @@ jobs:
           profile: minimal
       # We need `no-deps` here because `generic-array` we depend on has some obsolete attributes.
       # Can be removed when we update to `signature=3`
-      - run: env RUSTDOCFLAGS='--cfg docsrs -D warnings' cargo doc --all-features --no-deps
+      - name: Build docs
+        run: env RUSTDOCFLAGS='--cfg docsrs -D warnings' cargo doc --all-features --no-deps
+      - name: Run doctests
+        run: cargo test --all-features --doc --workspace
 
   build-book:
     runs-on: ubuntu-latest
