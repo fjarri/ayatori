@@ -40,8 +40,8 @@ impl<SP: SessionParameters> Node<SP> {
         Self(Arc::new(typed_node))
     }
 
-    pub(crate) fn new(store_in: Tag, kind: NodeKind<SP>) -> Self {
-        Self::new_typed(TypedNode::new(store_in, kind))
+    pub(crate) fn new(kind: NodeKind<SP>) -> Self {
+        Self::new_typed(TypedNode::new(kind))
     }
 
     pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
@@ -51,11 +51,6 @@ impl<SP: SessionParameters> Node<SP> {
     #[must_use]
     pub fn with_dependencies(self, dependencies: &[&Self]) -> Self {
         Self::new_typed(self.unwrap_or_shallow_clone().with_dependencies(dependencies))
-    }
-
-    #[must_use]
-    pub fn with_store_in(self, name: &str) -> Self {
-        Self::new_typed(self.unwrap_or_shallow_clone().with_store_in(name))
     }
 
     pub(crate) fn get_strong_ref(&self) -> Self {
@@ -240,7 +235,7 @@ impl<SP: SessionParameters> Node<SP> {
         for node in self.flattened() {
             let old_id = node.id();
 
-            let new_node = if let NodeKind::ScalarArgument { name } = node.kind() {
+            let new_node = if let NodeKind::ScalarArgument { name, .. } = node.kind() {
                 arguments.get(name)?.get_strong_ref()
             } else {
                 node.with_replacements(&replacement_nodes)
@@ -279,22 +274,20 @@ impl<SP: SessionParameters> Display for Node<SP> {
 
 #[derive(Debug)]
 struct TypedNode<SP: SessionParameters> {
-    store_in: Tag,
     kind: NodeKind<SP>,
     dependencies: Vec<Node<SP>>,
 }
 
 impl<SP: SessionParameters> TypedNode<SP> {
-    fn new(store_in: Tag, kind: NodeKind<SP>) -> Self {
+    fn new(kind: NodeKind<SP>) -> Self {
         Self {
-            store_in,
             kind,
             dependencies: Vec::new(),
         }
     }
 
     fn store_in(&self) -> &Tag {
-        &self.store_in
+        self.kind.store_in()
     }
 
     fn dependencies(&self) -> &[Node<SP>] {
@@ -324,16 +317,8 @@ impl<SP: SessionParameters> TypedNode<SP> {
         new_node
     }
 
-    #[must_use]
-    fn with_store_in(self, name: &str) -> Self {
-        let mut new_node = self;
-        new_node.store_in = new_node.store_in.with_name(name);
-        new_node
-    }
-
     fn shallow_clone(&self) -> Self {
         Self {
-            store_in: self.store_in.clone(),
             dependencies: nodes_to_owned(self.dependencies.iter()),
             kind: self.kind.shallow_clone(),
         }
@@ -348,9 +333,6 @@ impl<SP: SessionParameters> TypedNode<SP> {
 
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut new_node = self;
-        if !matches!(new_node.kind, NodeKind::ScalarArgument { .. }) {
-            new_node.store_in = new_node.store_in.with_added_prefix(prefix);
-        }
         new_node.kind = new_node.kind.with_added_prefix(prefix);
         new_node
     }
@@ -358,7 +340,7 @@ impl<SP: SessionParameters> TypedNode<SP> {
 
 impl<SP: SessionParameters> Display for TypedNode<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{} = {}", self.store_in, self.kind)?;
+        write!(f, "{} = {}", self.store_in(), self.kind)?;
         if !self.dependencies.is_empty() {
             write!(
                 f,
@@ -376,28 +358,34 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 #[derive(Debug)]
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
+        store_in: Tag,
         function: ScalarFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
     },
     ComputeArray {
+        store_in: Tag,
         function: ArrayFunction<SP>,
         group: PartyGroup<SP::Verifier>,
         args: BTreeMap<String, Node<SP>>,
     },
     DirectMessage {
+        store_in: Tag,
         data: Node<SP>,
         group: PartyGroup<SP::Verifier>,
     },
     Collect {
+        store_in: Tag,
         values: Node<SP>,
         group: PartyGroup<SP::Verifier>,
     },
     Receive {
+        store_in: Tag,
         group: PartyGroup<SP::Verifier>,
         message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
     ScalarArgument {
+        store_in: Tag,
         name: String,
     },
 }
@@ -405,7 +393,11 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
 impl<SP: SessionParameters> Display for NodeKind<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Self::ComputeScalar { function, args } => {
+            Self::ComputeScalar {
+                store_in: _store_in,
+                function,
+                args,
+            } => {
                 write!(
                     f,
                     "{function}({})",
@@ -415,6 +407,7 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                 )
             }
             Self::ComputeArray {
+                store_in: _store_in,
                 function,
                 group: _group,
                 args,
@@ -427,23 +420,46 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                         .join(", ")
                 )
             }
-            Self::DirectMessage { data, group: _group } => {
+            Self::DirectMessage {
+                store_in: _store_in,
+                data,
+                group: _group,
+            } => {
                 write!(f, "direct_message({})", data.store_in())
             }
-            Self::Collect { values, group: _group } => {
+            Self::Collect {
+                store_in: _store_in,
+                values,
+                group: _group,
+            } => {
                 write!(f, "collect({})", values.store_in())
             }
             Self::Receive {
+                store_in: _store_in,
                 group: _group,
                 message_name: _message_name,
                 serde_adapter: _serde_adapter,
             } => write!(f, "receive()"),
-            Self::ScalarArgument { name } => write!(f, "argument({name})"),
+            Self::ScalarArgument {
+                store_in: _store_in,
+                name,
+            } => write!(f, "argument({name})"),
         }
     }
 }
 
 impl<SP: SessionParameters> NodeKind<SP> {
+    fn store_in(&self) -> &Tag {
+        match self {
+            Self::ComputeScalar { store_in, .. }
+            | Self::ComputeArray { store_in, .. }
+            | Self::DirectMessage { store_in, .. }
+            | Self::Collect { store_in, .. }
+            | Self::Receive { store_in, .. }
+            | Self::ScalarArgument { store_in, .. } => store_in,
+        }
+    }
+
     fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         match self {
             Self::ComputeArray { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
@@ -455,33 +471,55 @@ impl<SP: SessionParameters> NodeKind<SP> {
 
     fn shallow_clone(&self) -> Self {
         match self {
-            Self::ComputeScalar { function, args } => Self::ComputeScalar {
+            Self::ComputeScalar {
+                store_in,
+                function,
+                args,
+            } => Self::ComputeScalar {
+                store_in: store_in.clone(),
                 function: function.clone(),
                 args: arg_map_to_owned(args),
             },
-            Self::ComputeArray { function, group, args } => Self::ComputeArray {
+            Self::ComputeArray {
+                store_in,
+                function,
+                group,
+                args,
+            } => Self::ComputeArray {
+                store_in: store_in.clone(),
                 function: function.clone(),
                 group: group.clone(),
                 args: arg_map_to_owned(args),
             },
-            Self::DirectMessage { data, group } => Self::DirectMessage {
+            Self::DirectMessage { store_in, data, group } => Self::DirectMessage {
+                store_in: store_in.clone(),
                 data: data.get_strong_ref(),
                 group: group.clone(),
             },
-            Self::Collect { values, group } => Self::Collect {
+            Self::Collect {
+                store_in,
+                values,
+                group,
+            } => Self::Collect {
+                store_in: store_in.clone(),
                 values: values.get_strong_ref(),
                 group: group.clone(),
             },
             Self::Receive {
+                store_in,
                 group,
                 message_name,
                 serde_adapter,
             } => Self::Receive {
+                store_in: store_in.clone(),
                 group: group.clone(),
                 message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
-            Self::ScalarArgument { name } => Self::ScalarArgument { name: name.clone() },
+            Self::ScalarArgument { store_in, name } => Self::ScalarArgument {
+                store_in: store_in.clone(),
+                name: name.clone(),
+            },
         }
     }
 
@@ -506,22 +544,23 @@ impl<SP: SessionParameters> NodeKind<SP> {
     }
 
     fn with_added_prefix(self, prefix: &str) -> Self {
-        match self {
-            Self::ComputeScalar { .. }
-            | Self::ComputeArray { .. }
-            | Self::Collect { .. }
-            | Self::DirectMessage { .. }
-            | Self::ScalarArgument { .. } => self,
-            Self::Receive {
-                group,
-                message_name,
-                serde_adapter,
-            } => Self::Receive {
-                message_name: message_name.with_added_prefix(prefix),
-                group,
-                serde_adapter,
-            },
+        let new_store_in = self.store_in().clone().with_added_prefix(prefix);
+        let mut result = self;
+        match &mut result {
+            Self::ComputeScalar { store_in, .. }
+            | Self::ComputeArray { store_in, .. }
+            | Self::Collect { store_in, .. }
+            | Self::DirectMessage { store_in, .. }
+            | Self::ScalarArgument { store_in, .. }
+            | Self::Receive { store_in, .. } => {
+                *store_in = new_store_in;
+            }
+        };
+        if let Self::Receive { message_name, .. } = &mut result {
+            *message_name = message_name.clone().with_added_prefix(prefix);
         }
+
+        result
     }
 }
 

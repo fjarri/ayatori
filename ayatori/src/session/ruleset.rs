@@ -179,11 +179,18 @@ impl<SP: SessionParameters> Ruleset<SP> {
             let mut actions = Vec::new();
 
             match node.kind() {
-                NodeKind::ScalarArgument { name } => {
+                NodeKind::ScalarArgument {
+                    store_in: _store_in,
+                    name,
+                } => {
                     // TODO: check that the remaining argument nodes correspond to arguments provided.
                     arguments.push(name.clone());
                 }
-                NodeKind::ComputeScalar { function, args } => {
+                NodeKind::ComputeScalar {
+                    store_in,
+                    function,
+                    args,
+                } => {
                     let mut specific_condition = Condition::empty();
                     for arg in args.values() {
                         specific_condition.and(LeafCondition::Value {
@@ -192,7 +199,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     }
                     actions.push((
                         Action::ComputeScalar {
-                            store_in: node.store_in().clone(),
+                            store_in: store_in.clone(),
                             function: function.clone(),
                             args: args
                                 .iter()
@@ -202,19 +209,18 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         specific_condition,
                     ));
                 }
-                NodeKind::ComputeArray { function, args, group } => {
+                NodeKind::ComputeArray {
+                    store_in,
+                    function,
+                    args,
+                    group,
+                } => {
                     let on_error = get_on_error(&node, private_inputs);
                     for id in group.ids() {
-                        actions.push(make_compute_array_action(
-                            node.store_in(),
-                            id,
-                            function,
-                            args,
-                            &on_error,
-                        ));
+                        actions.push(make_compute_array_action(store_in, id, function, args, &on_error));
                     }
                 }
-                NodeKind::DirectMessage { data, group } => {
+                NodeKind::DirectMessage { store_in, data, group } => {
                     for id in group.ids() {
                         let mut specific_condition = Condition::empty();
                         specific_condition.and(LeafCondition::ArrayElement {
@@ -223,7 +229,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         });
                         actions.push((
                             Action::Send {
-                                store_in: node.store_in().clone(),
+                                store_in: store_in.clone(),
                                 to_send: data.store_in().clone(),
                                 destination: id.clone(),
                                 index: Some(id.clone()),
@@ -232,7 +238,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         ));
                     }
                 }
-                NodeKind::Collect { values, group } => {
+                NodeKind::Collect {
+                    store_in,
+                    values,
+                    group,
+                } => {
                     let mut specific_condition = Condition::empty();
                     specific_condition.and(LeafCondition::Array {
                         tag: values.store_in().clone(),
@@ -242,13 +252,14 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     actions.push((
                         Action::Collect {
-                            store_in: node.store_in().clone(),
+                            store_in: store_in.clone(),
                             values: values.store_in().clone(),
                         },
                         specific_condition,
                     ));
                 }
                 NodeKind::Receive {
+                    store_in: _store_in,
                     group,
                     message_name,
                     serde_adapter: _serde_adapter,

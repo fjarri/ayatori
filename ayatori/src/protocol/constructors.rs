@@ -52,48 +52,43 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
 pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
     Node::new(
         // TODO (#62): a special tag type?
-        Tag::computed(name),
-        NodeKind::ScalarArgument { name: name.to_string() },
+        NodeKind::ScalarArgument {
+            store_in: Tag::computed(name),
+            name: name.to_string(),
+        },
     )
 }
 
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
-    Node::new(
-        Tag::computed(name),
-        NodeKind::ComputeScalar {
-            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(name, move |_args| {
-                Ok(erased_value.clone())
-            })),
-            args: BTreeMap::new(),
-        },
-    )
+    Node::new(NodeKind::ComputeScalar {
+        store_in: Tag::computed(name),
+        function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(name, move |_args| {
+            Ok(erased_value.clone())
+        })),
+        args: BTreeMap::new(),
+    })
 }
 
 pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
     if let Some(group) = node.group() {
-        Node::new(
-            Tag::computed(name),
-            NodeKind::ComputeArray {
-                function: ArrayFunction::Infallible(InfallibleArrayFunction::new_pre_erased(
-                    "alias",
-                    move |_id, args| args.get_value(arg_name).cloned(),
-                )),
-                args: [(arg_name.into(), node.get_strong_ref())].into(),
-                group: group.clone(),
-            },
-        )
+        Node::new(NodeKind::ComputeArray {
+            store_in: Tag::computed(name),
+            function: ArrayFunction::Infallible(InfallibleArrayFunction::new_pre_erased("alias", move |_id, args| {
+                args.get_value(arg_name).cloned()
+            })),
+            args: [(arg_name.into(), node.get_strong_ref())].into(),
+            group: group.clone(),
+        })
     } else {
-        Node::new(
-            Tag::computed(name),
-            NodeKind::ComputeScalar {
-                function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased("alias", move |args| {
-                    args.get_value(arg_name).cloned()
-                })),
-                args: [(arg_name.into(), node.get_strong_ref())].into(),
-            },
-        )
+        Node::new(NodeKind::ComputeScalar {
+            store_in: Tag::computed(name),
+            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased("alias", move |args| {
+                args.get_value(arg_name).cloned()
+            })),
+            args: [(arg_name.into(), node.get_strong_ref())].into(),
+        })
     }
 }
 
@@ -107,8 +102,8 @@ macro_rules! define_scalar_constructor {
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
             Ok(Node::new(
-                Tag::computed(name),
                 NodeKind::ComputeScalar {
+                    store_in: Tag::computed(name),
                     function: $outer_type::$outer_ctr($inner_type::new(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
@@ -135,8 +130,8 @@ macro_rules! define_array_constructor {
             }
 
             Ok(Node::new(
-                Tag::computed(name),
                 NodeKind::ComputeArray {
+                    store_in: Tag::computed(name),
                     function: $outer_type::$outer_ctr($inner_type::new(function)),
                     args: args_to_owned(args.iter().cloned())?,
                     group: group.clone(),
@@ -241,25 +236,21 @@ pub fn broadcast<SP: SessionParameters>(
     let args = [(arg_name.clone(), scalar.get_strong_ref())].into();
     let tag = Tag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(
-        tag.clone(),
-        NodeKind::ComputeArray {
-            function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
-                "serialize",
-                move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
-            )),
-            group: group.clone(),
-            args,
-        },
-    );
+    let serialize_and_sign = Node::new(NodeKind::ComputeArray {
+        store_in: tag.clone(),
+        function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
+            "serialize",
+            move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
+        )),
+        group: group.clone(),
+        args,
+    });
 
-    let send_node = Node::new(
-        tag.to_sent()?,
-        NodeKind::DirectMessage {
-            data: serialize_and_sign,
-            group: group.clone(),
-        },
-    );
+    let send_node = Node::new(NodeKind::DirectMessage {
+        store_in: tag.to_sent()?,
+        data: serialize_and_sign,
+        group: group.clone(),
+    });
 
     collect(&send_node)
 }
@@ -275,25 +266,22 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
     let args = [(arg_name.clone(), array.get_strong_ref())].into();
     let tag = Tag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(
-        tag.clone(),
-        NodeKind::ComputeArray {
-            function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
-                "serialize",
-                move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
-            )),
-            group: group.clone(),
-            args,
-        },
-    );
+    let serialize_and_sign = Node::new(NodeKind::ComputeArray {
+        store_in: tag.clone(),
 
-    let send_node = Node::new(
-        tag.to_sent()?,
-        NodeKind::DirectMessage {
-            data: serialize_and_sign,
-            group,
-        },
-    );
+        function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
+            "serialize",
+            move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
+        )),
+        group: group.clone(),
+        args,
+    });
+
+    let send_node = Node::new(NodeKind::DirectMessage {
+        store_in: tag.to_sent()?,
+        data: serialize_and_sign,
+        group,
+    });
 
     collect(&send_node)
 }
@@ -327,14 +315,12 @@ pub fn receive_signed<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     group: &PartyGroup<SP::Verifier>,
 ) -> Node<SP> {
-    Node::new(
-        Tag::signed_remote(message.name()),
-        NodeKind::Receive {
-            group: group.clone(),
-            message_name: FullName::new(message.name()),
-            serde_adapter: message.serde_adapter().clone(),
-        },
-    )
+    Node::new(NodeKind::Receive {
+        store_in: Tag::signed_remote(message.name()),
+        group: group.clone(),
+        message_name: FullName::new(message.name()),
+        serde_adapter: message.serde_adapter().clone(),
+    })
 }
 
 pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
@@ -349,17 +335,15 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
     let serde_adapter = serde_adapter.clone();
     let args = [(arg_name.clone(), received.get_strong_ref())].into();
 
-    Ok(Node::new(
-        received.store_in().to_received()?,
-        NodeKind::ComputeArray {
-            function: ArrayFunction::SenderAttributable(SenderAttributableArrayFunction::new_pre_erased(
-                "deserialize",
-                move |id, args| deserialize(id, args, &arg_name, &serde_adapter),
-            )),
-            group: group.clone(),
-            args,
-        },
-    ))
+    Ok(Node::new(NodeKind::ComputeArray {
+        store_in: received.store_in().to_received()?,
+        function: ArrayFunction::SenderAttributable(SenderAttributableArrayFunction::new_pre_erased(
+            "deserialize",
+            move |id, args| deserialize(id, args, &arg_name, &serde_adapter),
+        )),
+        group: group.clone(),
+        args,
+    }))
 }
 
 pub fn receive<SP: SessionParameters>(
@@ -376,13 +360,11 @@ pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, Loc
         .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be an array node"))?
         .clone();
 
-    Ok(Node::new(
-        values.store_in().collected(),
-        NodeKind::Collect {
-            values: values.get_strong_ref(),
-            group,
-        },
-    ))
+    Ok(Node::new(NodeKind::Collect {
+        store_in: values.store_in().collected(),
+        values: values.get_strong_ref(),
+        group,
+    }))
 }
 
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(

@@ -47,13 +47,6 @@ impl FullName {
         }
     }
 
-    pub(crate) fn with_name(self, name: &str) -> Self {
-        Self {
-            prefix: self.prefix,
-            name: name.to_string(),
-        }
-    }
-
     pub(crate) fn with_added_prefix(self, prefix: &str) -> Self {
         let mut full_prefix = self.prefix;
         full_prefix.push(prefix.to_string());
@@ -83,14 +76,6 @@ pub(crate) struct Tag {
 impl Tag {
     pub fn full_name(&self) -> &FullName {
         &self.full_name
-    }
-
-    pub fn with_name(self, name: &str) -> Self {
-        Self {
-            full_name: self.full_name.with_name(name),
-            kind: self.kind,
-            collected: self.collected,
-        }
     }
 
     pub fn with_added_prefix(self, prefix: &str) -> Self {

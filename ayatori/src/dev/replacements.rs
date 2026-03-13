@@ -48,7 +48,11 @@ impl<SP: SessionParameters> Replacement<SP> {
             if subnode.store_in() == &self.tag {
                 let new_subnode = match (subnode.kind(), self.kind) {
                     (
-                        NodeKind::ComputeScalar { function, args },
+                        NodeKind::ComputeScalar {
+                            store_in,
+                            function,
+                            args,
+                        },
                         ReplacementEnum::Scalar {
                             function: replacement_function,
                         },
@@ -66,16 +70,14 @@ impl<SP: SessionParameters> Replacement<SP> {
                             return Err(LocalError::new("Invalid function type"));
                         };
 
-                        Node::new(
-                            self.tag.clone(),
-                            NodeKind::ComputeScalar {
-                                function: new_function,
-                                args: args
-                                    .iter()
-                                    .map(|(name, node)| (name.clone(), node.get_strong_ref()))
-                                    .collect(),
-                            },
-                        )
+                        Node::new(NodeKind::ComputeScalar {
+                            store_in: store_in.clone(),
+                            function: new_function,
+                            args: args
+                                .iter()
+                                .map(|(name, node)| (name.clone(), node.get_strong_ref()))
+                                .collect(),
+                        })
                         .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())
                     }
                     _ => return Err(LocalError::new("Not supported")),
