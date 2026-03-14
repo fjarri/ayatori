@@ -9,7 +9,26 @@ use serde::{Deserialize, Serialize};
 use crate::error::LocalError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum TagKind {
+pub(crate) enum ScalarTagKind {
+    /// A locally computed value coming from an explicit computation/verification node
+    /// (not from serialization/deserialization).
+    /// The name of the tag will come from what the user provided when creating the node.
+    /// The contents are of some user type.
+    Computed,
+    Collected(ArrayTagKind),
+}
+
+impl Display for ScalarTagKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Computed => write!(f, ""),
+            Self::Collected(kind) => write!(f, "collected-{kind}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) enum ArrayTagKind {
     /// A locally computed value coming from an explicit computation/verification node
     /// (not from serialization/deserialization).
     /// The name of the tag will come from what the user provided when creating the node.
@@ -31,6 +50,18 @@ pub(crate) enum TagKind {
     /// The name of the tag will come from the protocol message name.
     /// The contents are of some user type.
     Received,
+}
+
+impl Display for ArrayTagKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Computed => write!(f, ""),
+            Self::Sent => write!(f, "sent"),
+            Self::Received => write!(f, "received"),
+            Self::SignedLocal => write!(f, "signed-local"),
+            Self::SignedRemote => write!(f, "signed-remote"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -67,13 +98,12 @@ impl Display for FullName {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct Tag {
+pub(crate) struct ScalarTag {
     full_name: FullName,
-    kind: TagKind,
-    collected: bool,
+    kind: ScalarTagKind,
 }
 
-impl Tag {
+impl ScalarTag {
     pub fn full_name(&self) -> &FullName {
         &self.full_name
     }
@@ -82,140 +112,106 @@ impl Tag {
         Self {
             full_name: self.full_name.with_added_prefix(prefix),
             kind: self.kind,
-            collected: self.collected,
         }
-    }
-}
-
-impl Display for Tag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        if self.collected {
-            write!(f, "collected(")?;
-        }
-        match self.kind {
-            TagKind::Computed => write!(f, "{}", self.full_name),
-            TagKind::Sent => write!(f, "sent({})", self.full_name),
-            TagKind::Received => write!(f, "received({})", self.full_name),
-            TagKind::SignedLocal => write!(f, "signed-local({})", self.full_name),
-            TagKind::SignedRemote => write!(f, "signed-remote({})", self.full_name),
-        }?;
-        if self.collected {
-            write!(f, ")")?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct ScalarTag(Tag);
-
-impl ScalarTag {
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
     }
 
     pub fn computed(name: &str) -> Self {
-        Self(Tag {
+        Self {
             full_name: FullName::new(name),
-            kind: TagKind::Computed,
-            collected: false,
-        })
-    }
-}
-
-impl AsRef<Tag> for ScalarTag {
-    fn as_ref(&self) -> &Tag {
-        &self.0
+            kind: ScalarTagKind::Computed,
+        }
     }
 }
 
 impl Display for ScalarTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{}", self.0)
+        match self.kind {
+            ScalarTagKind::Computed => write!(f, "{}", self.full_name),
+            _ => write!(f, "{}({})", self.kind, self.full_name),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct ArrayTag(Tag);
+pub(crate) struct ArrayTag {
+    full_name: FullName,
+    kind: ArrayTagKind,
+}
 
 impl ArrayTag {
+    pub fn full_name(&self) -> &FullName {
+        &self.full_name
+    }
+
     pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+        Self {
+            full_name: self.full_name.with_added_prefix(prefix),
+            kind: self.kind,
+        }
     }
 
     pub fn computed(name: &str) -> Self {
-        Self(Tag {
+        Self {
             full_name: FullName::new(name),
-            kind: TagKind::Computed,
-            collected: false,
-        })
+            kind: ArrayTagKind::Computed,
+        }
     }
 
     pub fn signed_remote(name: &str) -> Self {
-        Self(Tag {
+        Self {
             full_name: FullName::new(name),
-            kind: TagKind::SignedRemote,
-            collected: false,
-        })
+            kind: ArrayTagKind::SignedRemote,
+        }
     }
 
     pub fn signed_local(name: &str) -> Self {
-        Self(Tag {
+        Self {
             full_name: FullName::new(name),
-            kind: TagKind::SignedLocal,
-            collected: false,
-        })
+            kind: ArrayTagKind::SignedLocal,
+        }
     }
 
     pub fn to_sent(&self) -> Result<Self, LocalError> {
-        if self.0.kind != TagKind::SignedLocal {
+        if self.kind != ArrayTagKind::SignedLocal {
             return Err(LocalError::new("Only SignedLocal tags can be converted to Sent"));
         }
-        Ok(Self(Tag {
-            full_name: self.0.full_name.clone(),
-            kind: TagKind::Sent,
-            collected: false,
-        }))
+        Ok(Self {
+            full_name: self.full_name.clone(),
+            kind: ArrayTagKind::Sent,
+        })
     }
 
     pub fn signed_remote_with_full_name(full_name: &FullName) -> Self {
-        Self(Tag {
+        Self {
             full_name: full_name.clone(),
-            kind: TagKind::SignedRemote,
-            collected: false,
-        })
+            kind: ArrayTagKind::SignedRemote,
+        }
     }
 
     pub fn to_received(&self) -> Result<Self, LocalError> {
-        if self.0.kind != TagKind::SignedRemote {
+        if self.kind != ArrayTagKind::SignedRemote {
             return Err(LocalError::new("Only SignedRemote tags can be converted to Received"));
         }
-        Ok(Self(Tag {
-            full_name: self.0.full_name.clone(),
-            kind: TagKind::Received,
-            collected: false,
-        }))
+        Ok(Self {
+            full_name: self.full_name.clone(),
+            kind: ArrayTagKind::Received,
+        })
     }
 
     pub fn collected(&self) -> ScalarTag {
-        assert!(!self.0.collected); // TODO: is this necessary?
-        ScalarTag(Tag {
-            full_name: self.0.full_name.clone(),
-            kind: self.0.kind,
-            collected: true,
-        })
-    }
-}
-
-impl AsRef<Tag> for ArrayTag {
-    fn as_ref(&self) -> &Tag {
-        &self.0
+        ScalarTag {
+            full_name: self.full_name.clone(),
+            kind: ScalarTagKind::Collected(self.kind),
+        }
     }
 }
 
 impl Display for ArrayTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{}", self.0)
+        match self.kind {
+            ArrayTagKind::Computed => write!(f, "{}", self.full_name),
+            _ => write!(f, "{}({})", self.kind, self.full_name),
+        }
     }
 }
 
