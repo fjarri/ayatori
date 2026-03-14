@@ -100,23 +100,20 @@ impl<SP: SessionParameters> Node<SP> {
     }
 
     pub(crate) fn get_reproduction_subtree(&self, tag: &ArrayTag, verifier: &SP::Verifier) -> Result<Self, LocalError> {
-        for node in self.flattened() {
-            if node.store_in().array() == Some(tag) {
-                let node = node.tree_without_dependencies();
+        let node = self
+            .find_subnode(AnyTagRef::Array(tag))
+            .ok_or_else(|| LocalError::new(format!("Node {tag} was not found")))?;
+        let node = node.tree_without_dependencies();
 
-                // The output must be a scalar node, and `node` is an array node.
-                // So we wrap it in a collection node.
-                let wrapped = Node::new(NodeKind::Collect {
-                    store_in: tag.collected(),
-                    values: node.get_strong_ref(),
-                    group: PartyGroup::new(core::slice::from_ref(verifier)),
-                });
+        // The output must be a scalar node, and `node` is an array node.
+        // So we wrap it in a collection node.
+        let wrapped = Node::new(NodeKind::Collect {
+            store_in: tag.collected(),
+            values: node.get_strong_ref(),
+            group: PartyGroup::new(core::slice::from_ref(verifier)),
+        });
 
-                return Ok(wrapped);
-            }
-        }
-
-        Err(LocalError::new(format!("Node {tag} was not found")))
+        Ok(wrapped)
     }
 
     fn is_local(&self) -> bool {
@@ -165,50 +162,18 @@ impl<SP: SessionParameters> Node<SP> {
         Reproducibility::Available { arguments, messages }
     }
 
-    /// Returns the list of nodes consisting of `self` and all its subtree
-    /// sorted in such a way that for every node all its dependencies preceed it.
-    ///
-    /// (In other words, walks the dependency tree depth-first).
-    fn flattened_inner(&self, args_only: bool) -> Vec<Self> {
-        let mut nodes_to_process = vec![self.get_strong_ref()];
-        let mut nodes_processed = BTreeSet::new();
-        let mut flat_nodes = Vec::new();
-
-        while let Some(node) = nodes_to_process.pop() {
-            let all_dependencies = if args_only {
-                node.kind().args()
-            } else {
-                Box::new(node.dependencies().iter().chain(node.kind().args()))
-            };
-            let unprocessed_dependencies = all_dependencies
-                .filter_map(|dependency| {
-                    let id = dependency.id();
-                    if nodes_processed.contains(&id) {
-                        None
-                    } else {
-                        Some(dependency.get_strong_ref())
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            if unprocessed_dependencies.is_empty() {
-                flat_nodes.push(node.get_strong_ref());
-                nodes_processed.insert(node.id());
-            } else {
-                nodes_to_process.push(node.get_strong_ref());
-                nodes_to_process.extend(unprocessed_dependencies.into_iter());
-            }
-        }
-
-        flat_nodes
+    pub(crate) fn flattened(&self) -> TreeIterator<SP> {
+        TreeIterator::new(self, false)
     }
 
-    pub(crate) fn flattened(&self) -> Vec<Self> {
-        self.flattened_inner(false)
+    pub(crate) fn flattened_args(&self) -> TreeIterator<SP> {
+        TreeIterator::new(self, true)
     }
 
-    pub(crate) fn flattened_args(&self) -> Vec<Self> {
-        self.flattened_inner(true)
+    pub(crate) fn find_subnode(&self, tag: AnyTagRef<'_>) -> Option<Self> {
+        self.flattened()
+            .find(|subnode| subnode.store_in() == tag)
+            .map(|node| node.get_strong_ref())
     }
 
     pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
@@ -278,6 +243,58 @@ impl<SP: SessionParameters> Node<SP> {
         }
 
         replacement_nodes.remove(&root_id).expect("The root node was processed")
+    }
+}
+
+/// Iterates over the node subtree including the root node depth-first.
+/// That is, the nodes are emitted in such a way that for every node all its dependencies preceed it.
+pub(crate) struct TreeIterator<SP: SessionParameters> {
+    queue: Vec<Node<SP>>,
+    seen: BTreeSet<usize>,
+    args_only: bool,
+}
+
+impl<SP: SessionParameters> TreeIterator<SP> {
+    fn new(root: &Node<SP>, args_only: bool) -> Self {
+        Self {
+            queue: vec![root.get_strong_ref()],
+            seen: BTreeSet::new(),
+            args_only,
+        }
+    }
+}
+
+impl<SP: SessionParameters> Iterator for TreeIterator<SP> {
+    type Item = Node<SP>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(node) = self.queue.pop() {
+            let all_dependencies = if self.args_only {
+                node.kind().args()
+            } else {
+                Box::new(node.dependencies().iter().chain(node.kind().args()))
+            };
+
+            let unprocessed_dependencies = all_dependencies
+                .filter_map(|dependency| {
+                    let id = dependency.id();
+                    if self.seen.contains(&id) {
+                        None
+                    } else {
+                        Some(dependency.get_strong_ref())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if unprocessed_dependencies.is_empty() {
+                self.seen.insert(node.id());
+                return Some(node);
+            }
+
+            self.queue.push(node.get_strong_ref());
+            self.queue.extend(unprocessed_dependencies.into_iter());
+        }
+        None
     }
 }
 
