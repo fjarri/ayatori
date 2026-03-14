@@ -3,19 +3,19 @@ use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use crate::protocol::{PartyGroup, PartyId, Tag};
+use crate::protocol::{ArrayTag, PartyGroup, PartyId, ScalarTag};
 
 #[derive(Debug, Clone)]
 pub(crate) enum LeafCondition<Id: PartyId> {
     Value {
-        tag: Tag,
+        tag: ScalarTag,
     },
     ArrayElement {
-        tag: Tag,
+        tag: ArrayTag,
         id: Id,
     },
     Array {
-        tag: Tag,
+        tag: ArrayTag,
         group: PartyGroup<Id>,
         got_ids: BTreeSet<Id>,
     },
@@ -55,21 +55,14 @@ impl<Id: PartyId> Condition<Id> {
         true
     }
 
-    pub fn update_with_value_ready(&mut self, tag: &Tag) {
+    pub fn update_with_value_ready(&mut self, tag: &ScalarTag) {
         self.all_of.retain_mut(|leaf| match leaf {
-            LeafCondition::Array { tag: condition_tag, .. }
-            | LeafCondition::ArrayElement { tag: condition_tag, .. } => {
-                if condition_tag == tag {
-                    // TODO (#12)
-                    panic!()
-                }
-                true
-            }
+            LeafCondition::Array { .. } | LeafCondition::ArrayElement { .. } => true,
             LeafCondition::Value { tag: condition_tag } => condition_tag != tag,
         });
     }
 
-    pub fn update_with_array_element_ready(&mut self, tag: &Tag, id: &Id) {
+    pub fn update_with_array_element_ready(&mut self, tag: &ArrayTag, id: &Id) {
         self.all_of.retain_mut(|leaf| match leaf {
             LeafCondition::Array {
                 tag: condition_tag,
@@ -87,13 +80,7 @@ impl<Id: PartyId> Condition<Id> {
                 tag: condition_tag,
                 id: condition_id,
             } => !(condition_tag == tag && condition_id == id),
-            LeafCondition::Value { tag: condition_tag } => {
-                if condition_tag == tag {
-                    // TODO (#12)
-                    panic!()
-                }
-                true
-            }
+            LeafCondition::Value { .. } => true,
         });
     }
 }

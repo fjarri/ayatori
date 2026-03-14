@@ -16,7 +16,7 @@ use super::{
     args::BoundProtocolArgs,
     function::{ArrayFunction, ScalarFunction},
     party::PartyGroup,
-    tag::{FullName, Tag},
+    tag::{AnyTagRef, ArrayTag, FullName, ScalarTag},
     traits::SessionParameters,
     value::SerdeAdapter,
 };
@@ -63,8 +63,12 @@ impl<SP: SessionParameters> Node<SP> {
         Arc::as_ptr(&self.0) as usize
     }
 
-    pub(crate) fn store_in(&self) -> &Tag {
+    pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
         self.0.store_in()
+    }
+
+    pub(crate) fn store_in_and_group(&self) -> Option<(&ArrayTag, &PartyGroup<SP::Verifier>)> {
+        self.0.kind().store_in_and_group()
     }
 
     pub(crate) fn dependencies(&self) -> &[Node<SP>] {
@@ -95,12 +99,23 @@ impl<SP: SessionParameters> Node<SP> {
         s
     }
 
-    pub(crate) fn get_reproduction_subtree(&self, tag: &Tag) -> Result<Self, LocalError> {
+    pub(crate) fn get_reproduction_subtree(&self, tag: &ArrayTag, verifier: &SP::Verifier) -> Result<Self, LocalError> {
         for node in self.flattened() {
-            if node.store_in() == tag {
-                return Ok(node.tree_without_dependencies());
+            if node.store_in().array() == Some(tag) {
+                let node = node.tree_without_dependencies();
+
+                // The output must be a scalar node, and `node` is an array node.
+                // So we wrap it in a collection node.
+                let wrapped = Node::new(NodeKind::Collect {
+                    store_in: tag.collected(),
+                    values: node.get_strong_ref(),
+                    group: PartyGroup::new(core::slice::from_ref(verifier)),
+                });
+
+                return Ok(wrapped);
             }
         }
+
         Err(LocalError::new(format!("Node {tag} was not found")))
     }
 
@@ -286,7 +301,7 @@ impl<SP: SessionParameters> TypedNode<SP> {
         }
     }
 
-    fn store_in(&self) -> &Tag {
+    fn store_in(&self) -> AnyTagRef<'_> {
         self.kind.store_in()
     }
 
@@ -358,34 +373,34 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 #[derive(Debug)]
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
-        store_in: Tag,
+        store_in: ScalarTag,
         function: ScalarFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
     },
     ComputeArray {
-        store_in: Tag,
+        store_in: ArrayTag,
         function: ArrayFunction<SP>,
         group: PartyGroup<SP::Verifier>,
         args: BTreeMap<String, Node<SP>>,
     },
     DirectMessage {
-        store_in: Tag,
+        store_in: ArrayTag,
         data: Node<SP>,
         group: PartyGroup<SP::Verifier>,
     },
     Collect {
-        store_in: Tag,
+        store_in: ScalarTag,
         values: Node<SP>,
         group: PartyGroup<SP::Verifier>,
     },
     Receive {
-        store_in: Tag,
+        store_in: ArrayTag,
         group: PartyGroup<SP::Verifier>,
         message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
     ScalarArgument {
-        store_in: Tag,
+        store_in: ScalarTag,
         name: String,
     },
 }
@@ -449,14 +464,23 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
 }
 
 impl<SP: SessionParameters> NodeKind<SP> {
-    fn store_in(&self) -> &Tag {
+    fn store_in(&self) -> AnyTagRef<'_> {
         match self {
             Self::ComputeScalar { store_in, .. }
-            | Self::ComputeArray { store_in, .. }
-            | Self::DirectMessage { store_in, .. }
             | Self::Collect { store_in, .. }
-            | Self::Receive { store_in, .. }
-            | Self::ScalarArgument { store_in, .. } => store_in,
+            | Self::ScalarArgument { store_in, .. } => AnyTagRef::Scalar(store_in),
+            Self::ComputeArray { store_in, .. }
+            | Self::DirectMessage { store_in, .. }
+            | Self::Receive { store_in, .. } => AnyTagRef::Array(store_in),
+        }
+    }
+
+    fn store_in_and_group(&self) -> Option<(&ArrayTag, &PartyGroup<SP::Verifier>)> {
+        match self {
+            Self::ComputeArray { store_in, group, .. }
+            | Self::DirectMessage { store_in, group, .. }
+            | Self::Receive { store_in, group, .. } => Some((store_in, group)),
+            Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
         }
     }
 
@@ -544,22 +568,30 @@ impl<SP: SessionParameters> NodeKind<SP> {
     }
 
     fn with_added_prefix(self, prefix: &str) -> Self {
-        let new_store_in = self.store_in().clone().with_added_prefix(prefix);
         let mut result = self;
         match &mut result {
-            Self::ComputeScalar { store_in, .. }
-            | Self::ComputeArray { store_in, .. }
-            | Self::Collect { store_in, .. }
-            | Self::DirectMessage { store_in, .. }
-            | Self::ScalarArgument { store_in, .. }
-            | Self::Receive { store_in, .. } => {
-                *store_in = new_store_in;
+            Self::ComputeScalar { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::ComputeArray { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::Collect { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::DirectMessage { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::ScalarArgument { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::Receive {
+                store_in, message_name, ..
+            } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+                *message_name = message_name.clone().with_added_prefix(prefix);
             }
         };
-        if let Self::Receive { message_name, .. } = &mut result {
-            *message_name = message_name.clone().with_added_prefix(prefix);
-        }
-
         result
     }
 }

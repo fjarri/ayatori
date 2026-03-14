@@ -13,7 +13,7 @@ pub(crate) use function::{
     SenderErrorEnum, ThirdPartyAttributableArrayFunction, ThirdPartyErrorEnum,
 };
 pub(crate) use node::{NodeKind, Reproducibility};
-pub(crate) use tag::{FullName, Tag};
+pub(crate) use tag::{AnyTag, AnyTagRef, ArrayTag, FullName, ScalarTag};
 pub(crate) use value::{SerializedValue, Value};
 
 pub use crate::error::LocalError;

@@ -16,7 +16,7 @@ use super::{
     },
     node::{Node, NodeKind, args_to_owned},
     party::PartyGroup,
-    tag::{FullName, Tag},
+    tag::{ArrayTag, FullName, ScalarTag},
     traits::{ComposableProtocol, SessionParameters},
     value::{Erasable, SerdeAdapter, Value},
 };
@@ -53,7 +53,7 @@ pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
     Node::new(
         // TODO (#62): a special tag type?
         NodeKind::ScalarArgument {
-            store_in: Tag::computed(name),
+            store_in: ScalarTag::computed(name),
             name: name.to_string(),
         },
     )
@@ -62,7 +62,7 @@ pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
     Node::new(NodeKind::ComputeScalar {
-        store_in: Tag::computed(name),
+        store_in: ScalarTag::computed(name),
         function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(name, move |_args| {
             Ok(erased_value.clone())
         })),
@@ -74,7 +74,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
     if let Some(group) = node.group() {
         Node::new(NodeKind::ComputeArray {
-            store_in: Tag::computed(name),
+            store_in: ArrayTag::computed(name),
             function: ArrayFunction::Infallible(InfallibleArrayFunction::new_pre_erased("alias", move |_id, args| {
                 args.get_value(arg_name).cloned()
             })),
@@ -83,7 +83,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         })
     } else {
         Node::new(NodeKind::ComputeScalar {
-            store_in: Tag::computed(name),
+            store_in: ScalarTag::computed(name),
             function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased("alias", move |args| {
                 args.get_value(arg_name).cloned()
             })),
@@ -103,7 +103,7 @@ macro_rules! define_scalar_constructor {
         ) -> Result<Node<$SP>, LocalError> {
             Ok(Node::new(
                 NodeKind::ComputeScalar {
-                    store_in: Tag::computed(name),
+                    store_in: ScalarTag::computed(name),
                     function: $outer_type::$outer_ctr($inner_type::new(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
@@ -131,7 +131,7 @@ macro_rules! define_array_constructor {
 
             Ok(Node::new(
                 NodeKind::ComputeArray {
-                    store_in: Tag::computed(name),
+                    store_in: ArrayTag::computed(name),
                     function: $outer_type::$outer_ctr($inner_type::new(function)),
                     args: args_to_owned(args.iter().cloned())?,
                     group: group.clone(),
@@ -234,7 +234,7 @@ pub fn broadcast<SP: SessionParameters>(
     let arg_name = "_value".to_string();
     let serde_adapter = message.serde_adapter().clone();
     let args = [(arg_name.clone(), scalar.get_strong_ref())].into();
-    let tag = Tag::signed_local(message.name());
+    let tag = ArrayTag::signed_local(message.name());
 
     let serialize_and_sign = Node::new(NodeKind::ComputeArray {
         store_in: tag.clone(),
@@ -264,7 +264,7 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<S
     let arg_name = "_value".to_string();
     let serde_adapter = message.serde_adapter().clone();
     let args = [(arg_name.clone(), array.get_strong_ref())].into();
-    let tag = Tag::signed_local(message.name());
+    let tag = ArrayTag::signed_local(message.name());
 
     let serialize_and_sign = Node::new(NodeKind::ComputeArray {
         store_in: tag.clone(),
@@ -316,7 +316,7 @@ pub fn receive_signed<SP: SessionParameters>(
     group: &PartyGroup<SP::Verifier>,
 ) -> Node<SP> {
     Node::new(NodeKind::Receive {
-        store_in: Tag::signed_remote(message.name()),
+        store_in: ArrayTag::signed_remote(message.name()),
         group: group.clone(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
@@ -324,10 +324,13 @@ pub fn receive_signed<SP: SessionParameters>(
 }
 
 pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let (group, serde_adapter) = match received.kind() {
+    let (store_in, group, serde_adapter) = match received.kind() {
         NodeKind::Receive {
-            group, serde_adapter, ..
-        } => (group, serde_adapter),
+            store_in,
+            group,
+            serde_adapter,
+            ..
+        } => (store_in, group, serde_adapter),
         _ => return Err(LocalError::new("The given node must be a Receive node")),
     };
 
@@ -336,7 +339,7 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
     let args = [(arg_name.clone(), received.get_strong_ref())].into();
 
     Ok(Node::new(NodeKind::ComputeArray {
-        store_in: received.store_in().to_received()?,
+        store_in: store_in.to_received()?,
         function: ArrayFunction::SenderAttributable(SenderAttributableArrayFunction::new_pre_erased(
             "deserialize",
             move |id, args| deserialize(id, args, &arg_name, &serde_adapter),
@@ -355,15 +358,13 @@ pub fn receive<SP: SessionParameters>(
 }
 
 pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let group = values
-        .group()
-        .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be an array node"))?
-        .clone();
-
+    let (store_in, group) = values
+        .store_in_and_group()
+        .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be an array node"))?;
     Ok(Node::new(NodeKind::Collect {
-        store_in: values.store_in().collected(),
+        store_in: store_in.collected(),
         values: values.get_strong_ref(),
-        group,
+        group: group.clone(),
     }))
 }
 

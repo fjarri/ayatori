@@ -3,11 +3,11 @@ use core::fmt::{self, Debug};
 
 use crate::error::LocalError;
 use crate::protocol::{
-    Args, Erasable, InfallibleScalarFunction, Node, NodeKind, ScalarFunction, SessionParameters, Tag, Value,
+    Args, Erasable, InfallibleScalarFunction, Node, NodeKind, ScalarFunction, ScalarTag, SessionParameters, Value,
 };
 
 pub struct Replacement<SP: SessionParameters> {
-    tag: Tag,
+    tag: ScalarTag,
     kind: ReplacementEnum<SP>,
 }
 
@@ -32,7 +32,7 @@ impl<SP: SessionParameters> Replacement<SP> {
     {
         Self {
             // TODO (#61): support accessing nodes in subprotocols.
-            tag: Tag::computed(name),
+            tag: ScalarTag::computed(name),
             kind: ReplacementEnum::Scalar {
                 function: Box::new(move |value, args| {
                     let typed_value = value.downcast_ref::<Ret>()?;
@@ -44,8 +44,9 @@ impl<SP: SessionParameters> Replacement<SP> {
     }
 
     pub(crate) fn apply(self, node: Node<SP>) -> Result<Node<SP>, LocalError> {
+        // TODO: have `node.search()` function so that we don't build a whole vector
         for subnode in node.flattened() {
-            if subnode.store_in() == &self.tag {
+            if subnode.store_in().scalar() == Some(&self.tag) {
                 let new_subnode = match (subnode.kind(), self.kind) {
                     (
                         NodeKind::ComputeScalar {
