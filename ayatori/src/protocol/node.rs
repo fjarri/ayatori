@@ -176,71 +176,60 @@ impl<SP: SessionParameters> Node<SP> {
             .map(|node| node.get_strong_ref())
     }
 
-    pub(crate) fn tree_with_added_prefix(&self, prefix: &str) -> Self {
-        let root_id = self.id();
-        let mut replacement_nodes = BTreeMap::new();
-
-        for node in self.flattened() {
-            let old_id = node.id();
-            let new_node = node.with_replacements(&replacement_nodes).with_added_prefix(prefix);
-            replacement_nodes.insert(old_id, new_node);
-        }
-
-        replacement_nodes.remove(&root_id).expect("The root node was processed")
-    }
-
     fn without_dependencies(self) -> Self {
         Self::new_typed(self.unwrap_or_shallow_clone().without_dependencies())
     }
 
     fn tree_without_dependencies(&self) -> Self {
-        let root_id = self.id();
-        let mut replacement_nodes = BTreeMap::new();
-
-        for node in self.flattened_args() {
-            let old_id = node.id();
-            let new_node = node.without_dependencies().with_replacements(&replacement_nodes);
-            replacement_nodes.insert(old_id, new_node);
-        }
-
-        replacement_nodes.remove(&root_id).expect("The root node was processed")
+        self.mutate_tree(|node| Ok(node.without_dependencies()))
+            .expect("the closure is infallible")
     }
 
     pub(crate) fn with_substituted_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
-        let root_id = self.id();
-        let mut replacement_nodes = BTreeMap::new();
-
-        for node in self.flattened() {
-            let old_id = node.id();
-
-            let new_node = if let NodeKind::ScalarArgument { name, .. } = node.kind() {
+        self.mutate_tree(|node| {
+            Ok(if let NodeKind::ScalarArgument { name, .. } = node.kind() {
                 arguments.get(name)?.get_strong_ref()
             } else {
-                node.with_replacements(&replacement_nodes)
-            };
-            replacement_nodes.insert(old_id, new_node);
-        }
-
-        Ok(replacement_nodes.remove(&root_id).expect("The root node was processed"))
+                node
+            })
+        })
     }
 
     #[cfg(any(test, feature = "dev"))]
     pub(crate) fn with_replaced_subnode(&self, old_subnode: &Self, new_subnode: &Self) -> Self {
-        let root_id = self.id();
+        self.mutate_tree(|node| {
+            Ok(if node.id() == old_subnode.id() {
+                new_subnode.get_strong_ref()
+            } else {
+                node
+            })
+        })
+        .expect("the closure is infallible")
+    }
+
+    pub(crate) fn tree_with_added_prefix(&self, prefix: &str) -> Self {
+        self.mutate_tree(|node| Ok(node.with_added_prefix(prefix)))
+            .expect("the closure is infallible")
+    }
+
+    fn mutate_tree(&self, f: impl Fn(Self) -> Result<Self, LocalError>) -> Result<Self, LocalError> {
         let mut replacement_nodes = BTreeMap::new();
 
         for node in self.flattened() {
+            if node.id() == self.id() {
+                // This is the last element of the iterator, and we will process it separately.
+                break;
+            }
             let old_id = node.id();
-
-            let new_node = if node.id() == old_subnode.id() {
-                new_subnode.get_strong_ref()
-            } else {
-                node.with_replacements(&replacement_nodes)
-            };
-            replacement_nodes.insert(old_id, new_node);
+            let new_node = f(node)?.with_replacements(&replacement_nodes);
+            // Note that this may lead to errors if the node with `old_id` is dropped,
+            // but we are still retaining `self`, so all of its tree will persist until the end of the method.
+            if new_node.id() != old_id {
+                replacement_nodes.insert(old_id, new_node);
+            }
         }
 
-        replacement_nodes.remove(&root_id).expect("The root node was processed")
+        Ok(f(self.get_strong_ref())?.with_replacements(&replacement_nodes))
     }
 }
 
