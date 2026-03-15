@@ -377,7 +377,7 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
     let output = P::build(my_id, build_data, arg_nodes)?;
-    let prefixed = output.with_added_prefix(prefix);
+    let prefixed = output.tree_with_added_prefix(prefix);
     let bound_args = signature.bind(args)?;
     let with_args = prefixed.with_substituted_arguments(bound_args)?;
     Ok(with_args)

@@ -87,7 +87,7 @@ impl<SP: SessionParameters> Node<SP> {
         Self::new_typed(self.unwrap_or_shallow_clone().with_replacements(replacements))
     }
 
-    fn shallow_with_added_prefix(self, prefix: &str) -> Self {
+    fn with_added_prefix(self, prefix: &str) -> Self {
         Self::new_typed(self.unwrap_or_shallow_clone().with_added_prefix(prefix))
     }
 
@@ -176,15 +176,13 @@ impl<SP: SessionParameters> Node<SP> {
             .map(|node| node.get_strong_ref())
     }
 
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
+    pub(crate) fn tree_with_added_prefix(&self, prefix: &str) -> Self {
         let root_id = self.id();
         let mut replacement_nodes = BTreeMap::new();
 
         for node in self.flattened() {
             let old_id = node.id();
-            let new_node = node
-                .with_replacements(&replacement_nodes)
-                .shallow_with_added_prefix(prefix);
+            let new_node = node.with_replacements(&replacement_nodes).with_added_prefix(prefix);
             replacement_nodes.insert(old_id, new_node);
         }
 
