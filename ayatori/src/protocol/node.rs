@@ -574,19 +574,12 @@ impl<SP: SessionParameters> NodeKind<SP> {
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut result = self;
         match &mut result {
-            Self::ComputeScalar { store_in, .. } => {
+            Self::ComputeScalar { store_in, .. }
+            | Self::ScalarArgument { store_in, .. }
+            | Self::Collect { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
-            Self::ComputeArray { store_in, .. } => {
-                *store_in = store_in.clone().with_added_prefix(prefix);
-            }
-            Self::Collect { store_in, .. } => {
-                *store_in = store_in.clone().with_added_prefix(prefix);
-            }
-            Self::DirectMessage { store_in, .. } => {
-                *store_in = store_in.clone().with_added_prefix(prefix);
-            }
-            Self::ScalarArgument { store_in, .. } => {
+            Self::ComputeArray { store_in, .. } | Self::DirectMessage { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
             Self::Receive {
