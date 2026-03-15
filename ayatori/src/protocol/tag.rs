@@ -9,7 +9,26 @@ use serde::{Deserialize, Serialize};
 use crate::error::LocalError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum TagKind {
+pub(crate) enum ScalarTagKind {
+    /// A locally computed value coming from an explicit computation/verification node
+    /// (not from serialization/deserialization).
+    /// The name of the tag will come from what the user provided when creating the node.
+    /// The contents are of some user type.
+    Computed,
+    Collected(ArrayTagKind),
+}
+
+impl Display for ScalarTagKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Computed => write!(f, ""),
+            Self::Collected(kind) => write!(f, "collected-{kind}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) enum ArrayTagKind {
     /// A locally computed value coming from an explicit computation/verification node
     /// (not from serialization/deserialization).
     /// The name of the tag will come from what the user provided when creating the node.
@@ -33,6 +52,18 @@ pub(crate) enum TagKind {
     Received,
 }
 
+impl Display for ArrayTagKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Computed => write!(f, ""),
+            Self::Sent => write!(f, "sent"),
+            Self::Received => write!(f, "received"),
+            Self::SignedLocal => write!(f, "signed-local"),
+            Self::SignedRemote => write!(f, "signed-remote"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FullName {
     prefix: Vec<String>,
@@ -43,13 +74,6 @@ impl FullName {
     pub(crate) fn new(name: &str) -> Self {
         Self {
             prefix: Vec::new(),
-            name: name.to_string(),
-        }
-    }
-
-    pub(crate) fn with_name(self, name: &str) -> Self {
-        Self {
-            prefix: self.prefix,
             name: name.to_string(),
         }
     }
@@ -74,112 +98,163 @@ impl Display for FullName {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct Tag {
+pub(crate) struct ScalarTag {
     full_name: FullName,
-    kind: TagKind,
-    collected: bool,
+    kind: ScalarTagKind,
 }
 
-impl Tag {
+impl ScalarTag {
     pub fn full_name(&self) -> &FullName {
         &self.full_name
-    }
-
-    pub fn with_name(self, name: &str) -> Self {
-        Self {
-            full_name: self.full_name.with_name(name),
-            kind: self.kind,
-            collected: self.collected,
-        }
     }
 
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self {
             full_name: self.full_name.with_added_prefix(prefix),
             kind: self.kind,
-            collected: self.collected,
         }
     }
 
     pub fn computed(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
-            kind: TagKind::Computed,
-            collected: false,
+            kind: ScalarTagKind::Computed,
+        }
+    }
+}
+
+impl Display for ScalarTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self.kind {
+            ScalarTagKind::Computed => write!(f, "{}", self.full_name),
+            _ => write!(f, "{}({})", self.kind, self.full_name),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) struct ArrayTag {
+    full_name: FullName,
+    kind: ArrayTagKind,
+}
+
+impl ArrayTag {
+    pub fn full_name(&self) -> &FullName {
+        &self.full_name
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self {
+            full_name: self.full_name.with_added_prefix(prefix),
+            kind: self.kind,
+        }
+    }
+
+    pub fn computed(name: &str) -> Self {
+        Self {
+            full_name: FullName::new(name),
+            kind: ArrayTagKind::Computed,
         }
     }
 
     pub fn signed_remote(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
-            kind: TagKind::SignedRemote,
-            collected: false,
+            kind: ArrayTagKind::SignedRemote,
         }
     }
 
     pub fn signed_local(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
-            kind: TagKind::SignedLocal,
-            collected: false,
+            kind: ArrayTagKind::SignedLocal,
         }
-    }
-
-    pub fn to_received(&self) -> Result<Self, LocalError> {
-        if self.kind != TagKind::SignedRemote {
-            return Err(LocalError::new("Only SignedRemote tags can be converted to Received"));
-        }
-        Ok(Self {
-            full_name: self.full_name.clone(),
-            kind: TagKind::Received,
-            collected: false,
-        })
     }
 
     pub fn to_sent(&self) -> Result<Self, LocalError> {
-        if self.kind != TagKind::SignedLocal {
+        if self.kind != ArrayTagKind::SignedLocal {
             return Err(LocalError::new("Only SignedLocal tags can be converted to Sent"));
         }
         Ok(Self {
             full_name: self.full_name.clone(),
-            kind: TagKind::Sent,
-            collected: false,
+            kind: ArrayTagKind::Sent,
         })
     }
 
     pub fn signed_remote_with_full_name(full_name: &FullName) -> Self {
         Self {
             full_name: full_name.clone(),
-            kind: TagKind::SignedRemote,
-            collected: false,
+            kind: ArrayTagKind::SignedRemote,
         }
     }
 
-    pub fn collected(&self) -> Self {
-        assert!(!self.collected);
-        Self {
+    pub fn to_received(&self) -> Result<Self, LocalError> {
+        if self.kind != ArrayTagKind::SignedRemote {
+            return Err(LocalError::new("Only SignedRemote tags can be converted to Received"));
+        }
+        Ok(Self {
             full_name: self.full_name.clone(),
-            kind: self.kind,
-            collected: true,
+            kind: ArrayTagKind::Received,
+        })
+    }
+
+    pub fn collected(&self) -> ScalarTag {
+        ScalarTag {
+            full_name: self.full_name.clone(),
+            kind: ScalarTagKind::Collected(self.kind),
         }
     }
 }
 
-impl Display for Tag {
+impl Display for ArrayTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        if self.collected {
-            write!(f, "collected(")?;
-        }
         match self.kind {
-            TagKind::Computed => write!(f, "{}", self.full_name),
-            TagKind::Sent => write!(f, "sent({})", self.full_name),
-            TagKind::Received => write!(f, "received({})", self.full_name),
-            TagKind::SignedLocal => write!(f, "signed-local({})", self.full_name),
-            TagKind::SignedRemote => write!(f, "signed-remote({})", self.full_name),
-        }?;
-        if self.collected {
-            write!(f, ")")?;
+            ArrayTagKind::Computed => write!(f, "{}", self.full_name),
+            _ => write!(f, "{}({})", self.kind, self.full_name),
         }
-        Ok(())
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum AnyTagRef<'a> {
+    Scalar(&'a ScalarTag),
+    Array(&'a ArrayTag),
+}
+
+impl<'a> AnyTagRef<'a> {
+    pub fn scalar(&self) -> Option<&ScalarTag> {
+        match self {
+            Self::Scalar(tag) => Some(tag),
+            Self::Array(_) => None,
+        }
+    }
+
+    pub fn array(&self) -> Option<&ArrayTag> {
+        match self {
+            Self::Scalar(_) => None,
+            Self::Array(tag) => Some(tag),
+        }
+    }
+
+    pub fn to_owned(&self) -> AnyTag {
+        match self {
+            Self::Scalar(tag) => AnyTag::Scalar((*tag).clone()),
+            Self::Array(tag) => AnyTag::Array((*tag).clone()),
+        }
+    }
+}
+
+impl<'a> Display for AnyTagRef<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Scalar(tag) => write!(f, "{tag}"),
+            Self::Array(tag) => write!(f, "{tag}"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum AnyTag {
+    Scalar(ScalarTag),
+    Array(ArrayTag),
 }

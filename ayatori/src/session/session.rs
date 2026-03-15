@@ -23,8 +23,8 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        ArgNodes, Args, ArrayFunction, ExecutableProtocol, FullName, Node, PrivateInputs, ScalarFunction,
-        SessionParameters, Tag, Value,
+        ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, ScalarFunction,
+        SessionParameters, Value,
     },
 };
 
@@ -82,6 +82,7 @@ where
         let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
         let expected_messages = ruleset.expected_messages().clone();
         let storage = Storage::new(public_inputs, private_inputs);
+
         let data = Arc::new(SessionData {
             id,
             participants,
@@ -114,11 +115,12 @@ where
 
     pub(crate) fn new_with_reproduction_subtree(
         id: SessionId<SP>,
-        subtree_root: &Tag,
+        subtree_root: &ArrayTag,
         verifier: &SP::Verifier,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
-        let output_node = make_tree::<SP, P>(verifier, shared_data)?.get_reproduction_subtree(subtree_root)?;
+        let output_node =
+            make_tree::<SP, P>(verifier, shared_data)?.get_reproduction_subtree(subtree_root, verifier)?;
         Self::new_inner(id, None, verifier, output_node, PrivateInputs::new(), shared_data)
     }
 
@@ -146,7 +148,7 @@ where
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
     }
 
-    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: Tag) {
+    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: ArrayTag) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
@@ -196,12 +198,7 @@ where
                     destination,
                     index,
                 } => {
-                    let signed_value = if let Some(index) = index {
-                        self.storage.get_elem(&to_send, &index)
-                    } else {
-                        self.storage.get(&to_send)
-                    }?;
-
+                    let signed_value = self.storage.get_elem(&to_send, &index)?;
                     return Ok(Some(Task::send(store_in, destination, signed_value)));
                 }
                 Action::ComputeScalar {
@@ -343,7 +340,9 @@ where
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self.storage.get_elem(&Tag::signed_remote_with_full_name(&name), &id)?;
+                        let value = self
+                            .storage
+                            .get_elem(&ArrayTag::signed_remote_with_full_name(&name), &id)?;
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
