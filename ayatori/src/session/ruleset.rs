@@ -190,8 +190,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let mut element_condition = ElementCondition::empty();
                     for arg in args.values() {
                         match arg.store_in() {
-                            // TODO: we're assuming here that `arg.group()` is a superset of `group`.
-                            // Should we check that?
+                            // TODO (#68): we're assuming here that `arg.group()` is a superset of `group`.
+                            // Review this when fixing #68.
                             AnyTagRef::Array(tag) => element_condition = element_condition.and(tag),
                             AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
                         };
@@ -344,13 +344,14 @@ impl<SP: SessionParameters> Ruleset<SP> {
     }
 
     fn pop_send_action(&mut self) -> Option<Action<SP>> {
-        // TODO: clean up all exhausted actions (with element_conditions field empty)
+        let mut action = None;
+
         for rule in &mut self.send_rules {
             if !rule.dependencies.is_satisfied() {
                 continue;
             }
 
-            let maybe_action = rule
+            action = rule
                 .element_conditions
                 .extract_if(.., |_id, condition| condition.is_satisfied())
                 .next()
@@ -360,11 +361,20 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     destination: id,
                 });
 
-            if let Some(action) = maybe_action {
-                return Some(action);
+            if action.is_some() {
+                break;
             }
         }
-        None
+
+        // TODO (#68): this may need to be removed after #68 is fixed, because compute-array rules
+        // won't track the IDs for which they were completed.
+        // If not, it needs to be optimized to not look through the whole list,
+        // but only at the rule which produced the action.
+        if action.is_some() {
+            self.send_rules.retain(|rule| !rule.element_conditions.is_empty());
+        }
+
+        action
     }
 
     fn pop_compute_scalar_action(&mut self) -> Option<Action<SP>> {
@@ -381,13 +391,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
     }
 
     fn pop_compute_element_action(&mut self) -> Option<Action<SP>> {
-        // TODO: clean up all exhausted actions (with element_conditions field empty)
+        let mut action = None;
         for rule in &mut self.compute_array_rules {
             if !rule.dependencies.is_satisfied() || !rule.scalar_condition.is_satisfied() {
                 continue;
             }
 
-            let maybe_action = rule
+            action = rule
                 .element_conditions
                 .extract_if(.., |_id, condition| condition.is_satisfied())
                 .next()
@@ -399,11 +409,20 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     on_error: rule.on_error.clone(),
                 });
 
-            if let Some(action) = maybe_action {
-                return Some(action);
+            if action.is_some() {
+                break;
             }
         }
-        None
+
+        // TODO (#68): this may need to be removed after #68 is fixed, because compute-array rules
+        // won't track the IDs for which they were completed.
+        // If not, it needs to be optimized to not look through the whole list,
+        // but only at the rule which produced the action.
+        if action.is_some() {
+            self.send_rules.retain(|rule| !rule.element_conditions.is_empty());
+        }
+
+        action
     }
 
     fn pop_collect_action(&mut self) -> Option<Action<SP>> {
