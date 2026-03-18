@@ -126,7 +126,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
             &[("values_verified_map", &all_values_verified)],
         )?
         // We don't want to send out values that proved to be incorrect during deserialization checks.
-        .with_dependencies(&[&all_values_deserialized]);
+        .with_dependencies(&[&all_values_deserialized])?;
 
         let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties)?;
         let echo_pack = receive(&message_echo, all_parties)?;
@@ -156,7 +156,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
             &all_echo_packs_correct,
             &all_echo_contents_correct,
             &echo_pack_broadcasted,
-        ]);
+        ])?;
 
         Ok(output)
     }

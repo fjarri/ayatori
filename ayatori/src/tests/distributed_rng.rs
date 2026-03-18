@@ -84,9 +84,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
         let my_c = compute_scalar("my_c", commit_to_value, &[("b", &my_b), ("r", &my_r)])?;
         let c_broadcasted = broadcast(&message_c, &my_c, all_parties)?;
         let c = receive(&message_c, all_parties)?;
-        let all_c = collect(&c)?.with_dependencies(&[&c_broadcasted]);
-        let b_broadcasted = broadcast(&message_b, &my_b, all_parties)?.with_dependencies(&[&all_c]);
-        let r_broadcasted = broadcast(&message_r, &my_r, all_parties)?.with_dependencies(&[&all_c]);
+        let all_c = collect(&c)?.with_dependencies(&[&c_broadcasted])?;
+        let b_broadcasted = broadcast(&message_b, &my_b, all_parties)?.with_dependencies(&[&all_c])?;
+        let r_broadcasted = broadcast(&message_r, &my_r, all_parties)?.with_dependencies(&[&all_c])?;
         let b = receive(&message_b, all_parties)?;
         let r = receive(&message_r, all_parties)?;
         let hash_correct = compute_array_sender_fallible(
@@ -95,9 +95,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
             all_parties,
             &[("c", &c), ("b", &b), ("r", &r)],
         )?;
-        let all_hash_correct = collect(&hash_correct)?.with_dependencies(&[&b_broadcasted, &r_broadcasted]);
-        let all_b = collect(&b)?.with_dependencies(&[&b_broadcasted]);
-        Ok(compute_scalar("output", gen_output, &[("b", &all_b)])?.with_dependencies(&[&all_hash_correct]))
+        let all_hash_correct = collect(&hash_correct)?.with_dependencies(&[&b_broadcasted, &r_broadcasted])?;
+        let all_b = collect(&b)?.with_dependencies(&[&b_broadcasted])?;
+        compute_scalar("output", gen_output, &[("b", &all_b)])?.with_dependencies(&[&all_hash_correct])
     }
 }
 

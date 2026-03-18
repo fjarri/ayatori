@@ -136,7 +136,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
             let mut dependencies = ScalarCondition::empty();
 
             for dependency in node.dependencies() {
-                // TODO: should be checked at node graph creation stage
                 let tag = dependency
                     .store_in()
                     .scalar()
@@ -160,7 +159,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let mut arg_tags = BTreeMap::new();
                     let mut condition = ScalarCondition::empty();
                     for (name, arg) in args {
-                        // TODO: should be checked at node graph creation stage
                         let tag = arg.store_in().scalar().ok_or_else(|| {
                             LocalError::new(
                                 "Assumption: Only scalar nodes are allowed as arguments to scalar functions",
@@ -223,12 +221,9 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 NodeKind::DirectMessage { store_in, data, group } => {
                     let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
 
-                    // TODO: should be checked at node graph creation stage
-                    // TODO: this is an internal assumption error
-                    let tag = data
-                        .store_in()
-                        .array()
-                        .ok_or_else(|| LocalError::new("DirectMessage node is expected to send array data"))?;
+                    let tag = data.store_in().array().ok_or_else(|| {
+                        LocalError::new("Assumption: DirectMessage node is expected to send array data")
+                    })?;
                     let element_condition = ElementCondition::empty().and(tag);
                     let element_conditions = possible_ids
                         .into_iter()
@@ -247,12 +242,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     values,
                     group,
                 } => {
-                    // TODO: should be checked at node graph creation stage
-                    // TODO: this is an internal assumption error
                     let tag = values
                         .store_in()
                         .array()
-                        .ok_or_else(|| LocalError::new("Collect node is expected to collect array data"))?;
+                        .ok_or_else(|| LocalError::new("Assumption: Collect node is expected to collect array data"))?;
                     let condition = QuorumCondition::new(tag, group);
                     collect_rules.push(CollectRule {
                         dependencies,

@@ -101,6 +101,12 @@ macro_rules! define_scalar_constructor {
             function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
+            if !args.iter().all(|(_name, arg)| arg.group().is_none()) {
+                return Err(LocalError::new(
+                    "Scalar computations may only take scalar nodes as arguments"
+                ));
+            }
+
             Ok(Node::new(
                 NodeKind::ComputeScalar {
                     store_in: ScalarTag::computed(name),

@@ -48,9 +48,13 @@ impl<SP: SessionParameters> Node<SP> {
         self.0.group()
     }
 
-    #[must_use]
-    pub fn with_dependencies(self, dependencies: &[&Self]) -> Self {
-        Self::new_typed(self.unwrap_or_shallow_clone().with_dependencies(dependencies))
+    pub fn with_dependencies(self, dependencies: &[&Self]) -> Result<Self, LocalError> {
+        if !dependencies.iter().all(|node| node.group().is_none()) {
+            return Err(LocalError::new("Dependencies must be scalar nodes"));
+        }
+        Ok(Self::new_typed(
+            self.unwrap_or_shallow_clone().with_dependencies(dependencies),
+        ))
     }
 
     pub(crate) fn get_strong_ref(&self) -> Self {
