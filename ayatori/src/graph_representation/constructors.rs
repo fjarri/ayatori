@@ -8,21 +8,18 @@ use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
-    args::{ArgNodes, Args, ProtocolArgs},
-    function::{
-        ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleArrayFunctionWithSigner,
-        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction,
-        SenderError, ThirdPartyAttributableArrayFunction, ThirdPartyError,
-    },
+    args::{ArgNodes, ProtocolArgs},
     node::{Node, NodeKind, args_to_owned},
-    party::PartyGroup,
-    tag::{ArrayTag, FullName, ScalarTag},
-    traits::{ComposableProtocol, SessionParameters},
-    value::{Erasable, SerdeAdapter, Value},
 };
 use crate::{
-    error::LocalError,
-    session::{SignedValue, VerifiedValue},
+    entities::{
+        Args, ArrayFunction, ArrayTag, Erasable, FullName, InfallibleArrayFunction, InfallibleArrayFunctionWithRng,
+        InfallibleArrayFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, PartyGroup,
+        ScalarFunction, ScalarTag, SenderAttributableArrayFunction, SenderError, SerdeAdapter, SignedValue,
+        ThirdPartyAttributableArrayFunction, ThirdPartyError, Value, VerifiedValue,
+    },
+    errors::LocalError,
+    traits::{ComposableProtocol, SessionParameters},
 };
 
 #[derive(Debug)]

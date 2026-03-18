@@ -13,8 +13,7 @@ use core::{
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{Hex, SliceLike};
 
-use super::traits::WireFormat;
-use crate::error::LocalError;
+use crate::{errors::LocalError, traits::WireFormat};
 
 /*
 We need a dyn trait that both supports downcast for `Arc`s (like `Any` does),

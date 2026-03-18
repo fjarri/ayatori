@@ -12,15 +12,12 @@ use core::fmt::Debug;
 
 use itertools::Itertools;
 
-use super::{
-    args::BoundProtocolArgs,
-    function::{ArrayFunction, ScalarFunction},
-    party::PartyGroup,
-    tag::{AnyTagRef, ArrayTag, FullName, ScalarTag},
+use super::args::BoundProtocolArgs;
+use crate::{
+    entities::{AnyTagRef, ArrayFunction, ArrayTag, FullName, PartyGroup, ScalarFunction, ScalarTag, SerdeAdapter},
+    errors::LocalError,
     traits::SessionParameters,
-    value::SerdeAdapter,
 };
-use crate::error::LocalError;
 
 #[derive(Debug)]
 pub(crate) enum Reproducibility {

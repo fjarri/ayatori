@@ -4,12 +4,11 @@ use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest};
 
-use super::{
-    args::{ArgNodes, PrivateInputs, ProtocolSignature, PublicInputs},
-    node::Node,
-    value::Erasable,
+use crate::{
+    entities::Erasable,
+    errors::LocalError,
+    graph_representation::{ArgNodes, Node, PrivateInputs, ProtocolSignature, PublicInputs},
 };
-use crate::error::LocalError;
 
 pub trait PartyId:
     'static + Debug + Clone + PartialEq + Eq + PartialOrd + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>

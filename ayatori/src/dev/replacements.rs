@@ -1,10 +1,11 @@
 use alloc::{boxed::Box, format, vec::Vec};
 use core::fmt::{self, Debug};
 
-use crate::error::LocalError;
-use crate::protocol::{
-    AnyTagRef, Args, Erasable, InfallibleScalarFunction, Node, NodeKind, ScalarFunction, ScalarTag, SessionParameters,
-    Value,
+use crate::{
+    entities::{AnyTagRef, Args, Erasable, InfallibleScalarFunction, ScalarFunction, ScalarTag, Value},
+    errors::LocalError,
+    graph_representation::{Node, NodeKind},
+    traits::SessionParameters,
 };
 
 pub struct Replacement<SP: SessionParameters> {

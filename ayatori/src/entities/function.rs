@@ -9,10 +9,12 @@ use signature::rand_core::CryptoRngCore;
 
 use super::{
     args::Args,
-    traits::{SessionParameters, WireFormat},
     value::{Erasable, SerializedValue, Value},
 };
-use crate::error::LocalError;
+use crate::{
+    errors::LocalError,
+    traits::{SessionParameters, WireFormat},
+};
 
 #[derive(Debug, Default)]
 pub struct SenderError(pub(crate) SenderErrorEnum);

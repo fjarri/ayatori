@@ -4,14 +4,15 @@ use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    message::{MessageId, SignedValue, VerificationError, VerifiedValue},
     session::{PreprocessingError, Session},
     session_id::SessionId,
-    task::Task,
-    task::TaskResultEnum,
+    task::{Task, TaskResultEnum},
 };
-use crate::error::LocalError;
-use crate::protocol::{ArrayTag, ExecutableProtocol, SerializedValue, SessionParameters};
+use crate::{
+    entities::{ArrayTag, MessageId, SerializedValue, SignedValue, VerificationError, VerifiedValue},
+    errors::LocalError,
+    traits::{ExecutableProtocol, SessionParameters},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {

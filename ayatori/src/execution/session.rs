@@ -12,8 +12,7 @@ use signature::Keypair;
 
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
-    message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
-    ruleset::{Action, OnError, Ruleset},
+    message::MessageWithId,
     session_id::SessionId,
     storage::Storage,
     task::{
@@ -21,16 +20,18 @@ use super::{
         PreprocessingTask, Task, TaskResult, TaskResultEnum,
     },
 };
-use crate::{
-    error::LocalError,
-    protocol::{
-        ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, PublicInputs,
-        ScalarFunction, ScalarTag, SessionParameters, Value,
-    },
-};
-
 #[cfg(any(test, feature = "dev"))]
 use crate::dev::Replacement;
+use crate::{
+    entities::{
+        Args, ArrayFunction, ArrayTag, FullName, MessageId, ScalarFunction, ScalarTag, SignedValue, Value,
+        VerifiedValue,
+    },
+    errors::LocalError,
+    flat_representation::{Action, OnError, Ruleset},
+    graph_representation::{ArgNodes, Node, PrivateInputs, PublicInputs},
+    traits::{ExecutableProtocol, SessionParameters},
+};
 
 #[derive(Debug)]
 pub(crate) struct SessionData<SP: SessionParameters> {

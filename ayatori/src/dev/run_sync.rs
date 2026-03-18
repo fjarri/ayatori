@@ -3,9 +3,9 @@ use alloc::{collections::BTreeMap, format, vec::Vec};
 use signature::rand_core::CryptoRngCore;
 
 use crate::{
-    error::LocalError,
-    protocol::{ExecutableProtocol, SessionParameters},
-    session::{Message, PreprocessingError, Session, SessionReport, Task},
+    errors::LocalError,
+    execution::{Message, PreprocessingError, Session, SessionReport, Task},
+    traits::{ExecutableProtocol, SessionParameters},
 };
 
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(

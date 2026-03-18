@@ -1,4 +1,4 @@
-use alloc::{format, vec::Vec};
+use alloc::format;
 use core::fmt::{self, Debug};
 
 use serde::{Deserialize, Serialize};
@@ -9,10 +9,11 @@ use signature::{
     rand_core::CryptoRngCore,
 };
 
-use super::session_id::SessionId;
+use super::{tag::FullName, value::SerializedValue};
 use crate::{
-    error::LocalError,
-    protocol::{FullName, SerializedValue, SessionParameters, WireFormat},
+    errors::LocalError,
+    execution::SessionId,
+    traits::{SessionParameters, WireFormat},
 };
 
 #[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,61 +226,12 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message<SP: SessionParameters> {
-    destination: SP::Verifier,
-    values: Vec<SignedValue<SP>>,
-}
-
-impl<SP: SessionParameters> Message<SP> {
-    pub(crate) fn new(destination: SP::Verifier, values: Vec<SignedValue<SP>>) -> Self {
-        Self { destination, values }
-    }
-
-    pub fn destination(&self) -> &SP::Verifier {
-        &self.destination
-    }
-
-    /// Associates a random ID with the message.
-    ///
-    /// The user is expected to store the ID in association with the message source
-    /// (the nature of which will depend on the transport channel used).
-    /// If there is a problem with the message that cannot be associated with the specific verifier,
-    /// the returned error will contain the ID of the message the information came from.
-    /// Then, the user can use whatever measures necessary towards the associated source.
-    pub fn attach_id(self, rng: &mut impl CryptoRngCore) -> MessageWithId<SP> {
-        let message_id = MessageId::random(rng);
-        MessageWithId {
-            id: message_id,
-            destination: self.destination,
-            values: self.values,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessageWithId<SP: SessionParameters> {
-    id: MessageId<SP>,
-    destination: SP::Verifier,
-    values: Vec<SignedValue<SP>>,
-}
-
-impl<SP: SessionParameters> MessageWithId<SP> {
-    pub fn id(&self) -> &MessageId<SP> {
-        &self.id
-    }
-
-    pub(crate) fn into_values(self) -> impl Iterator<Item = SignedValue<SP>> {
-        self.values.into_iter()
-    }
-}
-
 #[derive(Serialize, Deserialize, PartialOrd, Ord, Hash)]
 #[derive_where::derive_where(Clone, PartialEq, Eq)]
 pub struct MessageId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
 
 impl<SP: SessionParameters> MessageId<SP> {
-    fn random(rng: &mut impl CryptoRngCore) -> Self {
+    pub(crate) fn random(rng: &mut impl CryptoRngCore) -> Self {
         let mut buffer = digest::Output::<SP::Digest>::default();
         rng.fill_bytes(&mut buffer);
         Self(buffer)

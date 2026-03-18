@@ -3,16 +3,17 @@ use core::fmt::Debug;
 
 use signature::rand_core::CryptoRngCore;
 
-use super::message::{Message, MessageId, SignedValue, VerificationError};
-use super::{ruleset::OnError, session::SessionData};
+use super::{message::Message, session::SessionData};
 use crate::{
-    error::LocalError,
-    protocol::{
+    entities::{
         AnyTagRef, Args, ArrayTag, InfallibleArrayFunction, InfallibleArrayFunctionWithRng,
-        InfallibleArrayFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, ScalarTag,
-        SenderAttributableArrayFunction, SenderError, SenderErrorEnum, SerializedValue, SessionParameters,
-        ThirdPartyAttributableArrayFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
+        InfallibleArrayFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MessageId,
+        ScalarTag, SenderAttributableArrayFunction, SenderError, SenderErrorEnum, SerializedValue, SignedValue,
+        ThirdPartyAttributableArrayFunction, ThirdPartyError, ThirdPartyErrorEnum, Value, VerificationError,
     },
+    errors::LocalError,
+    flat_representation::OnError,
+    traits::SessionParameters,
 };
 
 #[derive(Debug)]

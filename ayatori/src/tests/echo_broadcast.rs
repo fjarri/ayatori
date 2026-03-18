@@ -9,8 +9,8 @@ use signature::{Keypair, rand_core::SeedableRng};
 
 use crate::{
     dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol::*,
-    session::*,
+    protocol_author_api::*,
+    protocol_user_api::*,
 };
 
 fn prepare_echo_pack<SP: SessionParameters>(

@@ -1,13 +1,14 @@
-use crate::{
-    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol::*,
-    session::*,
-};
 use alloc::{collections::BTreeSet, vec::Vec};
 
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use signature::{Keypair, rand_core::SeedableRng};
+
+use crate::{
+    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+    protocol_author_api::*,
+    protocol_user_api::*,
+};
 
 #[derive(Debug)]
 struct Protocol2;

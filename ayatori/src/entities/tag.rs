@@ -6,7 +6,7 @@ use core::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::LocalError;
+use crate::errors::LocalError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) enum ScalarTagKind {

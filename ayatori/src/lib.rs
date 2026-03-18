@@ -14,12 +14,18 @@
 
 extern crate alloc;
 
+mod entities;
+mod errors;
+mod execution;
+mod flat_representation;
+mod graph_representation;
+mod traits;
+
+pub mod protocol_author_api;
+pub mod protocol_user_api;
+
 #[cfg(any(test, feature = "dev"))]
 pub mod dev;
-
-mod error;
-pub mod protocol;
-pub mod session;
 
 // We need the `dev` module for tests, but it is gated behind a feature
 // and cannot be enabled by default for integration tests.

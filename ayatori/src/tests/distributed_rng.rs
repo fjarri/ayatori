@@ -1,14 +1,15 @@
-use crate::{
-    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol::*,
-    session::*,
-};
 use alloc::{collections::BTreeSet, vec::Vec};
 
 use rand_chacha::ChaCha8Rng;
 use signature::{
     Keypair,
     rand_core::{CryptoRngCore, SeedableRng},
+};
+
+use crate::{
+    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+    protocol_author_api::*,
+    protocol_user_api::*,
 };
 
 #[derive(Debug)]

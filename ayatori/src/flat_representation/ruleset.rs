@@ -9,11 +9,10 @@ use itertools::Itertools;
 
 use super::conditions::{ElementCondition, QuorumCondition, ScalarCondition};
 use crate::{
-    error::LocalError,
-    protocol::{
-        AnyTag, AnyTagRef, ArrayFunction, ArrayTag, FullName, Node, NodeKind, Reproducibility, ScalarFunction,
-        ScalarTag, SessionParameters,
-    },
+    entities::{AnyTag, AnyTagRef, ArrayFunction, ArrayTag, FullName, ScalarFunction, ScalarTag},
+    errors::LocalError,
+    graph_representation::{Node, NodeKind, Reproducibility},
+    traits::SessionParameters,
 };
 
 #[derive_where::derive_where(Debug)]

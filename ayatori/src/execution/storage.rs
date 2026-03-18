@@ -5,8 +5,9 @@ use alloc::{
 };
 
 use crate::{
-    error::LocalError,
-    protocol::{AnyTag, ArrayTag, PartyId, ScalarTag, Value},
+    entities::{AnyTag, ArrayTag, ScalarTag, Value},
+    errors::LocalError,
+    traits::PartyId,
 };
 
 #[derive(Debug)]

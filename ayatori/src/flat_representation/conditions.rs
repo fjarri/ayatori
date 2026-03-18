@@ -3,7 +3,10 @@ use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use crate::protocol::{ArrayTag, PartyGroup, PartyId, ScalarTag};
+use crate::{
+    entities::{ArrayTag, PartyGroup, ScalarTag},
+    traits::PartyId,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ScalarCondition {
