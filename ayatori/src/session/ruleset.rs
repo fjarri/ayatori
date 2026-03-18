@@ -1,6 +1,5 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
-    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -8,7 +7,7 @@ use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use super::conditions::{Condition, LeafCondition};
+use super::conditions::{ElementCondition, QuorumCondition, ScalarCondition};
 use crate::{
     error::LocalError,
     protocol::{
@@ -16,6 +15,42 @@ use crate::{
         ScalarTag, SessionParameters,
     },
 };
+
+#[derive_where::derive_where(Debug)]
+struct ComputeScalarRule<SP: SessionParameters> {
+    dependencies: ScalarCondition,
+    condition: ScalarCondition,
+    store_in: ScalarTag,
+    function: ScalarFunction<SP>,
+    args: BTreeMap<String, ScalarTag>,
+}
+
+#[derive_where::derive_where(Debug)]
+struct ComputeArrayRule<SP: SessionParameters> {
+    dependencies: ScalarCondition,
+    scalar_condition: ScalarCondition,
+    element_conditions: BTreeMap<SP::Verifier, ElementCondition>,
+    store_in: ArrayTag,
+    function: ArrayFunction<SP>,
+    args: BTreeMap<String, AnyTag>,
+    on_error: OnError,
+}
+
+#[derive_where::derive_where(Debug)]
+struct SendRule<SP: SessionParameters> {
+    dependencies: ScalarCondition,
+    element_conditions: BTreeMap<SP::Verifier, ElementCondition>,
+    store_in: ArrayTag,
+    to_send: ArrayTag,
+}
+
+#[derive_where::derive_where(Debug)]
+struct CollectRule<SP: SessionParameters> {
+    dependencies: ScalarCondition,
+    condition: QuorumCondition<SP::Verifier>,
+    store_in: ScalarTag,
+    values: ArrayTag,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum OnError {
@@ -41,27 +76,14 @@ pub(crate) enum Action<SP: SessionParameters> {
         store_in: ArrayTag,
         to_send: ArrayTag,
         destination: SP::Verifier,
-        index: SP::Verifier,
     },
     Collect {
         store_in: ScalarTag,
         values: ArrayTag,
+        indices: BTreeSet<SP::Verifier>,
     },
-}
-
-impl<SP: SessionParameters> Action<SP> {
-    pub fn store_in(&self) -> AnyTagRef<'_> {
-        match self {
-            Self::ComputeScalar { store_in, .. } | Self::Collect { store_in, .. } => AnyTagRef::Scalar(store_in),
-            Self::ComputeArrayElement { store_in, .. } | Self::Send { store_in, .. } => AnyTagRef::Array(store_in),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Rule<SP: SessionParameters> {
-    condition: Condition<SP::Verifier>,
-    action: Action<SP>,
+    ReturnOutput(ScalarTag),
+    Terminate(ScalarTag),
 }
 
 fn get_on_error<SP: SessionParameters>(node: &Node<SP>, private_inputs: &BTreeSet<String>) -> OnError {
@@ -76,47 +98,6 @@ fn get_on_error<SP: SessionParameters>(node: &Node<SP>, private_inputs: &BTreeSe
     }
 }
 
-fn make_compute_array_action<SP: SessionParameters>(
-    store_in: &ArrayTag,
-    id: &SP::Verifier,
-    function: &ArrayFunction<SP>,
-    args: &BTreeMap<String, Node<SP>>,
-    on_error: &OnError,
-) -> (Action<SP>, Condition<SP::Verifier>) {
-    let mut specific_condition = Condition::empty();
-    for arg in args.values() {
-        match arg.store_in() {
-            AnyTagRef::Array(tag) => {
-                specific_condition.and(LeafCondition::ArrayElement {
-                    tag: tag.clone(),
-                    id: id.clone(),
-                });
-            }
-            AnyTagRef::Scalar(tag) => {
-                specific_condition.and(LeafCondition::Value { tag: tag.clone() });
-            }
-        }
-    }
-
-    let arg_tags = args
-        .iter()
-        .map(|(name, arg)| {
-            let arg = arg.store_in().to_owned();
-            (name.clone(), arg)
-        })
-        .collect();
-
-    let action = Action::ComputeArrayElement {
-        store_in: store_in.clone(),
-        function: function.clone(),
-        index: id.clone(),
-        args: arg_tags,
-        on_error: on_error.clone(),
-    };
-
-    (action, specific_condition)
-}
-
 #[derive(Debug)]
 enum State {
     InProgress,
@@ -125,19 +106,15 @@ enum State {
 }
 
 #[derive(Debug)]
-pub(crate) enum ActionGroup<SP: SessionParameters> {
-    Action(Action<SP>),
-    ReturnOutput(ScalarTag),
-    Terminate(ScalarTag),
-}
-
-#[derive(Debug)]
 pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: ScalarTag,
-    rules: Vec<Rule<SP>>,
+    compute_scalar_rules: Vec<ComputeScalarRule<SP>>,
+    compute_array_rules: Vec<ComputeArrayRule<SP>>,
+    send_rules: Vec<SendRule<SP>>,
+    collect_rules: Vec<CollectRule<SP>>,
     expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
+    arguments: BTreeMap<String, ScalarTag>,
     state: State,
-    banned_parties: BTreeSet<SP::Verifier>,
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
@@ -148,59 +125,52 @@ impl<SP: SessionParameters> Ruleset<SP> {
             .cloned()
             .ok_or_else(|| LocalError::new("The output node must be a scalar node"))?;
 
-        let mut rules = Vec::new();
+        let mut compute_scalar_rules = Vec::new();
+        let mut compute_array_rules = Vec::new();
+        let mut send_rules = Vec::new();
+        let mut collect_rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
 
-        let mut arguments = Vec::new();
+        let mut arguments = BTreeMap::new();
 
         for node in output_node.flattened() {
-            let mut shared_condition = Condition::empty();
+            let mut dependencies = ScalarCondition::empty();
 
             for dependency in node.dependencies() {
-                // TODO: should be checked at node graph creation stage
-                // TODO: this is an internal assumption error
                 let tag = dependency
                     .store_in()
                     .scalar()
-                    .cloned()
-                    .ok_or_else(|| LocalError::new("Only scalar nodes are allowed as dependencies"))?;
-                shared_condition.and(LeafCondition::Value { tag: tag.clone() });
+                    .ok_or_else(|| LocalError::new("Assumption: Only scalar nodes are allowed as dependencies"))?;
+                dependencies = dependencies.and(tag);
             }
 
-            let mut actions = Vec::new();
-
             match node.kind() {
-                NodeKind::ScalarArgument {
-                    store_in: _store_in,
-                    name,
-                } => {
-                    // TODO: check that the remaining argument nodes correspond to arguments provided.
-                    arguments.push(name.clone());
+                NodeKind::ScalarArgument { store_in, name } => {
+                    arguments.insert(name.clone(), store_in.clone());
                 }
                 NodeKind::ComputeScalar {
                     store_in,
                     function,
                     args,
                 } => {
-                    let mut specific_condition = Condition::empty();
                     let mut arg_tags = BTreeMap::new();
+                    let mut condition = ScalarCondition::empty();
                     for (name, arg) in args {
-                        // TODO: should be checked at node graph creation stage
-                        // TODO: this is an internal assumption error
-                        let tag = arg.store_in().scalar().cloned().ok_or_else(|| {
-                            LocalError::new("Only scalar nodes are allowed as arguments to scalar functions")
+                        let tag = arg.store_in().scalar().ok_or_else(|| {
+                            LocalError::new(
+                                "Assumption: Only scalar nodes are allowed as arguments to scalar functions",
+                            )
                         })?;
-                        specific_condition.and(LeafCondition::Value { tag: tag.clone() });
+                        condition = condition.and(tag);
                         arg_tags.insert(name.clone(), tag.clone());
                     }
-                    actions.push((
-                        Action::ComputeScalar {
-                            store_in: store_in.clone(),
-                            function: function.clone(),
-                            args: arg_tags,
-                        },
-                        specific_condition,
-                    ));
+                    compute_scalar_rules.push(ComputeScalarRule {
+                        dependencies,
+                        condition,
+                        store_in: store_in.clone(),
+                        function: function.clone(),
+                        args: arg_tags,
+                    });
                 }
                 NodeKind::ComputeArray {
                     store_in,
@@ -209,61 +179,77 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     group,
                 } => {
                     let on_error = get_on_error(&node, private_inputs);
-                    for id in group.ids() {
-                        actions.push(make_compute_array_action(store_in, id, function, args, &on_error));
+
+                    let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
+                    let mut scalar_condition = ScalarCondition::empty();
+                    let mut element_condition = ElementCondition::empty();
+                    for arg in args.values() {
+                        match arg.store_in() {
+                            // TODO (#68): we're assuming here that `arg.group()` is a superset of `group`.
+                            // Review this when fixing #68.
+                            AnyTagRef::Array(tag) => element_condition = element_condition.and(tag),
+                            AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                        };
                     }
+
+                    let element_conditions = possible_ids
+                        .into_iter()
+                        .map(|id| (id, element_condition.clone()))
+                        .collect();
+
+                    let arg_tags = args
+                        .iter()
+                        .map(|(name, arg)| {
+                            let arg = arg.store_in().to_owned();
+                            (name.clone(), arg)
+                        })
+                        .collect();
+
+                    compute_array_rules.push(ComputeArrayRule {
+                        dependencies,
+                        scalar_condition,
+                        element_conditions,
+                        store_in: store_in.clone(),
+                        function: function.clone(),
+                        args: arg_tags,
+                        on_error: on_error.clone(),
+                    })
                 }
                 NodeKind::DirectMessage { store_in, data, group } => {
-                    for id in group.ids() {
-                        let mut specific_condition = Condition::empty();
-                        // TODO: should be checked at node graph creation stage
-                        // TODO: this is an internal assumption error
-                        let tag = data
-                            .store_in()
-                            .array()
-                            .cloned()
-                            .ok_or_else(|| LocalError::new("DirectMessage node is expected to send array data"))?;
-                        specific_condition.and(LeafCondition::ArrayElement {
-                            tag: tag.clone(),
-                            id: id.clone(),
-                        });
-                        actions.push((
-                            Action::Send {
-                                store_in: store_in.clone(),
-                                to_send: tag.clone(),
-                                destination: id.clone(),
-                                index: id.clone(),
-                            },
-                            specific_condition,
-                        ));
-                    }
+                    let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
+
+                    let tag = data.store_in().array().ok_or_else(|| {
+                        LocalError::new("Assumption: DirectMessage node is expected to send array data")
+                    })?;
+                    let element_condition = ElementCondition::empty().and(tag);
+                    let element_conditions = possible_ids
+                        .into_iter()
+                        .map(|id| (id, element_condition.clone()))
+                        .collect();
+                    send_rules.push(SendRule {
+                        dependencies,
+                        element_conditions,
+                        store_in: store_in.clone(),
+                        to_send: tag.clone(),
+                    });
                 }
+
                 NodeKind::Collect {
                     store_in,
                     values,
                     group,
                 } => {
-                    let mut specific_condition = Condition::empty();
-                    // TODO: should be checked at node graph creation stage
-                    // TODO: this is an internal assumption error
                     let tag = values
                         .store_in()
                         .array()
-                        .cloned()
-                        .ok_or_else(|| LocalError::new("Collect node is expected to collect array data"))?;
-                    specific_condition.and(LeafCondition::Array {
-                        tag: tag.clone(),
-                        group: group.clone(),
-                        got_ids: BTreeSet::new(),
+                        .ok_or_else(|| LocalError::new("Assumption: Collect node is expected to collect array data"))?;
+                    let condition = QuorumCondition::new(tag, group);
+                    collect_rules.push(CollectRule {
+                        dependencies,
+                        condition,
+                        store_in: store_in.clone(),
+                        values: tag.clone(),
                     });
-
-                    actions.push((
-                        Action::Collect {
-                            store_in: store_in.clone(),
-                            values: tag.clone(),
-                        },
-                        specific_condition,
-                    ));
                 }
                 NodeKind::Receive {
                     store_in: _store_in,
@@ -273,105 +259,196 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 } => {
                     expected_messages.insert(message_name.clone(), group.ids().cloned().collect());
                 }
-            }
-
-            for (action, specific_condition) in actions {
-                let mut condition = shared_condition.clone();
-                condition.and_condition(specific_condition);
-                rules.push(Rule { condition, action });
-            }
+            };
         }
 
-        let mut result = Self {
+        Ok(Self {
             output_tag,
-            rules,
+            compute_scalar_rules,
+            compute_array_rules,
+            send_rules,
+            collect_rules,
             expected_messages,
+            arguments,
             state: State::InProgress,
-            banned_parties: BTreeSet::new(),
-        };
-
-        for name in arguments {
-            result.update_with_value_ready(&ScalarTag::computed(&name));
-        }
-
-        Ok(result)
+        })
     }
 
     pub fn update_with_banned_party(&mut self, id: &SP::Verifier) {
-        self.banned_parties.insert(id.clone());
-        for rule in &mut self.rules {
-            if !rule.condition.is_satisfiable(&self.banned_parties) {
-                // TODO (#21): it is possible that the output is reached by other branches,
-                // so we are not always stalled.
-                // TODO: we can only stall at Collect nodes. How to ensure that?
-                let store_in = rule
-                    .action
-                    .store_in()
-                    .scalar()
-                    .cloned()
-                    .expect("Can only stall at Collect nodes");
-                self.state = State::StalledAt(store_in);
-                return;
+        for rule in &mut self.collect_rules {
+            rule.condition.update_with_banned_party(id);
+        }
+
+        for rule in &self.collect_rules {
+            if !rule.condition.is_satisfiable() {
+                self.state = State::StalledAt(rule.store_in.clone());
             }
         }
     }
 
     pub fn update_with_value_ready(&mut self, tag: &ScalarTag) {
-        for rule in &mut self.rules {
-            rule.condition.update_with_value_ready(tag);
-        }
         if tag == &self.output_tag {
             self.state = State::ReachedOutput;
+        }
+
+        for rule in &mut self.compute_scalar_rules {
+            rule.dependencies.update_with_value_ready(tag);
+            rule.condition.update_with_value_ready(tag);
+        }
+
+        for rule in &mut self.compute_array_rules {
+            rule.dependencies.update_with_value_ready(tag);
+            rule.scalar_condition.update_with_value_ready(tag);
+        }
+
+        for rule in &mut self.send_rules {
+            rule.dependencies.update_with_value_ready(tag);
+        }
+
+        for rule in &mut self.collect_rules {
+            rule.dependencies.update_with_value_ready(tag);
         }
     }
 
     pub fn update_with_array_element_ready(&mut self, tag: &ArrayTag, id: &SP::Verifier) {
-        for rule in &mut self.rules {
-            rule.condition.update_with_array_element_ready(tag, id);
+        for rule in &mut self.compute_array_rules {
+            if let Some(condition) = rule.element_conditions.get_mut(id) {
+                condition.update_with_value_ready(tag)
+            }
+        }
+
+        for rule in &mut self.send_rules {
+            if let Some(condition) = rule.element_conditions.get_mut(id) {
+                condition.update_with_value_ready(tag)
+            }
+        }
+
+        for rule in &mut self.collect_rules {
+            rule.condition.update_with_element_ready(tag, id);
         }
     }
 
-    fn pop_send_action(&mut self) -> Option<ActionGroup<SP>> {
-        self.rules
-            .extract_if(.., |rule| {
-                matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
-            })
-            .next()
-            .map(|rule| rule.action)
-            .map(ActionGroup::Action)
+    fn pop_send_action(&mut self) -> Option<Action<SP>> {
+        let mut action = None;
+
+        for rule in &mut self.send_rules {
+            if !rule.dependencies.is_satisfied() {
+                continue;
+            }
+
+            action = rule
+                .element_conditions
+                .extract_if(.., |_id, condition| condition.is_satisfied())
+                .next()
+                .map(|(id, _condition)| Action::Send {
+                    store_in: rule.store_in.clone(),
+                    to_send: rule.to_send.clone(),
+                    destination: id,
+                });
+
+            if action.is_some() {
+                break;
+            }
+        }
+
+        // TODO (#68): this may need to be removed after #68 is fixed, because compute-array rules
+        // won't track the IDs for which they were completed.
+        // If not, it needs to be optimized to not look through the whole list,
+        // but only at the rule which produced the action.
+        if action.is_some() {
+            self.send_rules.retain(|rule| !rule.element_conditions.is_empty());
+        }
+
+        action
     }
 
-    fn pop_local_action(&mut self) -> Option<ActionGroup<SP>> {
-        self.rules
+    fn pop_compute_scalar_action(&mut self) -> Option<Action<SP>> {
+        self.compute_scalar_rules
             .extract_if(.., |rule| {
-                !matches!(rule.action, Action::Send { .. }) && rule.condition.is_empty()
+                rule.dependencies.is_satisfied() && rule.condition.is_satisfied()
             })
             .next()
-            .map(|rule| rule.action)
-            .map(ActionGroup::Action)
+            .map(|rule| Action::ComputeScalar {
+                store_in: rule.store_in,
+                function: rule.function,
+                args: rule.args,
+            })
     }
 
-    pub fn pop_action(&mut self) -> Result<Option<ActionGroup<SP>>, LocalError> {
-        if matches!(self.state, State::InProgress) && self.rules.is_empty() {
+    fn pop_compute_element_action(&mut self) -> Option<Action<SP>> {
+        let mut action = None;
+        for rule in &mut self.compute_array_rules {
+            if !rule.dependencies.is_satisfied() || !rule.scalar_condition.is_satisfied() {
+                continue;
+            }
+
+            action = rule
+                .element_conditions
+                .extract_if(.., |_id, condition| condition.is_satisfied())
+                .next()
+                .map(|(id, _condition)| Action::ComputeArrayElement {
+                    store_in: rule.store_in.clone(),
+                    index: id,
+                    function: rule.function.clone(),
+                    args: rule.args.clone(),
+                    on_error: rule.on_error.clone(),
+                });
+
+            if action.is_some() {
+                break;
+            }
+        }
+
+        // TODO (#68): this may need to be removed after #68 is fixed, because compute-array rules
+        // won't track the IDs for which they were completed.
+        // If not, it needs to be optimized to not look through the whole list,
+        // but only at the rule which produced the action.
+        if action.is_some() {
+            self.send_rules.retain(|rule| !rule.element_conditions.is_empty());
+        }
+
+        action
+    }
+
+    fn pop_collect_action(&mut self) -> Option<Action<SP>> {
+        self.collect_rules
+            .extract_if(.., |rule| {
+                rule.dependencies.is_satisfied() && rule.condition.is_satisfied()
+            })
+            .next()
+            .map(|rule| Action::Collect {
+                store_in: rule.store_in,
+                values: rule.values,
+                indices: rule.condition.available_ids(),
+            })
+    }
+
+    pub fn pop_action(&mut self) -> Result<Option<Action<SP>>, LocalError> {
+        if matches!(self.state, State::InProgress)
+            && self.compute_scalar_rules.is_empty()
+            && self.collect_rules.is_empty()
+        {
             return Err(LocalError::new(
                 "No rules to apply, and the output value has not been set",
             ));
         }
 
-        // TODO: we need to not expose Action to the outside. This way we can flatten ActionGroup.
         Ok(match &self.state {
             // Regular operation: first pop all locally computable actions
             // to have as many values ready to send as possible.
-            State::InProgress => self.pop_local_action().or_else(|| self.pop_send_action()),
-            // If we are ready to terminate, pop all send action first so that we don't stall other nodes,
+            State::InProgress => self
+                .pop_compute_scalar_action()
+                .or_else(|| self.pop_compute_element_action())
+                .or_else(|| self.pop_collect_action())
+                .or_else(|| self.pop_send_action()),
+            // If we are ready to terminate, pop all send actions first so that we don't stall other nodes,
             // then return the terminating action.
             State::ReachedOutput => self
                 .pop_send_action()
-                .or_else(|| Some(ActionGroup::ReturnOutput(self.output_tag.clone()))),
+                .or_else(|| Some(Action::ReturnOutput(self.output_tag.clone()))),
             State::StalledAt(tag) => {
                 let tag = tag.clone();
-                self.pop_send_action()
-                    .or_else(move || Some(ActionGroup::Terminate(tag)))
+                self.pop_send_action().or_else(move || Some(Action::Terminate(tag)))
             }
         })
     }
@@ -379,68 +456,86 @@ impl<SP: SessionParameters> Ruleset<SP> {
     pub fn expected_messages(&self) -> &BTreeMap<FullName, BTreeSet<SP::Verifier>> {
         &self.expected_messages
     }
-}
 
-impl<SP: SessionParameters> Display for Action<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::ComputeScalar {
-                store_in,
-                function,
-                args,
-            } => {
-                let joined_args = args.iter().map(|(name, arg)| format!("{}={}", name, arg)).join(", ");
-                write!(f, "{store_in} = {function}({joined_args})")
-            }
-            Self::ComputeArrayElement {
-                store_in,
-                index,
-                function,
-                args,
-                on_error,
-            } => {
-                let joined_args = args
-                    .iter()
-                    .map(|(name, arg)| {
-                        let arg_str = match arg {
-                            AnyTag::Scalar(tag) => tag.to_string(),
-                            AnyTag::Array(tag) => format!("{tag}[{index:?}]"),
-                        };
-                        format!("{}={}", name, arg_str)
-                    })
-                    .join(", ");
-                write!(f, "{store_in}[{index:?}] = {function}({index:?}, {joined_args})")?;
-                write!(f, "\n  on_error: {on_error:?}",)
-            }
-            Self::Send {
-                store_in,
-                to_send,
-                destination,
-                index,
-            } => {
-                write!(
-                    f,
-                    "{store_in}[{destination:?}] = send({to_send}[{index:?}]) to {destination:?})"
-                )
-            }
-            Self::Collect { store_in, values } => {
-                write!(f, "{store_in} = collect({values})")
-            }
-        }
+    pub fn arguments(&self) -> &BTreeMap<String, ScalarTag> {
+        &self.arguments
     }
 }
 
-impl<SP: SessionParameters> Display for Rule<SP> {
+impl<SP: SessionParameters> Display for ComputeScalarRule<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        writeln!(f, "if {}:", self.condition)?;
-        write!(f, "  {}", self.action)
+        if !self.dependencies.is_satisfied() {
+            writeln!(f, "if {}", self.dependencies)?;
+        }
+        if !self.condition.is_satisfied() {
+            writeln!(f, "if {}", self.condition)?;
+        }
+        writeln!(
+            f,
+            "  {} = {}({})",
+            self.store_in,
+            self.function,
+            self.args.values().map(ToString::to_string).join(", ")
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for ComputeArrayRule<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        if !self.dependencies.is_satisfied() {
+            writeln!(f, "if {}", self.dependencies)?;
+        }
+        if !self.scalar_condition.is_satisfied() {
+            writeln!(f, "if {}", self.scalar_condition)?;
+        }
+        for (id, condition) in self.element_conditions.iter() {
+            writeln!(f, "if element-ready({:?}, {})", id, condition)?;
+        }
+        writeln!(
+            f,
+            "  {} = {}({})",
+            self.store_in,
+            self.function,
+            self.args.values().map(ToString::to_string).join(", ")
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for SendRule<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        if !self.dependencies.is_satisfied() {
+            writeln!(f, "if {}", self.dependencies)?;
+        }
+        for (id, condition) in self.element_conditions.iter() {
+            writeln!(f, "if element-ready({:?}, {})", id, condition)?;
+        }
+        writeln!(f, "  {} = send({})", self.store_in, self.to_send)
+    }
+}
+
+impl<SP: SessionParameters> Display for CollectRule<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        if !self.dependencies.is_satisfied() {
+            writeln!(f, "if {}", self.dependencies)?;
+        }
+        writeln!(f, "if {}", self.condition)?;
+        writeln!(f, "  {} = collect({})", self.store_in, self.values)
     }
 }
 
 impl<SP: SessionParameters> Display for Ruleset<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         writeln!(f, "Ruleset:")?;
-        for rule in &self.rules {
+        for rule in &self.compute_scalar_rules {
+            writeln!(f, "{rule}")?;
+        }
+        for rule in &self.compute_array_rules {
+            writeln!(f, "{rule}")?;
+        }
+        for rule in &self.collect_rules {
+            writeln!(f, "{rule}")?;
+        }
+        for rule in &self.send_rules {
             writeln!(f, "{rule}")?;
         }
         Ok(())

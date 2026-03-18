@@ -80,7 +80,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                         .map(|(name, node)| (name.clone(), node.get_strong_ref()))
                         .collect(),
                 })
-                .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())
+                .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
             }
             _ => return Err(LocalError::new("Not supported")),
         };

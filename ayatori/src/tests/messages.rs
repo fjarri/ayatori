@@ -104,17 +104,17 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let my_x = compute_scalar("my_x", make_scalar_value, &[])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
         let x = receive(&message_x, all_parties)?;
-        let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted]);
+        let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted])?;
 
         let my_y = compute_array("my_y", make_array_elem, all_parties, &[])?;
         let y_sent = send(&message_y, &my_y)?;
         let y = receive(&message_y, my_y.group().unwrap())?;
-        let all_y = collect(&y)?.with_dependencies(&[&y_sent]);
+        let all_y = collect(&y)?.with_dependencies(&[&y_sent])?;
 
         let my_z = compute_array("my_z", make_array_elem_sans_me, &all_parties.except(my_id), &[])?;
         let z_sent = send(&message_z, &my_z)?;
         let z = receive(&message_z, my_z.group().unwrap())?;
-        let all_z = collect(&z)?.with_dependencies(&[&z_sent]);
+        let all_z = collect(&z)?.with_dependencies(&[&z_sent])?;
 
         compute_scalar("output", gen_output, &[("x", &all_x), ("y", &all_y), ("z", &all_z)])
     }

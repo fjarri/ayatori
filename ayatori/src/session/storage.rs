@@ -1,8 +1,12 @@
-use alloc::{collections::BTreeMap, format, string::String};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+};
 
 use crate::{
     error::LocalError,
-    protocol::{AnyTag, ArrayTag, PartyId, PrivateInputs, PublicInputs, ScalarTag, Value},
+    protocol::{AnyTag, ArrayTag, PartyId, ScalarTag, Value},
 };
 
 #[derive(Debug)]
@@ -12,22 +16,9 @@ pub(crate) struct Storage<Id> {
 }
 
 impl<Id: PartyId> Storage<Id> {
-    pub fn new(public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Self {
-        let mut scalars = BTreeMap::new();
-        scalars.extend(
-            private_inputs
-                .into_inner()
-                .into_iter()
-                .map(|(name, value)| (ScalarTag::computed(&name), value)),
-        );
-        scalars.extend(
-            public_inputs
-                .into_inner()
-                .into_iter()
-                .map(|(name, value)| (ScalarTag::computed(&name), value)),
-        );
+    pub fn new() -> Self {
         Self {
-            scalars,
+            scalars: BTreeMap::new(),
             mappings: BTreeMap::new(),
         }
     }
@@ -53,9 +44,17 @@ impl<Id: PartyId> Storage<Id> {
             .ok_or_else(|| LocalError::new(format!("Array {tag} not found in storage")))
     }
 
-    pub fn get_dict_as_value(&self, tag: &ArrayTag) -> Result<Value, LocalError> {
-        let dict = self.get_dict(tag)?.clone();
-        Ok(Value::new(dict))
+    pub fn get_dict_as_value(&self, tag: &ArrayTag, indices: &BTreeSet<Id>) -> Result<Value, LocalError> {
+        let dict = self.get_dict(tag)?;
+        let filtered_dict = indices
+            .iter()
+            .map(|id| {
+                dict.get(id)
+                    .ok_or_else(|| LocalError::new(format!("{tag}[{id:?}] not found in storage")))
+                    .map(|val| (id.clone(), val.clone()))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        Ok(Value::new(filtered_dict))
     }
 
     pub fn get_elem(&self, tag: &ArrayTag, id: &Id) -> Result<Value, LocalError> {

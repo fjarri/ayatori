@@ -7,12 +7,13 @@ use alloc::{
 };
 use core::{fmt::Debug, marker::PhantomData};
 
+use itertools::Itertools;
 use signature::Keypair;
 
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
-    ruleset::{Action, ActionGroup, OnError, Ruleset},
+    ruleset::{Action, OnError, Ruleset},
     session_id::SessionId,
     storage::Storage,
     task::{
@@ -23,8 +24,8 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, ScalarFunction,
-        SessionParameters, Value,
+        ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, PublicInputs,
+        ScalarFunction, ScalarTag, SessionParameters, Value,
     },
 };
 
@@ -80,16 +81,16 @@ where
         let public_inputs = P::make_public_inputs(shared_data);
 
         let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
-        let expected_messages = ruleset.expected_messages().clone();
-        let storage = Storage::new(public_inputs, private_inputs);
+        let storage = Storage::new();
 
+        let expected_messages = ruleset.expected_messages().clone();
         let data = Arc::new(SessionData {
             id,
             participants,
             local_participants,
             expected_messages,
         });
-        Ok(Self {
+        let mut session = Self {
             ruleset,
             storage,
             signer: signer.map(Arc::new),
@@ -98,7 +99,52 @@ where
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
             phantom: PhantomData,
-        })
+        };
+
+        session.fill_inputs(public_inputs, private_inputs)?;
+
+        Ok(session)
+    }
+
+    fn fill_inputs(&mut self, public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Result<(), LocalError> {
+        let arguments = self.ruleset.arguments().clone();
+
+        let public_values = public_inputs.into_inner();
+        let private_values = private_inputs.into_inner();
+
+        let public_names = public_values.keys().collect::<BTreeSet<_>>();
+        let private_names = private_values.keys().collect::<BTreeSet<_>>();
+
+        if !public_names.is_disjoint(&private_names) {
+            let mut intersection = public_names.intersection(&private_names);
+            return Err(LocalError::new(format!(
+                "Intersecting names in public and private arguments: {}",
+                intersection.join(", ")
+            )));
+        }
+
+        let all_names = public_names.union(&private_names).cloned().collect::<BTreeSet<_>>();
+        if all_names != arguments.keys().collect() {
+            return Err(LocalError::new(
+                "Public and private argument names differ from the protocol signature",
+            ));
+        }
+
+        for (name, value) in public_values {
+            let store_in = arguments.get(&name).ok_or_else(|| {
+                LocalError::new(format!("Public argument {name} not found in the protocol signature"))
+            })?;
+            self.add_scalar(store_in, value)?;
+        }
+
+        for (name, value) in private_values {
+            let store_in = arguments.get(&name).ok_or_else(|| {
+                LocalError::new(format!("Private argument {name} not found in the protocol signature"))
+            })?;
+            self.add_scalar(store_in, value)?;
+        }
+
+        Ok(())
     }
 
     pub fn new(
@@ -143,6 +189,18 @@ where
         &self.verifier
     }
 
+    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), LocalError> {
+        self.storage.set(store_in, value)?;
+        self.ruleset.update_with_value_ready(store_in);
+        Ok(())
+    }
+
+    fn add_element(&mut self, store_in: &ArrayTag, id: &SP::Verifier, value: Value) -> Result<(), LocalError> {
+        self.storage.set_elem(store_in, id, value)?;
+        self.ruleset.update_with_array_element_ready(store_in, id);
+        Ok(())
+    }
+
     fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
         self.ruleset.update_with_banned_party(evidence.guilty_party());
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
@@ -180,25 +238,20 @@ where
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
-        while let Some(action_group) = self.ruleset.pop_action()? {
-            let action = match action_group {
-                ActionGroup::Action(action) => action,
-                ActionGroup::ReturnOutput(tag) => {
+        while let Some(action) = self.ruleset.pop_action()? {
+            match action {
+                Action::ReturnOutput(tag) => {
                     return Ok(Some(Task::finalize_with_success(tag)));
                 }
-                ActionGroup::Terminate(tag) => {
+                Action::Terminate(tag) => {
                     return Ok(Some(Task::finalize_with_stall(tag)));
                 }
-            };
-
-            match action {
                 Action::Send {
                     store_in,
                     to_send,
                     destination,
-                    index,
                 } => {
-                    let signed_value = self.storage.get_elem(&to_send, &index)?;
+                    let signed_value = self.storage.get_elem(&to_send, &destination)?;
                     return Ok(Some(Task::send(store_in, destination, signed_value)));
                 }
                 Action::ComputeScalar {
@@ -248,9 +301,12 @@ where
                         }
                     }));
                 }
-                Action::Collect { store_in, values } => {
-                    self.storage.set(&store_in, self.storage.get_dict_as_value(&values)?)?;
-                    self.ruleset.update_with_value_ready(&store_in);
+                Action::Collect {
+                    store_in,
+                    values,
+                    indices,
+                } => {
+                    self.add_scalar(&store_in, self.storage.get_dict_as_value(&values, &indices)?)?;
                 }
             }
         }
@@ -324,16 +380,13 @@ where
     pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {
         match result.into_enum() {
             TaskResultEnum::Send { store_in, destination } => {
-                self.storage.set_elem(&store_in, &destination, Value::new(()))?;
-                self.ruleset.update_with_array_element_ready(&store_in, &destination);
+                self.add_element(&store_in, &destination, Value::new(()))?;
             }
             TaskResultEnum::Compute { store_in, result } => {
-                self.storage.set(&store_in, result)?;
-                self.ruleset.update_with_value_ready(&store_in);
+                self.add_scalar(&store_in, result)?;
             }
             TaskResultEnum::ComputeArray { store_in, id, result } => {
-                self.storage.set_elem(&store_in, &id, result)?;
-                self.ruleset.update_with_array_element_ready(&store_in, &id);
+                self.add_element(&store_in, &id, result)?;
             }
             TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
                 OnError::Escalate => self.register_attributable_error(id, store_in),

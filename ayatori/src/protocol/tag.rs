@@ -22,7 +22,14 @@ impl Display for ScalarTagKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::Computed => write!(f, ""),
-            Self::Collected(kind) => write!(f, "collected-{kind}"),
+            Self::Collected(kind) => {
+                write!(f, "collected")?;
+                if !matches!(kind, ArrayTagKind::Computed) {
+                    write!(f, "-{kind}")
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 }
@@ -222,14 +229,14 @@ pub(crate) enum AnyTagRef<'a> {
 }
 
 impl<'a> AnyTagRef<'a> {
-    pub fn scalar(&self) -> Option<&ScalarTag> {
+    pub fn scalar(&self) -> Option<&'a ScalarTag> {
         match self {
             Self::Scalar(tag) => Some(tag),
             Self::Array(_) => None,
         }
     }
 
-    pub fn array(&self) -> Option<&ArrayTag> {
+    pub fn array(&self) -> Option<&'a ArrayTag> {
         match self {
             Self::Scalar(_) => None,
             Self::Array(tag) => Some(tag),
@@ -253,8 +260,17 @@ impl<'a> Display for AnyTagRef<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AnyTag {
     Scalar(ScalarTag),
     Array(ArrayTag),
+}
+
+impl Display for AnyTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Scalar(tag) => write!(f, "{tag}"),
+            Self::Array(tag) => write!(f, "{tag}"),
+        }
+    }
 }
