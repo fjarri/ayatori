@@ -25,6 +25,10 @@ impl<Id: PartyId> PartyGroup<Id> {
         &self.ids == ids
     }
 
+    pub fn is_quorum_possible(&self, banned_ids: &BTreeSet<Id>) -> bool {
+        self.has_quorum(&self.ids.difference(banned_ids).cloned().collect::<BTreeSet<_>>())
+    }
+
     #[must_use]
     pub fn except(&self, id: &Id) -> Self {
         let mut ids = self.ids.clone();

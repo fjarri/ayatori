@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
+use alloc::{collections::BTreeSet, vec::Vec};
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
@@ -6,107 +6,122 @@ use itertools::Itertools;
 use crate::protocol::{ArrayTag, PartyGroup, PartyId, ScalarTag};
 
 #[derive(Debug, Clone)]
-pub(crate) enum LeafCondition<Id: PartyId> {
-    Value {
-        tag: ScalarTag,
-    },
-    ArrayElement {
-        tag: ArrayTag,
-        id: Id,
-    },
-    Array {
-        tag: ArrayTag,
-        group: PartyGroup<Id>,
-        got_ids: BTreeSet<Id>,
-    },
+pub(crate) struct ScalarCondition {
+    all_of: BTreeSet<ScalarTag>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Condition<Id: PartyId> {
-    all_of: Vec<LeafCondition<Id>>,
-}
-
-impl<Id: PartyId> Condition<Id> {
+impl ScalarCondition {
     pub fn empty() -> Self {
-        Self { all_of: Vec::new() }
+        Self {
+            all_of: BTreeSet::new(),
+        }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn is_satisfied(&self) -> bool {
         self.all_of.is_empty()
     }
 
-    pub fn and(&mut self, leaf: LeafCondition<Id>) {
-        self.all_of.push(leaf);
-    }
-
-    pub fn and_condition(&mut self, condition: Condition<Id>) {
-        self.all_of.extend(condition.all_of);
-    }
-
-    pub fn is_satisfiable(&self, banned_ids: &BTreeSet<Id>) -> bool {
-        for leaf in self.all_of.iter() {
-            // TODO (#20): this will get more complicated when threshold is involved
-            if let LeafCondition::Array { .. } = leaf
-                && !banned_ids.is_empty()
-            {
-                return false;
-            }
-        }
-        true
+    pub fn and(self, tag: &ScalarTag) -> Self {
+        let mut result = self;
+        result.all_of.insert(tag.clone());
+        result
     }
 
     pub fn update_with_value_ready(&mut self, tag: &ScalarTag) {
-        self.all_of.retain_mut(|leaf| match leaf {
-            LeafCondition::Array { .. } | LeafCondition::ArrayElement { .. } => true,
-            LeafCondition::Value { tag: condition_tag } => condition_tag != tag,
-        });
-    }
-
-    pub fn update_with_array_element_ready(&mut self, tag: &ArrayTag, id: &Id) {
-        self.all_of.retain_mut(|leaf| match leaf {
-            LeafCondition::Array {
-                tag: condition_tag,
-                group,
-                got_ids,
-            } => {
-                if condition_tag == tag {
-                    got_ids.insert(id.clone());
-                    !group.has_quorum(got_ids)
-                } else {
-                    true
-                }
-            }
-            LeafCondition::ArrayElement {
-                tag: condition_tag,
-                id: condition_id,
-            } => !(condition_tag == tag && condition_id == id),
-            LeafCondition::Value { .. } => true,
-        });
+        self.all_of.remove(tag);
     }
 }
 
-impl<Id: PartyId> Display for LeafCondition<Id> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::Value { tag } => {
-                write!(f, "ready({tag})")
-            }
-            Self::ArrayElement { tag, id } => {
-                write!(f, "ready({tag}, {id:?})")
-            }
-            Self::Array { tag, group, got_ids } => {
-                write!(f, "all-ready({tag}, {group}) [have: {got_ids:?}]")
-            }
+#[derive(Debug, Clone)]
+pub(crate) struct ElementCondition {
+    all_of: BTreeSet<ArrayTag>,
+}
+
+impl ElementCondition {
+    pub fn empty() -> Self {
+        Self {
+            all_of: BTreeSet::new(),
+        }
+    }
+
+    pub fn is_satisfied(&self) -> bool {
+        self.all_of.is_empty()
+    }
+
+    pub fn and(self, tag: &ArrayTag) -> Self {
+        let mut result = self;
+        result.all_of.insert(tag.clone());
+        result
+    }
+
+    pub fn update_with_value_ready(&mut self, tag: &ArrayTag) {
+        self.all_of.remove(tag);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct QuorumCondition<Id: PartyId> {
+    tag: ArrayTag,
+    group: PartyGroup<Id>,
+    got_ids: BTreeSet<Id>,
+    banned_ids: BTreeSet<Id>,
+}
+
+impl<Id: PartyId> QuorumCondition<Id> {
+    pub fn new(tag: &ArrayTag, group: &PartyGroup<Id>) -> Self {
+        Self {
+            tag: tag.clone(),
+            group: group.clone(),
+            got_ids: BTreeSet::new(),
+            banned_ids: BTreeSet::new(),
+        }
+    }
+
+    pub fn update_with_banned_party(&mut self, id: &Id) {
+        self.got_ids.remove(id);
+        self.banned_ids.insert(id.clone());
+    }
+
+    pub fn is_satisfiable(&self) -> bool {
+        self.group.is_quorum_possible(&self.banned_ids)
+    }
+
+    pub fn is_satisfied(&self) -> bool {
+        self.group.has_quorum(&self.got_ids)
+    }
+
+    pub fn available_ids(self) -> BTreeSet<Id> {
+        self.got_ids
+    }
+
+    pub fn update_with_element_ready(&mut self, tag: &ArrayTag, id: &Id) {
+        if &self.tag == tag {
+            self.got_ids.insert(id.clone());
         }
     }
 }
 
-impl<Id: PartyId> Display for Condition<Id> {
+impl Display for ScalarCondition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        if self.all_of.is_empty() {
-            write!(f, "True")
-        } else {
-            write!(f, "{}", self.all_of.iter().map(ToString::to_string).join(" AND "))
-        }
+        write!(f, "ready({})", self.all_of.iter().join(", "))
+    }
+}
+
+impl Display for ElementCondition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "ready({})", self.all_of.iter().join(", "))
+    }
+}
+
+impl<Id: PartyId> Display for QuorumCondition<Id> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "quorum({}, {}/{} (-{}))",
+            self.tag,
+            self.got_ids.len(),
+            self.group.ids().collect::<Vec<_>>().len(),
+            self.banned_ids.len()
+        )
     }
 }

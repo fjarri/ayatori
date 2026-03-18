@@ -1,4 +1,8 @@
-use alloc::{collections::BTreeMap, format, string::String};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+};
 
 use crate::{
     error::LocalError,
@@ -53,9 +57,17 @@ impl<Id: PartyId> Storage<Id> {
             .ok_or_else(|| LocalError::new(format!("Array {tag} not found in storage")))
     }
 
-    pub fn get_dict_as_value(&self, tag: &ArrayTag) -> Result<Value, LocalError> {
-        let dict = self.get_dict(tag)?.clone();
-        Ok(Value::new(dict))
+    pub fn get_dict_as_value(&self, tag: &ArrayTag, indices: &BTreeSet<Id>) -> Result<Value, LocalError> {
+        let dict = self.get_dict(tag)?;
+        let filtered_dict = indices
+            .iter()
+            .map(|id| {
+                dict.get(id)
+                    .ok_or_else(|| LocalError::new(format!("{tag}[{id:?}] not found in storage")))
+                    .map(|val| (id.clone(), val.clone()))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        Ok(Value::new(filtered_dict))
     }
 
     pub fn get_elem(&self, tag: &ArrayTag, id: &Id) -> Result<Value, LocalError> {

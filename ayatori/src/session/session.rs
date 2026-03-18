@@ -12,7 +12,7 @@ use signature::Keypair;
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
     message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
-    ruleset::{Action, ActionGroup, OnError, Ruleset},
+    ruleset::{Action, OnError, Ruleset},
     session_id::SessionId,
     storage::Storage,
     task::{
@@ -180,25 +180,20 @@ where
     }
 
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
-        while let Some(action_group) = self.ruleset.pop_action()? {
-            let action = match action_group {
-                ActionGroup::Action(action) => action,
-                ActionGroup::ReturnOutput(tag) => {
+        while let Some(action) = self.ruleset.pop_action()? {
+            match action {
+                Action::ReturnOutput(tag) => {
                     return Ok(Some(Task::finalize_with_success(tag)));
                 }
-                ActionGroup::Terminate(tag) => {
+                Action::Terminate(tag) => {
                     return Ok(Some(Task::finalize_with_stall(tag)));
                 }
-            };
-
-            match action {
                 Action::Send {
                     store_in,
                     to_send,
                     destination,
-                    index,
                 } => {
-                    let signed_value = self.storage.get_elem(&to_send, &index)?;
+                    let signed_value = self.storage.get_elem(&to_send, &destination)?;
                     return Ok(Some(Task::send(store_in, destination, signed_value)));
                 }
                 Action::ComputeScalar {
@@ -248,8 +243,13 @@ where
                         }
                     }));
                 }
-                Action::Collect { store_in, values } => {
-                    self.storage.set(&store_in, self.storage.get_dict_as_value(&values)?)?;
+                Action::Collect {
+                    store_in,
+                    values,
+                    indices,
+                } => {
+                    self.storage
+                        .set(&store_in, self.storage.get_dict_as_value(&values, &indices)?)?;
                     self.ruleset.update_with_value_ready(&store_in);
                 }
             }
