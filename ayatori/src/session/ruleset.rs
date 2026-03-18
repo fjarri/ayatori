@@ -113,6 +113,7 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     send_rules: Vec<SendRule<SP>>,
     collect_rules: Vec<CollectRule<SP>>,
     expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
+    arguments: BTreeMap<String, ScalarTag>,
     state: State,
 }
 
@@ -130,7 +131,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
         let mut collect_rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
 
-        let mut arguments = Vec::new();
+        let mut arguments = BTreeMap::new();
 
         for node in output_node.flattened() {
             let mut dependencies = ScalarCondition::empty();
@@ -144,12 +145,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
 
             match node.kind() {
-                NodeKind::ScalarArgument {
-                    store_in: _store_in,
-                    name,
-                } => {
-                    // TODO: check that the remaining argument nodes correspond to arguments provided.
-                    arguments.push(name.clone());
+                NodeKind::ScalarArgument { store_in, name } => {
+                    arguments.insert(name.clone(), store_in.clone());
                 }
                 NodeKind::ComputeScalar {
                     store_in,
@@ -265,21 +262,16 @@ impl<SP: SessionParameters> Ruleset<SP> {
             };
         }
 
-        let mut result = Self {
+        Ok(Self {
             output_tag,
             compute_scalar_rules,
             compute_array_rules,
             send_rules,
             collect_rules,
             expected_messages,
+            arguments,
             state: State::InProgress,
-        };
-
-        for name in arguments {
-            result.update_with_value_ready(&ScalarTag::computed(&name));
-        }
-
-        Ok(result)
+        })
     }
 
     pub fn update_with_banned_party(&mut self, id: &SP::Verifier) {
@@ -463,6 +455,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     pub fn expected_messages(&self) -> &BTreeMap<FullName, BTreeSet<SP::Verifier>> {
         &self.expected_messages
+    }
+
+    pub fn arguments(&self) -> &BTreeMap<String, ScalarTag> {
+        &self.arguments
     }
 }
 

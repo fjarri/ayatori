@@ -6,7 +6,7 @@ use alloc::{
 
 use crate::{
     error::LocalError,
-    protocol::{AnyTag, ArrayTag, PartyId, PrivateInputs, PublicInputs, ScalarTag, Value},
+    protocol::{AnyTag, ArrayTag, PartyId, ScalarTag, Value},
 };
 
 #[derive(Debug)]
@@ -16,22 +16,9 @@ pub(crate) struct Storage<Id> {
 }
 
 impl<Id: PartyId> Storage<Id> {
-    pub fn new(public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Self {
-        let mut scalars = BTreeMap::new();
-        scalars.extend(
-            private_inputs
-                .into_inner()
-                .into_iter()
-                .map(|(name, value)| (ScalarTag::computed(&name), value)),
-        );
-        scalars.extend(
-            public_inputs
-                .into_inner()
-                .into_iter()
-                .map(|(name, value)| (ScalarTag::computed(&name), value)),
-        );
+    pub fn new() -> Self {
         Self {
-            scalars,
+            scalars: BTreeMap::new(),
             mappings: BTreeMap::new(),
         }
     }

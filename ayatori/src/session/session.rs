@@ -7,6 +7,7 @@ use alloc::{
 };
 use core::{fmt::Debug, marker::PhantomData};
 
+use itertools::Itertools;
 use signature::Keypair;
 
 use super::{
@@ -23,8 +24,8 @@ use super::{
 use crate::{
     error::LocalError,
     protocol::{
-        ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, ScalarFunction,
-        SessionParameters, Value,
+        ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, PublicInputs,
+        ScalarFunction, SessionParameters, Value,
     },
 };
 
@@ -79,10 +80,12 @@ where
         let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
 
-        let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
-        let expected_messages = ruleset.expected_messages().clone();
-        let storage = Storage::new(public_inputs, private_inputs);
+        let mut ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
+        let mut storage = Storage::new();
 
+        Self::fill_inputs(&mut ruleset, &mut storage, public_inputs, private_inputs)?;
+
+        let expected_messages = ruleset.expected_messages().clone();
         let data = Arc::new(SessionData {
             id,
             participants,
@@ -99,6 +102,54 @@ where
             attributable_errors: BTreeMap::new(),
             phantom: PhantomData,
         })
+    }
+
+    fn fill_inputs(
+        ruleset: &mut Ruleset<SP>,
+        storage: &mut Storage<SP::Verifier>,
+        public_inputs: PublicInputs,
+        private_inputs: PrivateInputs,
+    ) -> Result<(), LocalError> {
+        let arguments = ruleset.arguments().clone();
+
+        let public_values = public_inputs.into_inner();
+        let private_values = private_inputs.into_inner();
+
+        let public_names = public_values.keys().collect::<BTreeSet<_>>();
+        let private_names = private_values.keys().collect::<BTreeSet<_>>();
+
+        if !public_names.is_disjoint(&private_names) {
+            let mut intersection = public_names.intersection(&private_names);
+            return Err(LocalError::new(format!(
+                "Intersecting names in public and private arguments: {}",
+                intersection.join(", ")
+            )));
+        }
+
+        let all_names = public_names.union(&private_names).cloned().collect::<BTreeSet<_>>();
+        if all_names != arguments.keys().collect() {
+            return Err(LocalError::new(
+                "Public and private argument names differ from the protocol signature",
+            ));
+        }
+
+        for (name, value) in public_values {
+            let store_in = arguments.get(&name).ok_or_else(|| {
+                LocalError::new(format!("Public argument {name} not found in the protocol signature"))
+            })?;
+            storage.set(store_in, value)?;
+            ruleset.update_with_value_ready(store_in);
+        }
+
+        for (name, value) in private_values {
+            let store_in = arguments.get(&name).ok_or_else(|| {
+                LocalError::new(format!("Private argument {name} not found in the protocol signature"))
+            })?;
+            storage.set(store_in, value)?;
+            ruleset.update_with_value_ready(store_in);
+        }
+
+        Ok(())
     }
 
     pub fn new(
