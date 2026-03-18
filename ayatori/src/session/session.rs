@@ -25,7 +25,7 @@ use crate::{
     error::LocalError,
     protocol::{
         ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, PublicInputs,
-        ScalarFunction, SessionParameters, Value,
+        ScalarFunction, ScalarTag, SessionParameters, Value,
     },
 };
 
@@ -80,10 +80,8 @@ where
         let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
 
-        let mut ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
-        let mut storage = Storage::new();
-
-        Self::fill_inputs(&mut ruleset, &mut storage, public_inputs, private_inputs)?;
+        let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
+        let storage = Storage::new();
 
         let expected_messages = ruleset.expected_messages().clone();
         let data = Arc::new(SessionData {
@@ -92,7 +90,7 @@ where
             local_participants,
             expected_messages,
         });
-        Ok(Self {
+        let mut session = Self {
             ruleset,
             storage,
             signer: signer.map(Arc::new),
@@ -101,16 +99,15 @@ where
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
             phantom: PhantomData,
-        })
+        };
+
+        session.fill_inputs(public_inputs, private_inputs)?;
+
+        Ok(session)
     }
 
-    fn fill_inputs(
-        ruleset: &mut Ruleset<SP>,
-        storage: &mut Storage<SP::Verifier>,
-        public_inputs: PublicInputs,
-        private_inputs: PrivateInputs,
-    ) -> Result<(), LocalError> {
-        let arguments = ruleset.arguments().clone();
+    fn fill_inputs(&mut self, public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Result<(), LocalError> {
+        let arguments = self.ruleset.arguments().clone();
 
         let public_values = public_inputs.into_inner();
         let private_values = private_inputs.into_inner();
@@ -137,16 +134,14 @@ where
             let store_in = arguments.get(&name).ok_or_else(|| {
                 LocalError::new(format!("Public argument {name} not found in the protocol signature"))
             })?;
-            storage.set(store_in, value)?;
-            ruleset.update_with_value_ready(store_in);
+            self.add_scalar(store_in, value)?;
         }
 
         for (name, value) in private_values {
             let store_in = arguments.get(&name).ok_or_else(|| {
                 LocalError::new(format!("Private argument {name} not found in the protocol signature"))
             })?;
-            storage.set(store_in, value)?;
-            ruleset.update_with_value_ready(store_in);
+            self.add_scalar(store_in, value)?;
         }
 
         Ok(())
@@ -192,6 +187,18 @@ where
 
     pub fn verifier(&self) -> &SP::Verifier {
         &self.verifier
+    }
+
+    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), LocalError> {
+        self.storage.set(store_in, value)?;
+        self.ruleset.update_with_value_ready(store_in);
+        Ok(())
+    }
+
+    fn add_element(&mut self, store_in: &ArrayTag, id: &SP::Verifier, value: Value) -> Result<(), LocalError> {
+        self.storage.set_elem(store_in, id, value)?;
+        self.ruleset.update_with_array_element_ready(store_in, id);
+        Ok(())
     }
 
     fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
@@ -299,9 +306,7 @@ where
                     values,
                     indices,
                 } => {
-                    self.storage
-                        .set(&store_in, self.storage.get_dict_as_value(&values, &indices)?)?;
-                    self.ruleset.update_with_value_ready(&store_in);
+                    self.add_scalar(&store_in, self.storage.get_dict_as_value(&values, &indices)?)?;
                 }
             }
         }
@@ -375,16 +380,13 @@ where
     pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {
         match result.into_enum() {
             TaskResultEnum::Send { store_in, destination } => {
-                self.storage.set_elem(&store_in, &destination, Value::new(()))?;
-                self.ruleset.update_with_array_element_ready(&store_in, &destination);
+                self.add_element(&store_in, &destination, Value::new(()))?;
             }
             TaskResultEnum::Compute { store_in, result } => {
-                self.storage.set(&store_in, result)?;
-                self.ruleset.update_with_value_ready(&store_in);
+                self.add_scalar(&store_in, result)?;
             }
             TaskResultEnum::ComputeArray { store_in, id, result } => {
-                self.storage.set_elem(&store_in, &id, result)?;
-                self.ruleset.update_with_array_element_ready(&store_in, &id);
+                self.add_element(&store_in, &id, result)?;
             }
             TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
                 OnError::Escalate => self.register_attributable_error(id, store_in),
