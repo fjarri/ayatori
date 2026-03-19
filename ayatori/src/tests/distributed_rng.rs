@@ -90,7 +90,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
         let r_broadcasted = broadcast(&message_r, &my_r, all_parties)?.with_dependencies(&[&all_c])?;
         let b = receive(&message_b, all_parties)?;
         let r = receive(&message_r, all_parties)?;
-        let hash_correct = compute_array_sender_fallible(
+        let hash_correct = compute_mapping_sender_fallible(
             "hash_correct",
             verify_commitment,
             all_parties,

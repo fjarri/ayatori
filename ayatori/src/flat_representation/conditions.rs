@@ -4,7 +4,7 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use crate::{
-    entities::{ArrayTag, PartyGroup, ScalarTag},
+    entities::{MappingTag, PartyGroup, ScalarTag},
     traits::PartyId,
 };
 
@@ -30,14 +30,14 @@ impl ScalarCondition {
         result
     }
 
-    pub fn update_with_value_ready(&mut self, tag: &ScalarTag) {
+    pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) {
         self.all_of.remove(tag);
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ElementCondition {
-    all_of: BTreeSet<ArrayTag>,
+    all_of: BTreeSet<MappingTag>,
 }
 
 impl ElementCondition {
@@ -51,27 +51,27 @@ impl ElementCondition {
         self.all_of.is_empty()
     }
 
-    pub fn and(self, tag: &ArrayTag) -> Self {
+    pub fn and(self, tag: &MappingTag) -> Self {
         let mut result = self;
         result.all_of.insert(tag.clone());
         result
     }
 
-    pub fn update_with_value_ready(&mut self, tag: &ArrayTag) {
+    pub fn update_with_scalar_ready(&mut self, tag: &MappingTag) {
         self.all_of.remove(tag);
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct QuorumCondition<Id: PartyId> {
-    tag: ArrayTag,
+    tag: MappingTag,
     group: PartyGroup<Id>,
     got_ids: BTreeSet<Id>,
     banned_ids: BTreeSet<Id>,
 }
 
 impl<Id: PartyId> QuorumCondition<Id> {
-    pub fn new(tag: &ArrayTag, group: &PartyGroup<Id>) -> Self {
+    pub fn new(tag: &MappingTag, group: &PartyGroup<Id>) -> Self {
         Self {
             tag: tag.clone(),
             group: group.clone(),
@@ -97,7 +97,7 @@ impl<Id: PartyId> QuorumCondition<Id> {
         self.got_ids
     }
 
-    pub fn update_with_element_ready(&mut self, tag: &ArrayTag, id: &Id) {
+    pub fn update_with_element_ready(&mut self, tag: &MappingTag, id: &Id) {
         if &self.tag == tag {
             self.got_ids.insert(id.clone());
         }

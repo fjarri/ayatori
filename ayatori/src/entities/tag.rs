@@ -15,7 +15,7 @@ pub(crate) enum ScalarTagKind {
     /// The name of the tag will come from what the user provided when creating the node.
     /// The contents are of some user type.
     Computed,
-    Collected(ArrayTagKind),
+    Collected(MappingTagKind),
 }
 
 impl Display for ScalarTagKind {
@@ -24,7 +24,7 @@ impl Display for ScalarTagKind {
             Self::Computed => write!(f, ""),
             Self::Collected(kind) => {
                 write!(f, "collected")?;
-                if !matches!(kind, ArrayTagKind::Computed) {
+                if !matches!(kind, MappingTagKind::Computed) {
                     write!(f, "-{kind}")
                 } else {
                     Ok(())
@@ -35,7 +35,7 @@ impl Display for ScalarTagKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum ArrayTagKind {
+pub(crate) enum MappingTagKind {
     /// A locally computed value coming from an explicit computation/verification node
     /// (not from serialization/deserialization).
     /// The name of the tag will come from what the user provided when creating the node.
@@ -59,7 +59,7 @@ pub(crate) enum ArrayTagKind {
     Received,
 }
 
-impl Display for ArrayTagKind {
+impl Display for MappingTagKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::Computed => write!(f, ""),
@@ -140,12 +140,12 @@ impl Display for ScalarTag {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct ArrayTag {
+pub(crate) struct MappingTag {
     full_name: FullName,
-    kind: ArrayTagKind,
+    kind: MappingTagKind,
 }
 
-impl ArrayTag {
+impl MappingTag {
     pub fn full_name(&self) -> &FullName {
         &self.full_name
     }
@@ -160,48 +160,48 @@ impl ArrayTag {
     pub fn computed(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
-            kind: ArrayTagKind::Computed,
+            kind: MappingTagKind::Computed,
         }
     }
 
     pub fn signed_remote(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
-            kind: ArrayTagKind::SignedRemote,
+            kind: MappingTagKind::SignedRemote,
         }
     }
 
     pub fn signed_local(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
-            kind: ArrayTagKind::SignedLocal,
+            kind: MappingTagKind::SignedLocal,
         }
     }
 
     pub fn to_sent(&self) -> Result<Self, LocalError> {
-        if self.kind != ArrayTagKind::SignedLocal {
+        if self.kind != MappingTagKind::SignedLocal {
             return Err(LocalError::new("Only SignedLocal tags can be converted to Sent"));
         }
         Ok(Self {
             full_name: self.full_name.clone(),
-            kind: ArrayTagKind::Sent,
+            kind: MappingTagKind::Sent,
         })
     }
 
     pub fn signed_remote_with_full_name(full_name: &FullName) -> Self {
         Self {
             full_name: full_name.clone(),
-            kind: ArrayTagKind::SignedRemote,
+            kind: MappingTagKind::SignedRemote,
         }
     }
 
     pub fn to_received(&self) -> Result<Self, LocalError> {
-        if self.kind != ArrayTagKind::SignedRemote {
+        if self.kind != MappingTagKind::SignedRemote {
             return Err(LocalError::new("Only SignedRemote tags can be converted to Received"));
         }
         Ok(Self {
             full_name: self.full_name.clone(),
-            kind: ArrayTagKind::Received,
+            kind: MappingTagKind::Received,
         })
     }
 
@@ -213,10 +213,10 @@ impl ArrayTag {
     }
 }
 
-impl Display for ArrayTag {
+impl Display for MappingTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self.kind {
-            ArrayTagKind::Computed => write!(f, "{}", self.full_name),
+            MappingTagKind::Computed => write!(f, "{}", self.full_name),
             _ => write!(f, "{}({})", self.kind, self.full_name),
         }
     }
@@ -225,28 +225,28 @@ impl Display for ArrayTag {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum AnyTagRef<'a> {
     Scalar(&'a ScalarTag),
-    Array(&'a ArrayTag),
+    Mapping(&'a MappingTag),
 }
 
 impl<'a> AnyTagRef<'a> {
     pub fn scalar(&self) -> Option<&'a ScalarTag> {
         match self {
             Self::Scalar(tag) => Some(tag),
-            Self::Array(_) => None,
+            Self::Mapping(_) => None,
         }
     }
 
-    pub fn array(&self) -> Option<&'a ArrayTag> {
+    pub fn mapping(&self) -> Option<&'a MappingTag> {
         match self {
             Self::Scalar(_) => None,
-            Self::Array(tag) => Some(tag),
+            Self::Mapping(tag) => Some(tag),
         }
     }
 
     pub fn to_owned(&self) -> AnyTag {
         match self {
             Self::Scalar(tag) => AnyTag::Scalar((*tag).clone()),
-            Self::Array(tag) => AnyTag::Array((*tag).clone()),
+            Self::Mapping(tag) => AnyTag::Mapping((*tag).clone()),
         }
     }
 }
@@ -255,7 +255,7 @@ impl<'a> Display for AnyTagRef<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::Scalar(tag) => write!(f, "{tag}"),
-            Self::Array(tag) => write!(f, "{tag}"),
+            Self::Mapping(tag) => write!(f, "{tag}"),
         }
     }
 }
@@ -263,14 +263,14 @@ impl<'a> Display for AnyTagRef<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AnyTag {
     Scalar(ScalarTag),
-    Array(ArrayTag),
+    Mapping(MappingTag),
 }
 
 impl Display for AnyTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::Scalar(tag) => write!(f, "{tag}"),
-            Self::Array(tag) => write!(f, "{tag}"),
+            Self::Mapping(tag) => write!(f, "{tag}"),
         }
     }
 }

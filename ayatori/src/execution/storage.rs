@@ -5,7 +5,7 @@ use alloc::{
 };
 
 use crate::{
-    entities::{AnyTag, ArrayTag, ScalarTag, Value},
+    entities::{AnyTag, MappingTag, ScalarTag, Value},
     errors::LocalError,
     traits::PartyId,
 };
@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct Storage<Id> {
     scalars: BTreeMap<ScalarTag, Value>,
-    mappings: BTreeMap<ArrayTag, BTreeMap<Id, Value>>,
+    mappings: BTreeMap<MappingTag, BTreeMap<Id, Value>>,
 }
 
 impl<Id: PartyId> Storage<Id> {
@@ -24,7 +24,7 @@ impl<Id: PartyId> Storage<Id> {
         }
     }
 
-    pub fn get(&self, tag: &ScalarTag) -> Result<Value, LocalError> {
+    pub fn get_scalar(&self, tag: &ScalarTag) -> Result<Value, LocalError> {
         Ok(self
             .scalars
             .get(tag)
@@ -32,21 +32,21 @@ impl<Id: PartyId> Storage<Id> {
             .clone())
     }
 
-    pub fn set(&mut self, tag: &ScalarTag, value: Value) -> Result<(), LocalError> {
+    pub fn set_scalar(&mut self, tag: &ScalarTag, value: Value) -> Result<(), LocalError> {
         match self.scalars.insert(tag.clone(), value) {
             None => Ok(()),
             Some(_) => Err(LocalError::new(format!("Scalar {tag} already has an associated value"))),
         }
     }
 
-    pub fn get_dict(&self, tag: &ArrayTag) -> Result<&BTreeMap<Id, Value>, LocalError> {
+    pub fn get_mapping(&self, tag: &MappingTag) -> Result<&BTreeMap<Id, Value>, LocalError> {
         self.mappings
             .get(tag)
-            .ok_or_else(|| LocalError::new(format!("Array {tag} not found in storage")))
+            .ok_or_else(|| LocalError::new(format!("Mapping {tag} not found in storage")))
     }
 
-    pub fn get_dict_as_value(&self, tag: &ArrayTag, indices: &BTreeSet<Id>) -> Result<Value, LocalError> {
-        let dict = self.get_dict(tag)?;
+    pub fn get_mapping_as_value(&self, tag: &MappingTag, indices: &BTreeSet<Id>) -> Result<Value, LocalError> {
+        let dict = self.get_mapping(tag)?;
         let filtered_dict = indices
             .iter()
             .map(|id| {
@@ -58,15 +58,15 @@ impl<Id: PartyId> Storage<Id> {
         Ok(Value::new(filtered_dict))
     }
 
-    pub fn get_elem(&self, tag: &ArrayTag, id: &Id) -> Result<Value, LocalError> {
+    pub fn get_elem(&self, tag: &MappingTag, id: &Id) -> Result<Value, LocalError> {
         Ok(self
-            .get_dict(tag)?
+            .get_mapping(tag)?
             .get(id)
             .ok_or_else(|| LocalError::new(format!("{tag}[{id:?}] not found in storage")))?
             .clone())
     }
 
-    pub fn set_elem(&mut self, tag: &ArrayTag, id: &Id, value: Value) -> Result<(), LocalError> {
+    pub fn set_elem(&mut self, tag: &MappingTag, id: &Id, value: Value) -> Result<(), LocalError> {
         let mapping = self.mappings.entry(tag.clone()).or_default();
         match mapping.insert(id.clone(), value) {
             None => Ok(()),
@@ -78,19 +78,19 @@ impl<Id: PartyId> Storage<Id> {
 
     pub fn get_scalar_args(&self, tags: BTreeMap<String, ScalarTag>) -> Result<BTreeMap<String, Value>, LocalError> {
         tags.into_iter()
-            .map(|(name, tag)| self.get(&tag).map(|value| (name, value)))
+            .map(|(name, tag)| self.get_scalar(&tag).map(|value| (name, value)))
             .collect::<Result<BTreeMap<_, _>, LocalError>>()
     }
 
-    pub fn get_scalar_or_array_args(
+    pub fn get_scalar_or_mapping_args(
         &self,
         index: &Id,
         tags: BTreeMap<String, AnyTag>,
     ) -> Result<BTreeMap<String, Value>, LocalError> {
         tags.into_iter()
             .map(|(name, arg)| match arg {
-                AnyTag::Scalar(tag) => self.get(&tag).map(|value| (name.clone(), value)),
-                AnyTag::Array(tag) => self.get_elem(&tag, index).map(|value| (name.clone(), value)),
+                AnyTag::Scalar(tag) => self.get_scalar(&tag).map(|value| (name.clone(), value)),
+                AnyTag::Mapping(tag) => self.get_elem(&tag, index).map(|value| (name.clone(), value)),
             })
             .collect::<Result<BTreeMap<_, _>, LocalError>>()
     }

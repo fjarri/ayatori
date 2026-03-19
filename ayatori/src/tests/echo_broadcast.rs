@@ -132,7 +132,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let echo_pack = receive(&message_echo, all_parties)?;
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
-        let echo_packs_correct = compute_array_sender_fallible(
+        let echo_packs_correct = compute_mapping_sender_fallible(
             "echo_packs_correct",
             verify_echo_pack_correct,
             all_parties,
@@ -142,7 +142,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
                 ("echoed", &echo_pack),
             ],
         )?;
-        let echo_contents_correct = compute_array_third_party_fallible(
+        let echo_contents_correct = compute_mapping_third_party_fallible(
             "echo_contents_correct",
             verify_echo_contents,
             all_parties,

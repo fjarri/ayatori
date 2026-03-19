@@ -13,10 +13,11 @@ use super::{
 };
 use crate::{
     entities::{
-        Args, ArrayFunction, ArrayTag, Erasable, FullName, InfallibleArrayFunction, InfallibleArrayFunctionWithRng,
-        InfallibleArrayFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, PartyGroup,
-        ScalarFunction, ScalarTag, SenderAttributableArrayFunction, SenderError, SerdeAdapter, SignedValue,
-        ThirdPartyAttributableArrayFunction, ThirdPartyError, Value, VerifiedValue,
+        Args, Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
+        InfallibleMappingFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng,
+        MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
+        SenderError, SerdeAdapter, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, Value,
+        VerifiedValue,
     },
     errors::LocalError,
     traits::{ComposableProtocol, SessionParameters},
@@ -70,11 +71,12 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
 pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
     if let Some(group) = node.group() {
-        Node::new(NodeKind::ComputeArray {
-            store_in: ArrayTag::computed(name),
-            function: ArrayFunction::Infallible(InfallibleArrayFunction::new_pre_erased("alias", move |_id, args| {
-                args.get_value(arg_name).cloned()
-            })),
+        Node::new(NodeKind::ComputeMapping {
+            store_in: MappingTag::computed(name),
+            function: MappingFunction::Infallible(InfallibleMappingFunction::new_pre_erased(
+                "alias",
+                move |_id, args| args.get_value(arg_name).cloned(),
+            )),
             args: [(arg_name.into(), node.get_strong_ref())].into(),
             group: group.clone(),
         })
@@ -115,7 +117,7 @@ macro_rules! define_scalar_constructor {
     }
 }
 
-macro_rules! define_array_constructor {
+macro_rules! define_mapping_constructor {
     ($func_name:ident<$SP:ident>, $outer_type:ident::$outer_ctr:ident($inner_type:ident),
         ($($arg_type:ty),+) -> $error_type:ty ) =>
     {
@@ -133,8 +135,8 @@ macro_rules! define_array_constructor {
             }
 
             Ok(Node::new(
-                NodeKind::ComputeArray {
-                    store_in: ArrayTag::computed(name),
+                NodeKind::ComputeMapping {
+                    store_in: MappingTag::computed(name),
                     function: $outer_type::$outer_ctr($inner_type::new(function)),
                     args: args_to_owned(args.iter().cloned())?,
                     group: group.clone(),
@@ -156,27 +158,27 @@ define_scalar_constructor!(
     (&mut dyn CryptoRngCore, Args<SP>) -> LocalError
 );
 
-define_array_constructor!(
-    compute_array<SP>,
-    ArrayFunction::Infallible(InfallibleArrayFunction),
+define_mapping_constructor!(
+    compute_mapping<SP>,
+    MappingFunction::Infallible(InfallibleMappingFunction),
     (&SP::Verifier, Args<SP>) -> LocalError
 );
 
-define_array_constructor!(
-    compute_array_sender_fallible<SP>,
-    ArrayFunction::SenderAttributable(SenderAttributableArrayFunction),
+define_mapping_constructor!(
+    compute_mapping_sender_fallible<SP>,
+    MappingFunction::SenderAttributable(SenderAttributableMappingFunction),
     (&SP::Verifier, Args<SP>) -> SenderError
 );
 
-define_array_constructor!(
-    compute_array_third_party_fallible<SP>,
-    ArrayFunction::ThirdPartyAttributable(ThirdPartyAttributableArrayFunction),
+define_mapping_constructor!(
+    compute_mapping_third_party_fallible<SP>,
+    MappingFunction::ThirdPartyAttributable(ThirdPartyAttributableMappingFunction),
     (&SP::Verifier, Args<SP>) -> ThirdPartyError<SP>
 );
 
-define_array_constructor!(
-    compute_array_with_rng<SP>,
-    ArrayFunction::InfallibleWithRng(InfallibleArrayFunctionWithRng),
+define_mapping_constructor!(
+    compute_mapping_with_rng<SP>,
+    MappingFunction::InfallibleWithRng(InfallibleMappingFunctionWithRng),
     (&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> LocalError
 );
 
@@ -237,11 +239,11 @@ pub fn broadcast<SP: SessionParameters>(
     let arg_name = "_value".to_string();
     let serde_adapter = message.serde_adapter().clone();
     let args = [(arg_name.clone(), scalar.get_strong_ref())].into();
-    let tag = ArrayTag::signed_local(message.name());
+    let tag = MappingTag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(NodeKind::ComputeArray {
+    let serialize_and_sign = Node::new(NodeKind::ComputeMapping {
         store_in: tag.clone(),
-        function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
+        function: MappingFunction::InfallibleWithSigner(InfallibleMappingFunctionWithSigner::new_pre_erased(
             "serialize",
             move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
         )),
@@ -258,21 +260,21 @@ pub fn broadcast<SP: SessionParameters>(
     collect(&send_node)
 }
 
-pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, array: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let group = array
+pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, mapping: &Node<SP>) -> Result<Node<SP>, LocalError> {
+    let group = mapping
         .group()
-        .ok_or_else(|| LocalError::new("`array` argument of `send()` must be an array node"))?
+        .ok_or_else(|| LocalError::new("`mapping` argument of `send()` must be an mapping node"))?
         .clone();
 
     let arg_name = "_value".to_string();
     let serde_adapter = message.serde_adapter().clone();
-    let args = [(arg_name.clone(), array.get_strong_ref())].into();
-    let tag = ArrayTag::signed_local(message.name());
+    let args = [(arg_name.clone(), mapping.get_strong_ref())].into();
+    let tag = MappingTag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(NodeKind::ComputeArray {
+    let serialize_and_sign = Node::new(NodeKind::ComputeMapping {
         store_in: tag.clone(),
 
-        function: ArrayFunction::InfallibleWithSigner(InfallibleArrayFunctionWithSigner::new_pre_erased(
+        function: MappingFunction::InfallibleWithSigner(InfallibleMappingFunctionWithSigner::new_pre_erased(
             "serialize",
             move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
         )),
@@ -319,7 +321,7 @@ pub fn receive_signed<SP: SessionParameters>(
     group: &PartyGroup<SP::Verifier>,
 ) -> Node<SP> {
     Node::new(NodeKind::Receive {
-        store_in: ArrayTag::signed_remote(message.name()),
+        store_in: MappingTag::signed_remote(message.name()),
         group: group.clone(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
@@ -341,9 +343,9 @@ pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Resul
     let serde_adapter = serde_adapter.clone();
     let args = [(arg_name.clone(), received.get_strong_ref())].into();
 
-    Ok(Node::new(NodeKind::ComputeArray {
+    Ok(Node::new(NodeKind::ComputeMapping {
         store_in: store_in.to_received()?,
-        function: ArrayFunction::SenderAttributable(SenderAttributableArrayFunction::new_pre_erased(
+        function: MappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_pre_erased(
             "deserialize",
             move |id, args| deserialize(id, args, &arg_name, &serde_adapter),
         )),
@@ -363,7 +365,7 @@ pub fn receive<SP: SessionParameters>(
 pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, LocalError> {
     let (store_in, group) = values
         .store_in_and_group()
-        .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be an array node"))?;
+        .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be an mapping node"))?;
     Ok(Node::new(NodeKind::Collect {
         store_in: store_in.collected(),
         values: values.get_strong_ref(),

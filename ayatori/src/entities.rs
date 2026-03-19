@@ -6,11 +6,11 @@ mod tag;
 mod value;
 
 pub(crate) use function::{
-    ArrayFunction, InfallibleArrayFunction, InfallibleArrayFunctionWithRng, InfallibleArrayFunctionWithSigner,
-    InfallibleScalarFunction, InfallibleScalarFunctionWithRng, ScalarFunction, SenderAttributableArrayFunction,
-    SenderErrorEnum, ThirdPartyAttributableArrayFunction, ThirdPartyErrorEnum,
+    InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleMappingFunctionWithSigner,
+    InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction, ScalarFunction,
+    SenderAttributableMappingFunction, SenderErrorEnum, ThirdPartyAttributableMappingFunction, ThirdPartyErrorEnum,
 };
-pub(crate) use tag::{AnyTag, AnyTagRef, ArrayTag, FullName, ScalarTag};
+pub(crate) use tag::{AnyTag, AnyTagRef, FullName, MappingTag, ScalarTag};
 pub(crate) use value::{SerdeAdapter, SerializedValue, Value};
 
 pub use args::Args;

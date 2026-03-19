@@ -26,14 +26,14 @@ fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<S
     Ok(Message1(args.my_id().clone()))
 }
 
-fn make_array_elem<SP: SessionParameters>(
+fn make_mapping_elem<SP: SessionParameters>(
     id: &SP::Verifier,
     args: Args<SP>,
 ) -> Result<Message2<SP::Verifier>, LocalError> {
     Ok(Message2(args.my_id().clone(), id.clone()))
 }
 
-fn make_array_elem_sans_me<SP: SessionParameters>(
+fn make_mapping_elem_sans_me<SP: SessionParameters>(
     id: &SP::Verifier,
     args: Args<SP>,
 ) -> Result<Message3<SP::Verifier>, LocalError> {
@@ -107,12 +107,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let x = receive(&message_x, all_parties)?;
         let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted])?;
 
-        let my_y = compute_array("my_y", make_array_elem, all_parties, &[])?;
+        let my_y = compute_mapping("my_y", make_mapping_elem, all_parties, &[])?;
         let y_sent = send(&message_y, &my_y)?;
         let y = receive(&message_y, my_y.group().unwrap())?;
         let all_y = collect(&y)?.with_dependencies(&[&y_sent])?;
 
-        let my_z = compute_array("my_z", make_array_elem_sans_me, &all_parties.except(my_id), &[])?;
+        let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &all_parties.except(my_id), &[])?;
         let z_sent = send(&message_z, &my_z)?;
         let z = receive(&message_z, my_z.group().unwrap())?;
         let all_z = collect(&z)?.with_dependencies(&[&z_sent])?;
