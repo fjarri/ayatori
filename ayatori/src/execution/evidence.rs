@@ -9,8 +9,12 @@ use super::{
     task::{Task, TaskResultEnum},
 };
 use crate::{
-    entities::{MappingTag, MessageId, SerializedValue, SignedValue, VerificationError, VerifiedValue},
+    entities::{
+        AnyTagRef, AssociatedData, MappingFunction, MappingTag, MessageId, SignedValue, VerificationError,
+        VerifiedValue,
+    },
     errors::LocalError,
+    graph_representation::{ArgNodes, NodeKind},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -60,7 +64,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
         match self {
             Self::SenderError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
             Self::ConflictingMessages(evidence) => evidence.verify(session_id, guilty_party),
-            Self::ThirdPartyError(evidence) => evidence.verify(session_id, guilty_party),
+            Self::ThirdPartyError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
         }
     }
 }
@@ -187,23 +191,47 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    reported_by: SP::Verifier,
     failed_at: MappingTag,
-    associated_data: SerializedValue,
+    associated_data: AssociatedData<SP>,
     phantom: PhantomData<(SP, P)>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
-    pub fn new(failed_at: &MappingTag, associated_data: SerializedValue) -> Self {
+    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, associated_data: AssociatedData<SP>) -> Self {
         Self {
+            reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
             associated_data,
             phantom: PhantomData,
         }
     }
 
-    pub fn verify(&self, _session_id: &SessionId<SP>, _guilty_party: &SP::Verifier) -> Result<(), EvidenceError> {
-        // TODO (#59): support third party error verification.
-        todo!()
+    pub fn verify(
+        &self,
+        session_id: &SessionId<SP>,
+        guilty_party: &SP::Verifier,
+        shared_data: &P::SharedData,
+    ) -> Result<(), EvidenceError> {
+        let build_data = P::make_build_data(shared_data);
+        let signature = P::signature();
+        let arg_nodes = ArgNodes::new(&signature);
+        let output = P::build(&self.reported_by, &build_data, arg_nodes)?;
+        let node = output
+            .find_subnode(AnyTagRef::Mapping(&self.failed_at))
+            .ok_or_else(|| EvidenceError::new(format!("Could not find subnode {}", self.failed_at)))?;
+
+        let function = match node.kind() {
+            NodeKind::ComputeMapping { function, .. } => function,
+            _ => return Err(EvidenceError::new("Invalid node type")),
+        };
+
+        let verification = match function {
+            MappingFunction::ThirdPartyAttributable { verification, .. } => verification,
+            _ => return Err(EvidenceError::new("Invalid function type")),
+        };
+
+        verification.call(session_id, guilty_party, &self.associated_data)
     }
 }
 

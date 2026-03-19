@@ -1,10 +1,14 @@
 use alloc::{
+    format,
     string::{String, ToString},
     sync::Arc,
 };
-use core::fmt::{self, Debug, Display};
+use core::{
+    fmt::{self, Debug, Display},
+    marker::PhantomData,
+};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
@@ -13,6 +17,7 @@ use super::{
 };
 use crate::{
     errors::LocalError,
+    execution::{EvidenceError, SessionId},
     traits::{SessionParameters, WireFormat},
 };
 
@@ -38,6 +43,27 @@ impl SenderError {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssociatedData<SP: SessionParameters> {
+    serialized_value: SerializedValue,
+    phantom: PhantomData<SP>,
+}
+
+impl<SP: SessionParameters> AssociatedData<SP> {
+    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(value: T) -> Result<Self, LocalError> {
+        let serialized_value = SerializedValue::new(SP::WireFormat::serialize(value)?);
+        Ok(Self {
+            serialized_value,
+            phantom: PhantomData,
+        })
+    }
+
+    pub fn deserialize<T: for<'de> Deserialize<'de>>(&self) -> Result<T, LocalError> {
+        SP::WireFormat::deserialize::<T>(self.serialized_value.as_ref())
+            .map_err(|err| LocalError::new(format!("Failed to deserialize: {err}")))
+    }
+}
+
 #[derive(Debug)]
 pub struct ThirdPartyError<SP: SessionParameters>(pub(crate) ThirdPartyErrorEnum<SP>);
 
@@ -46,7 +72,7 @@ pub(crate) enum ThirdPartyErrorEnum<SP: SessionParameters> {
     Local(LocalError),
     Error {
         guilty_party: SP::Verifier,
-        associated_data: SerializedValue,
+        associated_data: AssociatedData<SP>,
     },
 }
 
@@ -57,8 +83,11 @@ impl<SP: SessionParameters> From<LocalError> for ThirdPartyError<SP> {
 }
 
 impl<SP: SessionParameters> ThirdPartyError<SP> {
-    pub fn new<T: Serialize>(guilty_party: &SP::Verifier, associated_value: T) -> Result<Self, LocalError> {
-        let associated_data = SerializedValue::new(SP::WireFormat::serialize(associated_value)?);
+    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(
+        guilty_party: &SP::Verifier,
+        associated_value: T,
+    ) -> Result<Self, LocalError> {
+        let associated_data = AssociatedData::new(associated_value)?;
         Ok(Self(ThirdPartyErrorEnum::Error {
             guilty_party: guilty_party.clone(),
             associated_data,
@@ -160,6 +189,44 @@ define_function_type!(
     (id: &SP::Verifier, args: Args<SP>) -> ThirdPartyError<SP>
 );
 
+#[derive_where::derive_where(Clone)]
+pub(crate) struct ThirdPartyAttributableVerificationFunction<SP: SessionParameters> {
+    #[allow(clippy::type_complexity)]
+    function: Arc<dyn Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>>,
+    name: String,
+}
+
+impl<SP: SessionParameters> ThirdPartyAttributableVerificationFunction<SP> {
+    pub fn new(
+        function: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
+    ) -> Self {
+        let name = core::any::type_name_of_val(&function).to_string();
+        Self {
+            name,
+            function: Arc::new(function),
+        }
+    }
+
+    pub fn call(
+        &self,
+        session_id: &SessionId<SP>,
+        guilty_party: &SP::Verifier,
+        associated_data: &AssociatedData<SP>,
+    ) -> Result<(), EvidenceError> {
+        (self.function)(session_id, guilty_party, associated_data)
+    }
+}
+
+impl<SP: SessionParameters> Debug for ThirdPartyAttributableVerificationFunction<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "ThirdPartyAttributableVerificationFunction {{ function: {} }}",
+            self.name
+        )
+    }
+}
+
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ScalarFunction<SP: SessionParameters> {
     Infallible(InfallibleScalarFunction<SP>),
@@ -178,7 +245,10 @@ pub(crate) enum MappingFunction<SP: SessionParameters> {
     InfallibleWithRng(InfallibleMappingFunctionWithRng<SP>),
     InfallibleWithSigner(InfallibleMappingFunctionWithSigner<SP>),
     SenderAttributable(SenderAttributableMappingFunction<SP>),
-    ThirdPartyAttributable(ThirdPartyAttributableMappingFunction<SP>),
+    ThirdPartyAttributable {
+        function: ThirdPartyAttributableMappingFunction<SP>,
+        verification: ThirdPartyAttributableVerificationFunction<SP>,
+    },
 }
 
 impl<SP: SessionParameters> MappingFunction<SP> {
@@ -203,7 +273,7 @@ impl<SP: SessionParameters> Display for MappingFunction<SP> {
             Self::InfallibleWithSigner(function) => write!(f, "{function}[Signer]"),
             Self::Infallible(function) => write!(f, "{function}"),
             Self::SenderAttributable(function) => write!(f, "{function}"),
-            Self::ThirdPartyAttributable(function) => write!(f, "{function}"),
+            Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),
         }
     }
 }

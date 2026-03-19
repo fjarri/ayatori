@@ -6,11 +6,10 @@ use signature::rand_core::CryptoRngCore;
 use super::{message::Message, session::SessionData};
 use crate::{
     entities::{
-        AnyTagRef, Args, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
+        AnyTagRef, Args, AssociatedData, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
         InfallibleMappingFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingTag,
-        MessageId, ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SerializedValue,
-        SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
-        VerificationError,
+        MessageId, ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SignedValue,
+        ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value, VerificationError,
     },
     errors::LocalError,
     flat_representation::OnError,
@@ -48,7 +47,7 @@ pub struct ComputeTask<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ComputeTask<SP> {
-    pub fn compute(self) -> Result<TaskResult<SP::Verifier>, LocalError> {
+    pub fn compute(self) -> Result<TaskResult<SP>, LocalError> {
         match self.function {
             ComputeFunction::ScalarInfallible { store_in, function } => {
                 let result = function.call(self.args)?;
@@ -119,7 +118,7 @@ pub struct ComputeWithRngTask<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ComputeWithRngTask<SP> {
-    pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP::Verifier>, LocalError> {
+    pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP>, LocalError> {
         match self.function {
             ComputeWithRngFunction::ScalarInfallible { store_in, function } => {
                 let result = function.call(rng, self.args)?;
@@ -150,7 +149,7 @@ pub struct SendTask<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
-    pub fn compute(self) -> Result<(Message<SP>, TaskResult<SP::Verifier>), LocalError> {
+    pub fn compute(self) -> Result<(Message<SP>, TaskResult<SP>), LocalError> {
         let signed_value = self.signed_value.downcast::<SignedValue<SP>>()?;
         let signed_values = vec![signed_value];
         let message = Message::new(self.destination.clone(), signed_values);
@@ -302,14 +301,14 @@ impl<SP: SessionParameters> Task<SP> {
 }
 
 #[derive(Debug)]
-pub struct TaskResult<Id>(TaskResultEnum<Id>);
+pub struct TaskResult<SP: SessionParameters>(TaskResultEnum<SP>);
 
-impl<Id> TaskResult<Id> {
-    pub(crate) fn as_enum(&self) -> &TaskResultEnum<Id> {
+impl<SP: SessionParameters> TaskResult<SP> {
+    pub(crate) fn as_enum(&self) -> &TaskResultEnum<SP> {
         &self.0
     }
 
-    pub(crate) fn into_enum(self) -> TaskResultEnum<Id> {
+    pub(crate) fn into_enum(self) -> TaskResultEnum<SP> {
         self.0
     }
 
@@ -325,10 +324,10 @@ impl<Id> TaskResult<Id> {
 }
 
 #[derive(Debug)]
-pub(crate) enum TaskResultEnum<Id> {
+pub(crate) enum TaskResultEnum<SP: SessionParameters> {
     Send {
         store_in: MappingTag,
-        destination: Id,
+        destination: SP::Verifier,
     },
     Compute {
         store_in: ScalarTag,
@@ -336,18 +335,18 @@ pub(crate) enum TaskResultEnum<Id> {
     },
     ComputeMapping {
         store_in: MappingTag,
-        id: Id,
+        id: SP::Verifier,
         result: Value,
     },
     SenderError {
         store_in: MappingTag,
-        id: Id,
+        id: SP::Verifier,
         on_error: OnError,
     },
     ThirdPartyError {
         store_in: MappingTag,
-        id: Id,
-        associated_data: SerializedValue,
+        id: SP::Verifier,
+        associated_data: AssociatedData<SP>,
     },
 }
 

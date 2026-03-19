@@ -297,7 +297,7 @@ where
                         MappingFunction::SenderAttributable(function) => {
                             Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
                         }
-                        MappingFunction::ThirdPartyAttributable(function) => {
+                        MappingFunction::ThirdPartyAttributable { function, .. } => {
                             Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
                         }
                     }));
@@ -377,7 +377,7 @@ where
         }
     }
 
-    pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {
+    pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), LocalError> {
         match result.into_enum() {
             TaskResultEnum::Send { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
@@ -409,7 +409,11 @@ where
                 id,
                 associated_data,
             } => {
-                let evidence = EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(&store_in, associated_data));
+                let evidence = EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(
+                    &self.verifier,
+                    &store_in,
+                    associated_data,
+                ));
                 self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
             }
         }

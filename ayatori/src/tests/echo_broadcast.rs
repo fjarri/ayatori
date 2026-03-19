@@ -86,9 +86,27 @@ fn verify_echo_contents<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP
             .expect("we checked that the ID is present in the message map");
 
         if !ethalon.payload_hash_matches(message)? {
-            let associated_data = ((*ethalon).clone().unverify(), message);
+            let associated_data = ((*ethalon).clone().unverify(), message.clone());
             return Err(ThirdPartyError::new(from, associated_data)?);
         }
+    }
+
+    Ok(())
+}
+
+fn verify_echo_contents_error<SP: SessionParameters>(
+    session_id: &SessionId<SP>,
+    _guilty_party: &SP::Verifier,
+    associated_data: &AssociatedData<SP>,
+) -> Result<(), EvidenceError> {
+    let (message1, message2) = associated_data.deserialize::<(SignedValue<SP>, SignedValue<SP>)>()?;
+
+    if message1.metadata().session_id() != session_id {
+        return Err(EvidenceError::new("Session ID mismatch"));
+    }
+
+    if message2.metadata().session_id() != session_id {
+        return Err(EvidenceError::new("Session ID mismatch"));
     }
 
     Ok(())
@@ -147,6 +165,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
             verify_echo_contents,
             all_parties,
             &[("received", &all_values_verified), ("echoed", &echo_pack)],
+            verify_echo_contents_error,
         )?;
 
         let all_echo_packs_correct = collect(&echo_packs_correct)?;

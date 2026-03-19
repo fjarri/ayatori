@@ -13,13 +13,14 @@ use super::{
 };
 use crate::{
     entities::{
-        Args, Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
+        Args, AssociatedData, Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
         InfallibleMappingFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng,
         MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
-        SenderError, SerdeAdapter, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, Value,
-        VerifiedValue,
+        SenderError, SerdeAdapter, SignedValue, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value, VerifiedValue,
     },
     errors::LocalError,
+    execution::{EvidenceError, SessionId},
     traits::{ComposableProtocol, SessionParameters},
 };
 
@@ -124,7 +125,7 @@ macro_rules! define_mapping_constructor {
         pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
             name: &str,
             function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
-            group: &PartyGroup<SP::Verifier>,
+            group: &PartyGroup<$SP::Verifier>,
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
             let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
@@ -171,16 +172,35 @@ define_mapping_constructor!(
 );
 
 define_mapping_constructor!(
-    compute_mapping_third_party_fallible<SP>,
-    MappingFunction::ThirdPartyAttributable(ThirdPartyAttributableMappingFunction),
-    (&SP::Verifier, Args<SP>) -> ThirdPartyError<SP>
-);
-
-define_mapping_constructor!(
     compute_mapping_with_rng<SP>,
     MappingFunction::InfallibleWithRng(InfallibleMappingFunctionWithRng),
     (&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> LocalError
 );
+
+pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
+    group: &PartyGroup<SP::Verifier>,
+    args: &[(&str, &Node<SP>)],
+    verification: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
+) -> Result<Node<SP>, LocalError> {
+    let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
+    if arg_groups.iter().any(|g| g != &group) {
+        return Err(LocalError::new(
+            "The group of all arguments must be equal to the one provided to the constructor",
+        ));
+    }
+
+    Ok(Node::new(NodeKind::ComputeMapping {
+        store_in: MappingTag::computed(name),
+        function: MappingFunction::ThirdPartyAttributable {
+            function: ThirdPartyAttributableMappingFunction::new(function),
+            verification: ThirdPartyAttributableVerificationFunction::new(verification),
+        },
+        args: args_to_owned(args.iter().cloned())?,
+        group: group.clone(),
+    }))
+}
 
 /// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
 /// since some RustCrypto libraries don't accept a `?Sized` RNG.
