@@ -12,8 +12,7 @@ use signature::Keypair;
 
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
-    message::{MessageId, MessageWithId, SignedValue, VerifiedValue},
-    ruleset::{Action, OnError, Ruleset},
+    message::MessageWithId,
     session_id::SessionId,
     storage::Storage,
     task::{
@@ -21,16 +20,18 @@ use super::{
         PreprocessingTask, Task, TaskResult, TaskResultEnum,
     },
 };
-use crate::{
-    error::LocalError,
-    protocol::{
-        ArgNodes, Args, ArrayFunction, ArrayTag, ExecutableProtocol, FullName, Node, PrivateInputs, PublicInputs,
-        ScalarFunction, ScalarTag, SessionParameters, Value,
-    },
-};
-
 #[cfg(any(test, feature = "dev"))]
 use crate::dev::Replacement;
+use crate::{
+    entities::{
+        Args, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag, SignedValue, Value,
+        VerifiedValue,
+    },
+    errors::LocalError,
+    flat_representation::{Action, OnError, Ruleset},
+    graph_representation::{ArgNodes, Node, PrivateInputs, PublicInputs},
+    traits::{ExecutableProtocol, SessionParameters},
+};
 
 #[derive(Debug)]
 pub(crate) struct SessionData<SP: SessionParameters> {
@@ -161,7 +162,7 @@ where
 
     pub(crate) fn new_with_reproduction_subtree(
         id: SessionId<SP>,
-        subtree_root: &ArrayTag,
+        subtree_root: &MappingTag,
         verifier: &SP::Verifier,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
@@ -190,14 +191,14 @@ where
     }
 
     fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), LocalError> {
-        self.storage.set(store_in, value)?;
-        self.ruleset.update_with_value_ready(store_in);
+        self.storage.set_scalar(store_in, value)?;
+        self.ruleset.update_with_scalar_ready(store_in);
         Ok(())
     }
 
-    fn add_element(&mut self, store_in: &ArrayTag, id: &SP::Verifier, value: Value) -> Result<(), LocalError> {
+    fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), LocalError> {
         self.storage.set_elem(store_in, id, value)?;
-        self.ruleset.update_with_array_element_ready(store_in, id);
+        self.ruleset.update_with_element_ready(store_in, id);
         Ok(())
     }
 
@@ -206,7 +207,7 @@ where
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
     }
 
-    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: ArrayTag) {
+    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: MappingTag) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
@@ -221,7 +222,7 @@ where
     }
 
     pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, LocalError> {
-        let value = self.storage.get(task.output_tag())?;
+        let value = self.storage.get_scalar(task.output_tag())?;
         let result = value.downcast::<P::Output>()?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
@@ -270,34 +271,34 @@ where
                         }
                     }));
                 }
-                Action::ComputeArrayElement {
+                Action::ComputeMappingElement {
                     store_in,
                     function,
                     index,
                     args,
                     on_error,
                 } => {
-                    let arg_values = self.storage.get_scalar_or_array_args(&index, args)?;
+                    let arg_values = self.storage.get_scalar_or_mapping_args(&index, args)?;
                     let args = Args::new(store_in.full_name(), &self.data, self.verifier(), arg_values)?;
                     return Ok(Some(match function {
-                        ArrayFunction::Infallible(function) => {
-                            Task::compute_array_elem_infallible(store_in, index, function, args)
+                        MappingFunction::Infallible(function) => {
+                            Task::compute_mapping_elem_infallible(store_in, index, function, args)
                         }
-                        ArrayFunction::InfallibleWithRng(function) => {
-                            Task::compute_array_elem_infallible_with_rng(store_in, index, function, args)
+                        MappingFunction::InfallibleWithRng(function) => {
+                            Task::compute_mapping_elem_infallible_with_rng(store_in, index, function, args)
                         }
-                        ArrayFunction::InfallibleWithSigner(function) => {
+                        MappingFunction::InfallibleWithSigner(function) => {
                             let signer = self
                                 .signer
                                 .as_ref()
                                 .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
-                            Task::compute_array_elem_infallible_with_signer(store_in, signer, index, function, args)
+                            Task::compute_mapping_elem_infallible_with_signer(store_in, signer, index, function, args)
                         }
-                        ArrayFunction::SenderAttributable(function) => {
-                            Task::compute_array_elem_sender_attributable(store_in, index, function, args, on_error)
+                        MappingFunction::SenderAttributable(function) => {
+                            Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
                         }
-                        ArrayFunction::ThirdPartyAttributable(function) => {
-                            Task::compute_array_elem_third_party_attributable(store_in, index, function, args)
+                        MappingFunction::ThirdPartyAttributable(function) => {
+                            Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
                         }
                     }));
                 }
@@ -306,7 +307,7 @@ where
                     values,
                     indices,
                 } => {
-                    self.add_scalar(&store_in, self.storage.get_dict_as_value(&values, &indices)?)?;
+                    self.add_scalar(&store_in, self.storage.get_mapping_as_value(&values, &indices)?)?;
                 }
             }
         }
@@ -362,8 +363,7 @@ where
                     }));
                 }
 
-                self.storage.set_elem(&store_in, &id, value)?;
-                self.ruleset.update_with_array_element_ready(&store_in, &id);
+                self.add_element(&store_in, &id, value)?;
 
                 Ok(())
             }
@@ -385,7 +385,7 @@ where
             TaskResultEnum::Compute { store_in, result } => {
                 self.add_scalar(&store_in, result)?;
             }
-            TaskResultEnum::ComputeArray { store_in, id, result } => {
+            TaskResultEnum::ComputeMapping { store_in, id, result } => {
                 self.add_element(&store_in, &id, result)?;
             }
             TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
@@ -395,7 +395,7 @@ where
                     for name in message_names {
                         let value = self
                             .storage
-                            .get_elem(&ArrayTag::signed_remote_with_full_name(&name), &id)?;
+                            .get_elem(&MappingTag::signed_remote_with_full_name(&name), &id)?;
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }

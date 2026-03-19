@@ -8,7 +8,7 @@ use signature::{
     rand_core::CryptoRngCore,
 };
 
-use crate::protocol::{SessionParameters, WireFormat};
+use crate::traits::{SessionParameters, WireFormat};
 
 /// A simple signer for testing purposes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

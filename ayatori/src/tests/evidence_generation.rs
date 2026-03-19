@@ -1,12 +1,13 @@
-use crate::{
-    dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol::*,
-    session::*,
-};
 use alloc::{collections::BTreeSet, vec::Vec};
 
 use rand_chacha::ChaCha8Rng;
 use signature::{Keypair, rand_core::SeedableRng};
+
+use crate::{
+    dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
+    protocol_author_api::*,
+    protocol_user_api::*,
+};
 
 #[derive(Debug)]
 struct TestProtocol;
@@ -71,7 +72,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let my_x = compute_scalar("my_x", gen_value, &[])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
         let x = receive(&message_x, all_parties)?;
-        let x_correct = compute_array_sender_fallible("x_correct", verify, all_parties, &[("x", &x)])?;
+        let x_correct = compute_mapping_sender_fallible("x_correct", verify, all_parties, &[("x", &x)])?;
         let all_x_correct = collect(&x_correct)?.with_dependencies(&[&x_broadcasted])?;
         let all_x = collect(&x)?;
         compute_scalar("output", gen_output, &[("x", &all_x)])?.with_dependencies(&[&all_x_correct])

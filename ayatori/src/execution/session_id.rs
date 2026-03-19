@@ -3,11 +3,10 @@ use core::fmt::{self, Debug};
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::digest::{self, Digest};
-
 #[cfg(any(test, feature = "dev"))]
 use signature::rand_core::CryptoRngCore;
 
-use crate::protocol::SessionParameters;
+use crate::traits::SessionParameters;
 
 /// A session identifier shared between the parties.
 #[derive(Serialize, Deserialize, PartialOrd, Ord, Hash)]

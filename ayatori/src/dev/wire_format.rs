@@ -2,7 +2,7 @@ use alloc::{boxed::Box, string::ToString};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{error::LocalError, protocol::WireFormat};
+use crate::{errors::LocalError, traits::WireFormat};
 
 /// A binary format to use in tests.
 #[derive(Debug, Clone, Copy)]

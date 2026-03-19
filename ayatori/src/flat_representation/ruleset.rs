@@ -9,11 +9,10 @@ use itertools::Itertools;
 
 use super::conditions::{ElementCondition, QuorumCondition, ScalarCondition};
 use crate::{
-    error::LocalError,
-    protocol::{
-        AnyTag, AnyTagRef, ArrayFunction, ArrayTag, FullName, Node, NodeKind, Reproducibility, ScalarFunction,
-        ScalarTag, SessionParameters,
-    },
+    entities::{AnyTag, AnyTagRef, FullName, MappingFunction, MappingTag, ScalarFunction, ScalarTag},
+    errors::LocalError,
+    graph_representation::{Node, NodeKind, Reproducibility},
+    traits::SessionParameters,
 };
 
 #[derive_where::derive_where(Debug)]
@@ -26,12 +25,12 @@ struct ComputeScalarRule<SP: SessionParameters> {
 }
 
 #[derive_where::derive_where(Debug)]
-struct ComputeArrayRule<SP: SessionParameters> {
+struct ComputeMappingRule<SP: SessionParameters> {
     dependencies: ScalarCondition,
     scalar_condition: ScalarCondition,
     element_conditions: BTreeMap<SP::Verifier, ElementCondition>,
-    store_in: ArrayTag,
-    function: ArrayFunction<SP>,
+    store_in: MappingTag,
+    function: MappingFunction<SP>,
     args: BTreeMap<String, AnyTag>,
     on_error: OnError,
 }
@@ -40,8 +39,8 @@ struct ComputeArrayRule<SP: SessionParameters> {
 struct SendRule<SP: SessionParameters> {
     dependencies: ScalarCondition,
     element_conditions: BTreeMap<SP::Verifier, ElementCondition>,
-    store_in: ArrayTag,
-    to_send: ArrayTag,
+    store_in: MappingTag,
+    to_send: MappingTag,
 }
 
 #[derive_where::derive_where(Debug)]
@@ -49,7 +48,7 @@ struct CollectRule<SP: SessionParameters> {
     dependencies: ScalarCondition,
     condition: QuorumCondition<SP::Verifier>,
     store_in: ScalarTag,
-    values: ArrayTag,
+    values: MappingTag,
 }
 
 #[derive(Debug, Clone)]
@@ -65,21 +64,21 @@ pub(crate) enum Action<SP: SessionParameters> {
         function: ScalarFunction<SP>,
         args: BTreeMap<String, ScalarTag>,
     },
-    ComputeArrayElement {
-        store_in: ArrayTag,
+    ComputeMappingElement {
+        store_in: MappingTag,
         index: SP::Verifier,
-        function: ArrayFunction<SP>,
+        function: MappingFunction<SP>,
         args: BTreeMap<String, AnyTag>,
         on_error: OnError,
     },
     Send {
-        store_in: ArrayTag,
-        to_send: ArrayTag,
+        store_in: MappingTag,
+        to_send: MappingTag,
         destination: SP::Verifier,
     },
     Collect {
         store_in: ScalarTag,
-        values: ArrayTag,
+        values: MappingTag,
         indices: BTreeSet<SP::Verifier>,
     },
     ReturnOutput(ScalarTag),
@@ -109,7 +108,7 @@ enum State {
 pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: ScalarTag,
     compute_scalar_rules: Vec<ComputeScalarRule<SP>>,
-    compute_array_rules: Vec<ComputeArrayRule<SP>>,
+    compute_mapping_rules: Vec<ComputeMappingRule<SP>>,
     send_rules: Vec<SendRule<SP>>,
     collect_rules: Vec<CollectRule<SP>>,
     expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
@@ -126,7 +125,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             .ok_or_else(|| LocalError::new("The output node must be a scalar node"))?;
 
         let mut compute_scalar_rules = Vec::new();
-        let mut compute_array_rules = Vec::new();
+        let mut compute_mapping_rules = Vec::new();
         let mut send_rules = Vec::new();
         let mut collect_rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
@@ -172,7 +171,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         args: arg_tags,
                     });
                 }
-                NodeKind::ComputeArray {
+                NodeKind::ComputeMapping {
                     store_in,
                     function,
                     args,
@@ -187,7 +186,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         match arg.store_in() {
                             // TODO (#68): we're assuming here that `arg.group()` is a superset of `group`.
                             // Review this when fixing #68.
-                            AnyTagRef::Array(tag) => element_condition = element_condition.and(tag),
+                            AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
                             AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
                         };
                     }
@@ -205,7 +204,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         })
                         .collect();
 
-                    compute_array_rules.push(ComputeArrayRule {
+                    compute_mapping_rules.push(ComputeMappingRule {
                         dependencies,
                         scalar_condition,
                         element_conditions,
@@ -218,8 +217,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 NodeKind::DirectMessage { store_in, data, group } => {
                     let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
 
-                    let tag = data.store_in().array().ok_or_else(|| {
-                        LocalError::new("Assumption: DirectMessage node is expected to send array data")
+                    let tag = data.store_in().mapping().ok_or_else(|| {
+                        LocalError::new("Assumption: DirectMessage node is expected to send mapping data")
                     })?;
                     let element_condition = ElementCondition::empty().and(tag);
                     let element_conditions = possible_ids
@@ -239,10 +238,9 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     values,
                     group,
                 } => {
-                    let tag = values
-                        .store_in()
-                        .array()
-                        .ok_or_else(|| LocalError::new("Assumption: Collect node is expected to collect array data"))?;
+                    let tag = values.store_in().mapping().ok_or_else(|| {
+                        LocalError::new("Assumption: Collect node is expected to collect mapping data")
+                    })?;
                     let condition = QuorumCondition::new(tag, group);
                     collect_rules.push(CollectRule {
                         dependencies,
@@ -265,7 +263,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
         Ok(Self {
             output_tag,
             compute_scalar_rules,
-            compute_array_rules,
+            compute_mapping_rules,
             send_rules,
             collect_rules,
             expected_messages,
@@ -286,40 +284,40 @@ impl<SP: SessionParameters> Ruleset<SP> {
         }
     }
 
-    pub fn update_with_value_ready(&mut self, tag: &ScalarTag) {
+    pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) {
         if tag == &self.output_tag {
             self.state = State::ReachedOutput;
         }
 
         for rule in &mut self.compute_scalar_rules {
-            rule.dependencies.update_with_value_ready(tag);
-            rule.condition.update_with_value_ready(tag);
+            rule.dependencies.update_with_scalar_ready(tag);
+            rule.condition.update_with_scalar_ready(tag);
         }
 
-        for rule in &mut self.compute_array_rules {
-            rule.dependencies.update_with_value_ready(tag);
-            rule.scalar_condition.update_with_value_ready(tag);
+        for rule in &mut self.compute_mapping_rules {
+            rule.dependencies.update_with_scalar_ready(tag);
+            rule.scalar_condition.update_with_scalar_ready(tag);
         }
 
         for rule in &mut self.send_rules {
-            rule.dependencies.update_with_value_ready(tag);
+            rule.dependencies.update_with_scalar_ready(tag);
         }
 
         for rule in &mut self.collect_rules {
-            rule.dependencies.update_with_value_ready(tag);
+            rule.dependencies.update_with_scalar_ready(tag);
         }
     }
 
-    pub fn update_with_array_element_ready(&mut self, tag: &ArrayTag, id: &SP::Verifier) {
-        for rule in &mut self.compute_array_rules {
+    pub fn update_with_element_ready(&mut self, tag: &MappingTag, id: &SP::Verifier) {
+        for rule in &mut self.compute_mapping_rules {
             if let Some(condition) = rule.element_conditions.get_mut(id) {
-                condition.update_with_value_ready(tag)
+                condition.update_with_scalar_ready(tag)
             }
         }
 
         for rule in &mut self.send_rules {
             if let Some(condition) = rule.element_conditions.get_mut(id) {
-                condition.update_with_value_ready(tag)
+                condition.update_with_scalar_ready(tag)
             }
         }
 
@@ -351,7 +349,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
         }
 
-        // TODO (#68): this may need to be removed after #68 is fixed, because compute-array rules
+        // TODO (#68): this may need to be removed after #68 is fixed, because compute-mapping rules
         // won't track the IDs for which they were completed.
         // If not, it needs to be optimized to not look through the whole list,
         // but only at the rule which produced the action.
@@ -377,7 +375,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     fn pop_compute_element_action(&mut self) -> Option<Action<SP>> {
         let mut action = None;
-        for rule in &mut self.compute_array_rules {
+        for rule in &mut self.compute_mapping_rules {
             if !rule.dependencies.is_satisfied() || !rule.scalar_condition.is_satisfied() {
                 continue;
             }
@@ -386,7 +384,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 .element_conditions
                 .extract_if(.., |_id, condition| condition.is_satisfied())
                 .next()
-                .map(|(id, _condition)| Action::ComputeArrayElement {
+                .map(|(id, _condition)| Action::ComputeMappingElement {
                     store_in: rule.store_in.clone(),
                     index: id,
                     function: rule.function.clone(),
@@ -399,7 +397,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
         }
 
-        // TODO (#68): this may need to be removed after #68 is fixed, because compute-array rules
+        // TODO (#68): this may need to be removed after #68 is fixed, because compute-mapping rules
         // won't track the IDs for which they were completed.
         // If not, it needs to be optimized to not look through the whole list,
         // but only at the rule which produced the action.
@@ -480,7 +478,7 @@ impl<SP: SessionParameters> Display for ComputeScalarRule<SP> {
     }
 }
 
-impl<SP: SessionParameters> Display for ComputeArrayRule<SP> {
+impl<SP: SessionParameters> Display for ComputeMappingRule<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         if !self.dependencies.is_satisfied() {
             writeln!(f, "if {}", self.dependencies)?;
@@ -529,7 +527,7 @@ impl<SP: SessionParameters> Display for Ruleset<SP> {
         for rule in &self.compute_scalar_rules {
             writeln!(f, "{rule}")?;
         }
-        for rule in &self.compute_array_rules {
+        for rule in &self.compute_mapping_rules {
             writeln!(f, "{rule}")?;
         }
         for rule in &self.collect_rules {

@@ -3,16 +3,18 @@ use core::fmt::Debug;
 
 use signature::rand_core::CryptoRngCore;
 
-use super::message::{Message, MessageId, SignedValue, VerificationError};
-use super::{ruleset::OnError, session::SessionData};
+use super::{message::Message, session::SessionData};
 use crate::{
-    error::LocalError,
-    protocol::{
-        AnyTagRef, Args, ArrayTag, InfallibleArrayFunction, InfallibleArrayFunctionWithRng,
-        InfallibleArrayFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, ScalarTag,
-        SenderAttributableArrayFunction, SenderError, SenderErrorEnum, SerializedValue, SessionParameters,
-        ThirdPartyAttributableArrayFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
+    entities::{
+        AnyTagRef, Args, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
+        InfallibleMappingFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingTag,
+        MessageId, ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SerializedValue,
+        SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
+        VerificationError,
     },
+    errors::LocalError,
+    flat_representation::OnError,
+    traits::SessionParameters,
 };
 
 #[derive(Debug)]
@@ -21,19 +23,19 @@ enum ComputeFunction<SP: SessionParameters> {
         store_in: ScalarTag,
         function: InfallibleScalarFunction<SP>,
     },
-    ArrayInfallible {
-        store_in: ArrayTag,
-        function: InfallibleArrayFunction<SP>,
+    MappingInfallible {
+        store_in: MappingTag,
+        function: InfallibleMappingFunction<SP>,
         id: SP::Verifier,
     },
-    ArraySenderAttributable {
-        store_in: ArrayTag,
-        function: SenderAttributableArrayFunction<SP>,
+    MappingSenderAttributable {
+        store_in: MappingTag,
+        function: SenderAttributableMappingFunction<SP>,
         id: SP::Verifier,
     },
-    ArrayThirdPartyAttributable {
-        store_in: ArrayTag,
-        function: ThirdPartyAttributableArrayFunction<SP>,
+    MappingThirdPartyAttributable {
+        store_in: MappingTag,
+        function: ThirdPartyAttributableMappingFunction<SP>,
         id: SP::Verifier,
     },
 }
@@ -52,11 +54,11 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 let result = function.call(self.args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
-            ComputeFunction::ArrayInfallible { store_in, function, id } => {
+            ComputeFunction::MappingInfallible { store_in, function, id } => {
                 let result = function.call(&id, self.args)?;
-                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+                Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
-            ComputeFunction::ArraySenderAttributable { store_in, function, id } => {
+            ComputeFunction::MappingSenderAttributable { store_in, function, id } => {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
                     Err(SenderError(SenderErrorEnum::Local(error))) => return Err(error),
@@ -68,9 +70,9 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         }));
                     }
                 };
-                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+                Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
-            ComputeFunction::ArrayThirdPartyAttributable { store_in, function, id } => {
+            ComputeFunction::MappingThirdPartyAttributable { store_in, function, id } => {
                 let result = match function.call(&id, self.args) {
                     Ok(result) => result,
                     Err(ThirdPartyError(ThirdPartyErrorEnum::Local(error))) => return Err(error),
@@ -85,7 +87,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         }));
                     }
                 };
-                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+                Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
         }
     }
@@ -97,15 +99,15 @@ enum ComputeWithRngFunction<SP: SessionParameters> {
         store_in: ScalarTag,
         function: InfallibleScalarFunctionWithRng<SP>,
     },
-    ArrayInfallible {
-        store_in: ArrayTag,
-        function: InfallibleArrayFunctionWithRng<SP>,
+    MappingInfallible {
+        store_in: MappingTag,
+        function: InfallibleMappingFunctionWithRng<SP>,
         id: SP::Verifier,
     },
-    ArrayInfallibleWithSigner {
-        store_in: ArrayTag,
+    MappingInfallibleWithSigner {
+        store_in: MappingTag,
         signer: Arc<SP::Signer>,
-        function: InfallibleArrayFunctionWithSigner<SP>,
+        function: InfallibleMappingFunctionWithSigner<SP>,
         id: SP::Verifier,
     },
 }
@@ -123,18 +125,18 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 let result = function.call(rng, self.args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
-            ComputeWithRngFunction::ArrayInfallible { store_in, function, id } => {
+            ComputeWithRngFunction::MappingInfallible { store_in, function, id } => {
                 let result = function.call(rng, &id, self.args)?;
-                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+                Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
-            ComputeWithRngFunction::ArrayInfallibleWithSigner {
+            ComputeWithRngFunction::MappingInfallibleWithSigner {
                 store_in,
                 signer,
                 function,
                 id,
             } => {
                 let result = function.call(rng, &signer, &id, self.args)?;
-                Ok(TaskResult(TaskResultEnum::ComputeArray { store_in, id, result }))
+                Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
         }
     }
@@ -142,7 +144,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
 
 #[derive(Debug)]
 pub struct SendTask<SP: SessionParameters> {
-    store_in: ArrayTag,
+    store_in: MappingTag,
     destination: SP::Verifier,
     signed_value: Value,
 }
@@ -196,7 +198,7 @@ impl<SP: SessionParameters> Task<SP> {
         Self::FinalizeWithStall(FinalizeWithStallTask(tag))
     }
 
-    pub(crate) fn send(store_in: ArrayTag, destination: SP::Verifier, signed_value: Value) -> Self {
+    pub(crate) fn send(store_in: MappingTag, destination: SP::Verifier, signed_value: Value) -> Self {
         Self::Send(SendTask {
             store_in,
             destination,
@@ -227,40 +229,40 @@ impl<SP: SessionParameters> Task<SP> {
         })
     }
 
-    pub(crate) fn compute_array_elem_infallible(
-        store_in: ArrayTag,
+    pub(crate) fn compute_mapping_elem_infallible(
+        store_in: MappingTag,
         id: SP::Verifier,
-        function: InfallibleArrayFunction<SP>,
+        function: InfallibleMappingFunction<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::Compute(ComputeTask {
-            function: ComputeFunction::ArrayInfallible { store_in, id, function },
+            function: ComputeFunction::MappingInfallible { store_in, id, function },
             args,
             on_error: OnError::Escalate,
         })
     }
 
-    pub(crate) fn compute_array_elem_infallible_with_rng(
-        store_in: ArrayTag,
+    pub(crate) fn compute_mapping_elem_infallible_with_rng(
+        store_in: MappingTag,
         id: SP::Verifier,
-        function: InfallibleArrayFunctionWithRng<SP>,
+        function: InfallibleMappingFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
-            function: ComputeWithRngFunction::ArrayInfallible { store_in, id, function },
+            function: ComputeWithRngFunction::MappingInfallible { store_in, id, function },
             args,
         })
     }
 
-    pub(crate) fn compute_array_elem_infallible_with_signer(
-        store_in: ArrayTag,
+    pub(crate) fn compute_mapping_elem_infallible_with_signer(
+        store_in: MappingTag,
         signer: &Arc<SP::Signer>,
         id: SP::Verifier,
-        function: InfallibleArrayFunctionWithSigner<SP>,
+        function: InfallibleMappingFunctionWithSigner<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
-            function: ComputeWithRngFunction::ArrayInfallibleWithSigner {
+            function: ComputeWithRngFunction::MappingInfallibleWithSigner {
                 store_in,
                 signer: signer.clone(),
                 id,
@@ -270,28 +272,28 @@ impl<SP: SessionParameters> Task<SP> {
         })
     }
 
-    pub(crate) fn compute_array_elem_sender_attributable(
-        store_in: ArrayTag,
+    pub(crate) fn compute_mapping_elem_sender_attributable(
+        store_in: MappingTag,
         id: SP::Verifier,
-        function: SenderAttributableArrayFunction<SP>,
+        function: SenderAttributableMappingFunction<SP>,
         args: Args<SP>,
         on_error: OnError,
     ) -> Self {
         Self::Compute(ComputeTask {
-            function: ComputeFunction::ArraySenderAttributable { store_in, id, function },
+            function: ComputeFunction::MappingSenderAttributable { store_in, id, function },
             args,
             on_error,
         })
     }
 
-    pub(crate) fn compute_array_elem_third_party_attributable(
-        store_in: ArrayTag,
+    pub(crate) fn compute_mapping_elem_third_party_attributable(
+        store_in: MappingTag,
         id: SP::Verifier,
-        function: ThirdPartyAttributableArrayFunction<SP>,
+        function: ThirdPartyAttributableMappingFunction<SP>,
         args: Args<SP>,
     ) -> Self {
         Self::Compute(ComputeTask {
-            function: ComputeFunction::ArrayThirdPartyAttributable { store_in, id, function },
+            function: ComputeFunction::MappingThirdPartyAttributable { store_in, id, function },
             args,
             // TODO (#59): support third party attributable failures
             on_error: OnError::Escalate,
@@ -315,9 +317,9 @@ impl<Id> TaskResult<Id> {
         match &self.0 {
             TaskResultEnum::Compute { store_in, .. } => AnyTagRef::Scalar(store_in),
             TaskResultEnum::Send { store_in, .. }
-            | TaskResultEnum::ComputeArray { store_in, .. }
+            | TaskResultEnum::ComputeMapping { store_in, .. }
             | TaskResultEnum::SenderError { store_in, .. }
-            | TaskResultEnum::ThirdPartyError { store_in, .. } => AnyTagRef::Array(store_in),
+            | TaskResultEnum::ThirdPartyError { store_in, .. } => AnyTagRef::Mapping(store_in),
         }
     }
 }
@@ -325,25 +327,25 @@ impl<Id> TaskResult<Id> {
 #[derive(Debug)]
 pub(crate) enum TaskResultEnum<Id> {
     Send {
-        store_in: ArrayTag,
+        store_in: MappingTag,
         destination: Id,
     },
     Compute {
         store_in: ScalarTag,
         result: Value,
     },
-    ComputeArray {
-        store_in: ArrayTag,
+    ComputeMapping {
+        store_in: MappingTag,
         id: Id,
         result: Value,
     },
     SenderError {
-        store_in: ArrayTag,
+        store_in: MappingTag,
         id: Id,
         on_error: OnError,
     },
     ThirdPartyError {
-        store_in: ArrayTag,
+        store_in: MappingTag,
         id: Id,
         associated_data: SerializedValue,
     },
@@ -425,7 +427,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             }
         };
 
-        let store_in = ArrayTag::signed_remote_with_full_name(verified_value.metadata().full_name());
+        let store_in = MappingTag::signed_remote_with_full_name(verified_value.metadata().full_name());
         let value = Value::new(verified_value);
 
         Ok(PreprocessingResult(PreprocessingResultEnum::Success {
@@ -448,7 +450,7 @@ impl<SP: SessionParameters> PreprocessingResult<SP> {
 #[derive(Debug)]
 pub(crate) enum PreprocessingResultEnum<SP: SessionParameters> {
     Success {
-        store_in: ArrayTag,
+        store_in: MappingTag,
         id: SP::Verifier,
         value: Value,
     },

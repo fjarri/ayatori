@@ -1,14 +1,15 @@
-use crate::{
-    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol::*,
-    session::*,
-};
 use alloc::{collections::BTreeSet, vec::Vec};
 
 use rand_chacha::ChaCha8Rng;
 use signature::{
     Keypair,
     rand_core::{CryptoRngCore, SeedableRng},
+};
+
+use crate::{
+    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+    protocol_author_api::*,
+    protocol_user_api::*,
 };
 
 #[derive(Debug)]
@@ -89,7 +90,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
         let r_broadcasted = broadcast(&message_r, &my_r, all_parties)?.with_dependencies(&[&all_c])?;
         let b = receive(&message_b, all_parties)?;
         let r = receive(&message_r, all_parties)?;
-        let hash_correct = compute_array_sender_fallible(
+        let hash_correct = compute_mapping_sender_fallible(
             "hash_correct",
             verify_commitment,
             all_parties,

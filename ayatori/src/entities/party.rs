@@ -3,7 +3,7 @@ use core::fmt::{self, Debug, Display};
 
 use itertools::Itertools;
 
-use super::traits::PartyId;
+use crate::traits::PartyId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartyGroup<Id: PartyId> {

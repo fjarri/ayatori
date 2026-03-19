@@ -12,15 +12,12 @@ use core::fmt::Debug;
 
 use itertools::Itertools;
 
-use super::{
-    args::BoundProtocolArgs,
-    function::{ArrayFunction, ScalarFunction},
-    party::PartyGroup,
-    tag::{AnyTagRef, ArrayTag, FullName, ScalarTag},
+use super::args::BoundProtocolArgs;
+use crate::{
+    entities::{AnyTagRef, FullName, MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag, SerdeAdapter},
+    errors::LocalError,
     traits::SessionParameters,
-    value::SerdeAdapter,
 };
-use crate::error::LocalError;
 
 #[derive(Debug)]
 pub(crate) enum Reproducibility {
@@ -71,7 +68,7 @@ impl<SP: SessionParameters> Node<SP> {
         self.0.store_in()
     }
 
-    pub(crate) fn store_in_and_group(&self) -> Option<(&ArrayTag, &PartyGroup<SP::Verifier>)> {
+    pub(crate) fn store_in_and_group(&self) -> Option<(&MappingTag, &PartyGroup<SP::Verifier>)> {
         self.0.kind().store_in_and_group()
     }
 
@@ -103,13 +100,17 @@ impl<SP: SessionParameters> Node<SP> {
         s
     }
 
-    pub(crate) fn get_reproduction_subtree(&self, tag: &ArrayTag, verifier: &SP::Verifier) -> Result<Self, LocalError> {
+    pub(crate) fn get_reproduction_subtree(
+        &self,
+        tag: &MappingTag,
+        verifier: &SP::Verifier,
+    ) -> Result<Self, LocalError> {
         let node = self
-            .find_subnode(AnyTagRef::Array(tag))
+            .find_subnode(AnyTagRef::Mapping(tag))
             .ok_or_else(|| LocalError::new(format!("Node {tag} was not found")))?;
         let node = node.tree_without_dependencies();
 
-        // The output must be a scalar node, and `node` is an array node.
+        // The output must be a scalar node, and `node` is an mapping node.
         // So we wrap it in a collection node.
         let wrapped = Node::new(NodeKind::Collect {
             store_in: tag.collected(),
@@ -140,7 +141,7 @@ impl<SP: SessionParameters> Node<SP> {
                         return Reproducibility::NotAvailable;
                     }
                 }
-                NodeKind::ComputeArray { function, .. } => {
+                NodeKind::ComputeMapping { function, .. } => {
                     if !function.is_reproducible() {
                         return Reproducibility::NotAvailable;
                     }
@@ -385,14 +386,14 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         function: ScalarFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
     },
-    ComputeArray {
-        store_in: ArrayTag,
-        function: ArrayFunction<SP>,
+    ComputeMapping {
+        store_in: MappingTag,
+        function: MappingFunction<SP>,
         group: PartyGroup<SP::Verifier>,
         args: BTreeMap<String, Node<SP>>,
     },
     DirectMessage {
-        store_in: ArrayTag,
+        store_in: MappingTag,
         data: Node<SP>,
         group: PartyGroup<SP::Verifier>,
     },
@@ -402,7 +403,7 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         group: PartyGroup<SP::Verifier>,
     },
     Receive {
-        store_in: ArrayTag,
+        store_in: MappingTag,
         group: PartyGroup<SP::Verifier>,
         message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
@@ -429,7 +430,7 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                         .join(", ")
                 )
             }
-            Self::ComputeArray {
+            Self::ComputeMapping {
                 store_in: _store_in,
                 function,
                 group: _group,
@@ -477,15 +478,15 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeScalar { store_in, .. }
             | Self::Collect { store_in, .. }
             | Self::ScalarArgument { store_in, .. } => AnyTagRef::Scalar(store_in),
-            Self::ComputeArray { store_in, .. }
+            Self::ComputeMapping { store_in, .. }
             | Self::DirectMessage { store_in, .. }
-            | Self::Receive { store_in, .. } => AnyTagRef::Array(store_in),
+            | Self::Receive { store_in, .. } => AnyTagRef::Mapping(store_in),
         }
     }
 
-    fn store_in_and_group(&self) -> Option<(&ArrayTag, &PartyGroup<SP::Verifier>)> {
+    fn store_in_and_group(&self) -> Option<(&MappingTag, &PartyGroup<SP::Verifier>)> {
         match self {
-            Self::ComputeArray { store_in, group, .. }
+            Self::ComputeMapping { store_in, group, .. }
             | Self::DirectMessage { store_in, group, .. }
             | Self::Receive { store_in, group, .. } => Some((store_in, group)),
             Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
@@ -494,7 +495,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
 
     fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
         match self {
-            Self::ComputeArray { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
+            Self::ComputeMapping { group, .. } | Self::DirectMessage { group, .. } | Self::Receive { group, .. } => {
                 Some(group)
             }
             Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
@@ -512,12 +513,12 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 function: function.clone(),
                 args: arg_map_to_owned(args),
             },
-            Self::ComputeArray {
+            Self::ComputeMapping {
                 store_in,
                 function,
                 group,
                 args,
-            } => Self::ComputeArray {
+            } => Self::ComputeMapping {
                 store_in: store_in.clone(),
                 function: function.clone(),
                 group: group.clone(),
@@ -557,7 +558,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
 
     fn args(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
         match self {
-            Self::ComputeScalar { args, .. } | Self::ComputeArray { args, .. } => Box::new(args.values()),
+            Self::ComputeScalar { args, .. } | Self::ComputeMapping { args, .. } => Box::new(args.values()),
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
             Self::DirectMessage { data, .. } => Box::new(core::iter::once(data)),
             Self::Receive { .. } => Box::new(core::iter::empty()),
@@ -568,7 +569,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
     fn replace(&mut self, replacements: &BTreeMap<usize, Node<SP>>) {
         match self {
             Self::ComputeScalar { args, .. } => maybe_replace_map(args, replacements),
-            Self::ComputeArray { args, .. } => maybe_replace_map(args, replacements),
+            Self::ComputeMapping { args, .. } => maybe_replace_map(args, replacements),
             Self::Collect { values, .. } => maybe_replace(values, replacements),
             Self::DirectMessage { data, .. } => maybe_replace(data, replacements),
             Self::Receive { .. } | Self::ScalarArgument { .. } => {}
@@ -583,7 +584,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             | Self::Collect { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
-            Self::ComputeArray { store_in, .. } | Self::DirectMessage { store_in, .. } => {
+            Self::ComputeMapping { store_in, .. } | Self::DirectMessage { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
             Self::Receive {

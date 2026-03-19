@@ -4,14 +4,15 @@ use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    message::{MessageId, SignedValue, VerificationError, VerifiedValue},
     session::{PreprocessingError, Session},
     session_id::SessionId,
-    task::Task,
-    task::TaskResultEnum,
+    task::{Task, TaskResultEnum},
 };
-use crate::error::LocalError;
-use crate::protocol::{ArrayTag, ExecutableProtocol, SerializedValue, SessionParameters};
+use crate::{
+    entities::{MappingTag, MessageId, SerializedValue, SignedValue, VerificationError, VerifiedValue},
+    errors::LocalError,
+    traits::{ExecutableProtocol, SessionParameters},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
@@ -113,13 +114,13 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
-    failed_at: ArrayTag,
+    failed_at: MappingTag,
     signed_values: Vec<SignedValue<SP>>,
     phantom: PhantomData<P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P> {
-    pub fn new(reported_by: &SP::Verifier, failed_at: &ArrayTag, signed_values: Vec<SignedValue<SP>>) -> Self {
+    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, signed_values: Vec<SignedValue<SP>>) -> Self {
         Self {
             reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
@@ -155,7 +156,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
             match task {
                 Task::Compute(task) => {
                     let result = task.compute()?;
-                    if result.store_in().array() == Some(&self.failed_at)
+                    if result.store_in().mapping() == Some(&self.failed_at)
                         && matches!(result.as_enum(), TaskResultEnum::SenderError { .. })
                     {
                         return Ok(());
@@ -186,13 +187,13 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    failed_at: ArrayTag,
+    failed_at: MappingTag,
     associated_data: SerializedValue,
     phantom: PhantomData<(SP, P)>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
-    pub fn new(failed_at: &ArrayTag, associated_data: SerializedValue) -> Self {
+    pub fn new(failed_at: &MappingTag, associated_data: SerializedValue) -> Self {
         Self {
             failed_at: failed_at.clone(),
             associated_data,
