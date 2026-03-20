@@ -6,9 +6,9 @@ mod tag;
 mod value;
 
 pub(crate) use function::{
-    InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleMappingFunctionWithSigner,
-    InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction, ScalarFunction,
-    SenderAttributableMappingFunction, SenderErrorEnum, ThirdPartyAttributableMappingFunction,
+    InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
+    InfallibleScalarFunctionWithRng, MappingFunction, ScalarFunction, SenderAttributableMappingFunction,
+    SenderErrorEnum, SerializeAndSignFunction, ThirdPartyAttributableMappingFunction,
     ThirdPartyAttributableVerificationFunction, ThirdPartyErrorEnum,
 };
 pub(crate) use tag::{AnyTag, AnyTagRef, FullName, MappingTag, ScalarTag};

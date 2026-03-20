@@ -14,9 +14,9 @@ use super::{
 use crate::{
     entities::{
         Args, AssociatedData, Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
-        InfallibleMappingFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng,
-        MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
-        SenderError, SerdeAdapter, SignedValue, ThirdPartyAttributableMappingFunction,
+        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction, MappingTag, PartyGroup,
+        ScalarFunction, ScalarTag, SenderAttributableMappingFunction, SenderError, SerdeAdapter,
+        SerializeAndSignFunction, SignedValue, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value, VerifiedValue,
     },
     errors::LocalError,
@@ -223,23 +223,23 @@ impl signature::rand_core::RngCore for Rng<'_> {
 
 impl signature::rand_core::CryptoRng for Rng<'_> {}
 
-fn serialize<SP: SessionParameters>(
+fn default_serialize_and_sign<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
     signer: &SP::Signer,
-    id: &SP::Verifier,
-    args: Args<SP>,
-    arg_name: &str,
+    destination: &SP::Verifier,
+    session_id: &SessionId<SP>,
+    value: &Value,
+    message_name: &FullName,
     serde_adapter: &SerdeAdapter<SP::WireFormat>,
 ) -> Result<Value, LocalError> {
-    let value = args.get_value(arg_name)?;
     let serialized_value = serde_adapter.serialize(value)?;
     let mut typed_rng = Rng(rng);
     let signed_value = SignedValue::<SP>::new(
         &mut typed_rng,
         signer,
-        args.session_id(),
-        args.store_in_name(),
-        id,
+        session_id,
+        message_name,
+        destination,
         serialized_value,
     )?;
     Ok(Value::new(signed_value))
@@ -256,19 +256,15 @@ pub fn broadcast<SP: SessionParameters>(
         ));
     }
 
-    let arg_name = "_value".to_string();
-    let serde_adapter = message.serde_adapter().clone();
-    let args = [(arg_name.clone(), scalar.get_strong_ref())].into();
     let tag = MappingTag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(NodeKind::ComputeMapping {
+    let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
         store_in: tag.clone(),
-        function: MappingFunction::InfallibleWithSigner(InfallibleMappingFunctionWithSigner::new_pre_erased(
-            "serialize",
-            move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
-        )),
+        function: SerializeAndSignFunction::new(default_serialize_and_sign),
+        data: scalar.get_strong_ref(),
         group: group.clone(),
-        args,
+        message_name: FullName::new(message.name()),
+        serde_adapter: message.serde_adapter().clone(),
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {
@@ -286,20 +282,15 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, mapping: &Node
         .ok_or_else(|| LocalError::new("`mapping` argument of `send()` must be an mapping node"))?
         .clone();
 
-    let arg_name = "_value".to_string();
-    let serde_adapter = message.serde_adapter().clone();
-    let args = [(arg_name.clone(), mapping.get_strong_ref())].into();
     let tag = MappingTag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(NodeKind::ComputeMapping {
+    let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
         store_in: tag.clone(),
-
-        function: MappingFunction::InfallibleWithSigner(InfallibleMappingFunctionWithSigner::new_pre_erased(
-            "serialize",
-            move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
-        )),
+        function: SerializeAndSignFunction::new(default_serialize_and_sign),
+        data: mapping.get_strong_ref(),
         group: group.clone(),
-        args,
+        message_name: FullName::new(message.name()),
+        serde_adapter: message.serde_adapter().clone(),
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {

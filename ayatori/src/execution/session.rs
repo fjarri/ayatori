@@ -24,7 +24,7 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        Args, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag, SignedValue, Value,
+        AnyTag, Args, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag, SignedValue, Value,
         VerifiedValue,
     },
     errors::LocalError,
@@ -287,13 +287,6 @@ where
                         MappingFunction::InfallibleWithRng(function) => {
                             Task::compute_mapping_elem_infallible_with_rng(store_in, index, function, args)
                         }
-                        MappingFunction::InfallibleWithSigner(function) => {
-                            let signer = self
-                                .signer
-                                .as_ref()
-                                .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
-                            Task::compute_mapping_elem_infallible_with_signer(store_in, signer, index, function, args)
-                        }
                         MappingFunction::SenderAttributable(function) => {
                             Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
                         }
@@ -301,6 +294,33 @@ where
                             Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
                         }
                     }));
+                }
+                Action::ComputeSerializeAndSignElement {
+                    store_in,
+                    function,
+                    index,
+                    data,
+                    message_name,
+                    serde_adapter,
+                } => {
+                    let signer = self
+                        .signer
+                        .as_ref()
+                        .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
+                    let value = match data {
+                        AnyTag::Scalar(tag) => self.storage.get_scalar(&tag)?,
+                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index)?,
+                    };
+                    return Ok(Some(Task::compute_serialize_and_sign_elem(
+                        store_in,
+                        signer,
+                        index,
+                        &self.data.id,
+                        function,
+                        value,
+                        message_name,
+                        serde_adapter,
+                    )));
                 }
                 Action::Collect {
                     store_in,

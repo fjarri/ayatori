@@ -6,12 +6,14 @@ use signature::rand_core::CryptoRngCore;
 use super::{message::Message, session::SessionData};
 use crate::{
     entities::{
-        AnyTagRef, Args, AssociatedData, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
-        InfallibleMappingFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingTag,
-        MessageId, ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SignedValue,
-        ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value, VerificationError,
+        AnyTagRef, Args, AssociatedData, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
+        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingTag, MessageId, ScalarTag,
+        SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SerdeAdapter, SerializeAndSignFunction,
+        SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
+        VerificationError,
     },
     errors::LocalError,
+    execution::SessionId,
     flat_representation::OnError,
     traits::SessionParameters,
 };
@@ -97,44 +99,62 @@ enum ComputeWithRngFunction<SP: SessionParameters> {
     ScalarInfallible {
         store_in: ScalarTag,
         function: InfallibleScalarFunctionWithRng<SP>,
+        args: Args<SP>,
     },
     MappingInfallible {
         store_in: MappingTag,
         function: InfallibleMappingFunctionWithRng<SP>,
         id: SP::Verifier,
+        args: Args<SP>,
     },
-    MappingInfallibleWithSigner {
+    SerializeAndSign {
         store_in: MappingTag,
         signer: Arc<SP::Signer>,
-        function: InfallibleMappingFunctionWithSigner<SP>,
+        function: SerializeAndSignFunction<SP>,
         id: SP::Verifier,
+        session_id: SessionId<SP>,
+        data: Value,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
 }
 
 #[derive(Debug)]
 pub struct ComputeWithRngTask<SP: SessionParameters> {
     function: ComputeWithRngFunction<SP>,
-    args: Args<SP>,
 }
 
 impl<SP: SessionParameters> ComputeWithRngTask<SP> {
     pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP>, LocalError> {
         match self.function {
-            ComputeWithRngFunction::ScalarInfallible { store_in, function } => {
-                let result = function.call(rng, self.args)?;
+            ComputeWithRngFunction::ScalarInfallible {
+                store_in,
+                function,
+                args,
+            } => {
+                let result = function.call(rng, args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
-            ComputeWithRngFunction::MappingInfallible { store_in, function, id } => {
-                let result = function.call(rng, &id, self.args)?;
+            ComputeWithRngFunction::MappingInfallible {
+                store_in,
+                function,
+                id,
+                args,
+            } => {
+                let result = function.call(rng, &id, args)?;
                 Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
-            ComputeWithRngFunction::MappingInfallibleWithSigner {
+            ComputeWithRngFunction::SerializeAndSign {
                 store_in,
                 signer,
                 function,
                 id,
+                session_id,
+                data,
+                message_name,
+                serde_adapter,
             } => {
-                let result = function.call(rng, &signer, &id, self.args)?;
+                let result = function.call(rng, &signer, &id, &session_id, &data, &message_name, &serde_adapter)?;
                 Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
         }
@@ -223,8 +243,11 @@ impl<SP: SessionParameters> Task<SP> {
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
-            function: ComputeWithRngFunction::ScalarInfallible { store_in, function },
-            args,
+            function: ComputeWithRngFunction::ScalarInfallible {
+                store_in,
+                function,
+                args,
+            },
         })
     }
 
@@ -248,26 +271,36 @@ impl<SP: SessionParameters> Task<SP> {
         args: Args<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
-            function: ComputeWithRngFunction::MappingInfallible { store_in, id, function },
-            args,
+            function: ComputeWithRngFunction::MappingInfallible {
+                store_in,
+                id,
+                function,
+                args,
+            },
         })
     }
 
-    pub(crate) fn compute_mapping_elem_infallible_with_signer(
+    pub(crate) fn compute_serialize_and_sign_elem(
         store_in: MappingTag,
         signer: &Arc<SP::Signer>,
         id: SP::Verifier,
-        function: InfallibleMappingFunctionWithSigner<SP>,
-        args: Args<SP>,
+        session_id: &SessionId<SP>,
+        function: SerializeAndSignFunction<SP>,
+        data: Value,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
-            function: ComputeWithRngFunction::MappingInfallibleWithSigner {
+            function: ComputeWithRngFunction::SerializeAndSign {
                 store_in,
                 signer: signer.clone(),
                 id,
+                session_id: session_id.clone(),
                 function,
+                data,
+                message_name,
+                serde_adapter,
             },
-            args,
         })
     }
 

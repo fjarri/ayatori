@@ -9,7 +9,10 @@ use itertools::Itertools;
 
 use super::conditions::{ElementCondition, QuorumCondition, ScalarCondition};
 use crate::{
-    entities::{AnyTag, AnyTagRef, FullName, MappingFunction, MappingTag, ScalarFunction, ScalarTag},
+    entities::{
+        AnyTag, AnyTagRef, FullName, MappingFunction, MappingTag, ScalarFunction, ScalarTag, SerdeAdapter,
+        SerializeAndSignFunction,
+    },
     errors::LocalError,
     graph_representation::{Node, NodeKind, Reproducibility},
     traits::SessionParameters,
@@ -33,6 +36,18 @@ struct ComputeMappingRule<SP: SessionParameters> {
     function: MappingFunction<SP>,
     args: BTreeMap<String, AnyTag>,
     on_error: OnError,
+}
+
+#[derive_where::derive_where(Debug)]
+struct ComputeSerializeAndSignRule<SP: SessionParameters> {
+    dependencies: ScalarCondition,
+    scalar_condition: ScalarCondition,
+    element_conditions: BTreeMap<SP::Verifier, ElementCondition>,
+    store_in: MappingTag,
+    function: SerializeAndSignFunction<SP>,
+    data: AnyTag,
+    message_name: FullName,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
 }
 
 #[derive_where::derive_where(Debug)]
@@ -70,6 +85,14 @@ pub(crate) enum Action<SP: SessionParameters> {
         function: MappingFunction<SP>,
         args: BTreeMap<String, AnyTag>,
         on_error: OnError,
+    },
+    ComputeSerializeAndSignElement {
+        store_in: MappingTag,
+        index: SP::Verifier,
+        function: SerializeAndSignFunction<SP>,
+        data: AnyTag,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
     Send {
         store_in: MappingTag,
@@ -109,6 +132,7 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: ScalarTag,
     compute_scalar_rules: Vec<ComputeScalarRule<SP>>,
     compute_mapping_rules: Vec<ComputeMappingRule<SP>>,
+    compute_serialize_and_sign_rules: Vec<ComputeSerializeAndSignRule<SP>>,
     send_rules: Vec<SendRule<SP>>,
     collect_rules: Vec<CollectRule<SP>>,
     expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
@@ -126,6 +150,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
         let mut compute_scalar_rules = Vec::new();
         let mut compute_mapping_rules = Vec::new();
+        let mut compute_serialize_and_sign_rules = Vec::new();
         let mut send_rules = Vec::new();
         let mut collect_rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
@@ -214,6 +239,42 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         on_error: on_error.clone(),
                     })
                 }
+                NodeKind::SerializeAndSign {
+                    store_in,
+                    function,
+                    data,
+                    group,
+                    message_name,
+                    serde_adapter,
+                } => {
+                    let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
+
+                    let tag = data.store_in();
+
+                    let mut scalar_condition = ScalarCondition::empty();
+                    let mut element_condition = ElementCondition::empty();
+
+                    match tag {
+                        AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                        AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
+                    }
+
+                    let element_conditions = possible_ids
+                        .into_iter()
+                        .map(|id| (id, element_condition.clone()))
+                        .collect();
+
+                    compute_serialize_and_sign_rules.push(ComputeSerializeAndSignRule {
+                        dependencies,
+                        scalar_condition,
+                        element_conditions,
+                        store_in: store_in.clone(),
+                        function: function.clone(),
+                        data: tag.to_owned(),
+                        message_name: message_name.clone(),
+                        serde_adapter: serde_adapter.clone(),
+                    })
+                }
                 NodeKind::DirectMessage { store_in, data, group } => {
                     let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
 
@@ -264,6 +325,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             output_tag,
             compute_scalar_rules,
             compute_mapping_rules,
+            compute_serialize_and_sign_rules,
             send_rules,
             collect_rules,
             expected_messages,
@@ -299,6 +361,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
             rule.scalar_condition.update_with_scalar_ready(tag);
         }
 
+        for rule in &mut self.compute_serialize_and_sign_rules {
+            rule.dependencies.update_with_scalar_ready(tag);
+            rule.scalar_condition.update_with_scalar_ready(tag);
+        }
+
         for rule in &mut self.send_rules {
             rule.dependencies.update_with_scalar_ready(tag);
         }
@@ -310,6 +377,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     pub fn update_with_element_ready(&mut self, tag: &MappingTag, id: &SP::Verifier) {
         for rule in &mut self.compute_mapping_rules {
+            if let Some(condition) = rule.element_conditions.get_mut(id) {
+                condition.update_with_scalar_ready(tag)
+            }
+        }
+
+        for rule in &mut self.compute_serialize_and_sign_rules {
             if let Some(condition) = rule.element_conditions.get_mut(id) {
                 condition.update_with_scalar_ready(tag)
             }
@@ -402,7 +475,45 @@ impl<SP: SessionParameters> Ruleset<SP> {
         // If not, it needs to be optimized to not look through the whole list,
         // but only at the rule which produced the action.
         if action.is_some() {
-            self.send_rules.retain(|rule| !rule.element_conditions.is_empty());
+            self.compute_mapping_rules
+                .retain(|rule| !rule.element_conditions.is_empty());
+        }
+
+        action
+    }
+
+    fn pop_serialize_and_sign_action(&mut self) -> Option<Action<SP>> {
+        let mut action = None;
+        for rule in &mut self.compute_serialize_and_sign_rules {
+            if !rule.dependencies.is_satisfied() || !rule.scalar_condition.is_satisfied() {
+                continue;
+            }
+
+            action = rule
+                .element_conditions
+                .extract_if(.., |_id, condition| condition.is_satisfied())
+                .next()
+                .map(|(id, _condition)| Action::ComputeSerializeAndSignElement {
+                    store_in: rule.store_in.clone(),
+                    index: id,
+                    function: rule.function.clone(),
+                    data: rule.data.clone(),
+                    message_name: rule.message_name.clone(),
+                    serde_adapter: rule.serde_adapter.clone(),
+                });
+
+            if action.is_some() {
+                break;
+            }
+        }
+
+        // TODO (#68): this may need to be removed after #68 is fixed, because compute-mapping rules
+        // won't track the IDs for which they were completed.
+        // If not, it needs to be optimized to not look through the whole list,
+        // but only at the rule which produced the action.
+        if action.is_some() {
+            self.compute_serialize_and_sign_rules
+                .retain(|rule| !rule.element_conditions.is_empty());
         }
 
         action
@@ -437,6 +548,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             State::InProgress => self
                 .pop_compute_scalar_action()
                 .or_else(|| self.pop_compute_element_action())
+                .or_else(|| self.pop_serialize_and_sign_action())
                 .or_else(|| self.pop_collect_action())
                 .or_else(|| self.pop_send_action()),
             // If we are ready to terminate, pop all send actions first so that we don't stall other nodes,

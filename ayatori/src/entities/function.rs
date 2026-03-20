@@ -13,7 +13,8 @@ use signature::rand_core::CryptoRngCore;
 
 use super::{
     args::Args,
-    value::{Erasable, SerializedValue, Value},
+    tag::FullName,
+    value::{Erasable, SerdeAdapter, SerializedValue, Value},
 };
 use crate::{
     errors::LocalError,
@@ -174,11 +175,6 @@ define_function_type!(
     (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>) -> LocalError
 );
 
-define_function_type_erased!(
-    InfallibleMappingFunctionWithSigner<SP>,
-    (rng: &mut dyn CryptoRngCore, signer: &SP::Signer, id: &SP::Verifier, args: Args<SP>) -> LocalError
-);
-
 define_function_type!(
     SenderAttributableMappingFunction<SP>,
     (id: &SP::Verifier, args: Args<SP>) -> SenderError
@@ -227,6 +223,63 @@ impl<SP: SessionParameters> Debug for ThirdPartyAttributableVerificationFunction
     }
 }
 
+#[derive_where::derive_where(Clone)]
+pub(crate) struct SerializeAndSignFunction<SP: SessionParameters> {
+    #[allow(clippy::type_complexity)]
+    function: Arc<
+        dyn Fn(
+            &mut dyn CryptoRngCore,
+            &SP::Signer,
+            &SP::Verifier,
+            &SessionId<SP>,
+            &Value,
+            &FullName,
+            &SerdeAdapter<SP::WireFormat>,
+        ) -> Result<Value, LocalError>,
+    >,
+    name: String,
+}
+
+impl<SP: SessionParameters> SerializeAndSignFunction<SP> {
+    pub fn new(
+        function: impl 'static
+        + Fn(
+            &mut dyn CryptoRngCore,
+            &SP::Signer,
+            &SP::Verifier,
+            &SessionId<SP>,
+            &Value,
+            &FullName,
+            &SerdeAdapter<SP::WireFormat>,
+        ) -> Result<Value, LocalError>,
+    ) -> Self {
+        let name = core::any::type_name_of_val(&function).to_string();
+        Self {
+            name,
+            function: Arc::new(function),
+        }
+    }
+
+    pub fn call(
+        &self,
+        rng: &mut dyn CryptoRngCore,
+        signer: &SP::Signer,
+        destination: &SP::Verifier,
+        session_id: &SessionId<SP>,
+        value: &Value,
+        message_name: &FullName,
+        serde_adapter: &SerdeAdapter<SP::WireFormat>,
+    ) -> Result<Value, LocalError> {
+        (self.function)(rng, signer, destination, session_id, value, message_name, serde_adapter)
+    }
+}
+
+impl<SP: SessionParameters> Debug for SerializeAndSignFunction<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "SerializeAndSignFunction {{ function: {} }}", self.name)
+    }
+}
+
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ScalarFunction<SP: SessionParameters> {
     Infallible(InfallibleScalarFunction<SP>),
@@ -243,7 +296,6 @@ impl<SP: SessionParameters> ScalarFunction<SP> {
 pub(crate) enum MappingFunction<SP: SessionParameters> {
     Infallible(InfallibleMappingFunction<SP>),
     InfallibleWithRng(InfallibleMappingFunctionWithRng<SP>),
-    InfallibleWithSigner(InfallibleMappingFunctionWithSigner<SP>),
     SenderAttributable(SenderAttributableMappingFunction<SP>),
     ThirdPartyAttributable {
         function: ThirdPartyAttributableMappingFunction<SP>,
@@ -253,7 +305,7 @@ pub(crate) enum MappingFunction<SP: SessionParameters> {
 
 impl<SP: SessionParameters> MappingFunction<SP> {
     pub fn is_reproducible(&self) -> bool {
-        !matches!(self, Self::InfallibleWithRng(_) | Self::InfallibleWithSigner(_))
+        !matches!(self, Self::InfallibleWithRng(_))
     }
 }
 
@@ -270,7 +322,6 @@ impl<SP: SessionParameters> Display for MappingFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::InfallibleWithRng(function) => write!(f, "{function}[RNG]"),
-            Self::InfallibleWithSigner(function) => write!(f, "{function}[Signer]"),
             Self::Infallible(function) => write!(f, "{function}"),
             Self::SenderAttributable(function) => write!(f, "{function}"),
             Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),
