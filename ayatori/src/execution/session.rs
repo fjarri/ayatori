@@ -177,11 +177,13 @@ where
         signer: SP::Signer,
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
-        replacement: Replacement<SP>,
+        replacements: &[&Replacement<SP>],
     ) -> Result<Self, LocalError> {
         let verifier = signer.verifying_key();
-        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
-        let output_node = replacement.apply(output_node)?;
+        let mut output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        for replacement in replacements {
+            output_node = (*replacement).clone().apply(output_node)?;
+        }
         let private_inputs = P::make_private_inputs(private_data);
         Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
     }

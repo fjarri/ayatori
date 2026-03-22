@@ -44,7 +44,8 @@ impl SenderError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[derive_where::derive_where(Clone)]
 pub struct AssociatedData<SP: SessionParameters> {
     serialized_value: SerializedValue,
     phantom: PhantomData<SP>,
@@ -66,9 +67,11 @@ impl<SP: SessionParameters> AssociatedData<SP> {
 }
 
 #[derive(Debug)]
+#[derive_where::derive_where(Clone)]
 pub struct ThirdPartyError<SP: SessionParameters>(pub(crate) ThirdPartyErrorEnum<SP>);
 
 #[derive(Debug)]
+#[derive_where::derive_where(Clone)]
 pub(crate) enum ThirdPartyErrorEnum<SP: SessionParameters> {
     Local(LocalError),
     Error {
@@ -260,6 +263,8 @@ impl<SP: SessionParameters> SerializeAndSignFunction<SP> {
         }
     }
 
+    // TODO: can we wrap some arguments into a struct?
+    #[allow(clippy::too_many_arguments)]
     pub fn call(
         &self,
         rng: &mut dyn CryptoRngCore,

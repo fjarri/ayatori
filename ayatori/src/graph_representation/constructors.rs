@@ -202,27 +202,6 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     }))
 }
 
-/// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
-/// since some RustCrypto libraries don't accept a `?Sized` RNG.
-struct Rng<'a>(&'a mut dyn CryptoRngCore);
-
-impl signature::rand_core::RngCore for Rng<'_> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-    fn fill_bytes(&mut self, bytes: &mut [u8]) {
-        self.0.fill_bytes(bytes);
-    }
-    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), signature::rand_core::Error> {
-        self.0.try_fill_bytes(bytes)
-    }
-}
-
-impl signature::rand_core::CryptoRng for Rng<'_> {}
-
 fn default_serialize_and_sign<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
     signer: &SP::Signer,
@@ -233,15 +212,7 @@ fn default_serialize_and_sign<SP: SessionParameters>(
     serde_adapter: &SerdeAdapter<SP::WireFormat>,
 ) -> Result<Value, LocalError> {
     let serialized_value = serde_adapter.serialize(value)?;
-    let mut typed_rng = Rng(rng);
-    let signed_value = SignedValue::<SP>::new(
-        &mut typed_rng,
-        signer,
-        session_id,
-        message_name,
-        destination,
-        serialized_value,
-    )?;
+    let signed_value = SignedValue::<SP>::new(rng, signer, session_id, message_name, destination, serialized_value)?;
     Ok(Value::new(signed_value))
 }
 

@@ -75,6 +75,27 @@ fn hash_value_and_metadata<SP: SessionParameters>(
     hash_value_hash_and_metadata::<SP>(&value_hash, metadata)
 }
 
+/// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
+/// since some RustCrypto libraries don't accept a `?Sized` RNG.
+struct Rng<'a>(&'a mut dyn CryptoRngCore);
+
+impl signature::rand_core::RngCore for Rng<'_> {
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+    fn fill_bytes(&mut self, bytes: &mut [u8]) {
+        self.0.fill_bytes(bytes);
+    }
+    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), signature::rand_core::Error> {
+        self.0.try_fill_bytes(bytes)
+    }
+}
+
+impl signature::rand_core::CryptoRng for Rng<'_> {}
+
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedValue<SP: SessionParameters> {
     signature: SP::Signature,
@@ -85,7 +106,7 @@ pub struct SignedValue<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SignedValue<SP> {
     pub(crate) fn new(
-        rng: &mut impl CryptoRngCore,
+        rng: &mut dyn CryptoRngCore,
         signer: &SP::Signer,
         session_id: &SessionId<SP>,
         name: &FullName,
@@ -98,8 +119,9 @@ impl<SP: SessionParameters> SignedValue<SP> {
             session_id: session_id.clone(),
         };
         let digest = hash_value_and_metadata::<SP>(&value, &metadata)?;
+        let mut typed_rng = Rng(rng);
         let signature = signer
-            .try_sign_digest_with_rng(rng, digest)
+            .try_sign_digest_with_rng(&mut typed_rng, digest)
             .map_err(|err| LocalError::new(format!("Signing failed: {err}")))?;
         Ok(Self {
             signature,

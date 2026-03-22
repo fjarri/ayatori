@@ -11,11 +11,12 @@ pub(crate) use function::{
     SenderErrorEnum, SerializeAndSignFunction, ThirdPartyAttributableMappingFunction,
     ThirdPartyAttributableVerificationFunction, ThirdPartyErrorEnum,
 };
-pub(crate) use tag::{AnyTag, AnyTagRef, FullName, MappingTag, ScalarTag};
-pub(crate) use value::{SerdeAdapter, Value};
+pub(crate) use tag::{AnyTag, AnyTagRef, MappingTag, ScalarTag};
+pub(crate) use value::Value;
 
 pub use args::Args;
 pub use function::{AssociatedData, SenderError, ThirdPartyError};
 pub use message::{MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
 pub use party::PartyGroup;
-pub use value::Erasable;
+pub use tag::FullName;
+pub use value::{Erasable, SerdeAdapter, SerializedValue};

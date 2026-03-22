@@ -280,6 +280,7 @@ impl<SP: SessionParameters> Task<SP> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn compute_serialize_and_sign_elem(
         store_in: MappingTag,
         signer: &Arc<SP::Signer>,
