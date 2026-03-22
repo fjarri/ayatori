@@ -133,11 +133,11 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub(crate) fn apply(self, node: Node<SP>) -> Result<Node<SP>, LocalError> {
+    pub(crate) fn apply(&self, node: Node<SP>) -> Result<Node<SP>, LocalError> {
         let subnode = node
             .find_subnode(self.tag.as_ref())
             .ok_or_else(|| LocalError::new("Node not found"))?;
-        let new_subnode = match (subnode.kind(), self.kind) {
+        let new_subnode = match (subnode.kind(), &self.kind) {
             (
                 NodeKind::ComputeScalar {
                     store_in,
@@ -150,6 +150,7 @@ impl<SP: SessionParameters> Replacement<SP> {
             ) => {
                 let new_function = if let ScalarFunction::Infallible(orig_function) = function {
                     let orig_function = orig_function.clone();
+                    let replacement_function = replacement_function.clone();
                     ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(
                         format!("[modified] {orig_function}"),
                         move |args| {
@@ -188,6 +189,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 } = function
                 {
                     let orig_function = orig_function.clone();
+                    let replacement_function = replacement_function.clone();
                     MappingFunction::ThirdPartyAttributable {
                         function: ThirdPartyAttributableMappingFunction::new_pre_erased(
                             format!("[modified] {orig_function}"),
@@ -227,6 +229,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 },
             ) => {
                 let function = function.clone();
+                let replacement_function = replacement_function.clone();
                 let new_function = SerializeAndSignFunction::new(
                     move |rng, signer, destination, session_id, value, message_name, serde_adapter| {
                         let orig_value =
