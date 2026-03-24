@@ -288,16 +288,20 @@ fn happy_path() {
 
 fn serialize_replacement(
     rng: &mut dyn CryptoRngCore,
-    signer: &<SP as SessionParameters>::Signer,
-    destination: &<SP as SessionParameters>::Verifier,
-    session_id: &SessionId<SP>,
     orig_value: &SignedValue<SP>,
-    message_name: &FullName,
-    serde_adapter: &SerdeAdapter<<SP as SessionParameters>::WireFormat>,
+    destination: &<SP as SessionParameters>::Verifier,
+    args: &SerializeArgs<SP>,
 ) -> Result<SignedValue<SP>, LocalError> {
     if destination == &TestSigner::new(2).verifying_key() {
-        let serialized_value = serde_adapter.serialize_typed(Message1(*destination))?;
-        SignedValue::<SP>::new(rng, signer, session_id, message_name, destination, serialized_value)
+        let serialized_value = args.serde_adapter().serialize_typed(Message1(*destination))?;
+        SignedValue::<SP>::new(
+            rng,
+            args.signer(),
+            args.session_id(),
+            args.message_name(),
+            destination,
+            serialized_value,
+        )
     } else {
         Ok(orig_value.clone())
     }

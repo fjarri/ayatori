@@ -12,9 +12,8 @@ use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
-    args::Args,
-    tag::FullName,
-    value::{Erasable, SerdeAdapter, SerializedValue, Value},
+    args::{Args, SerializeArgs},
+    value::{Erasable, SerializedValue, Value},
 };
 use crate::{
     errors::LocalError,
@@ -229,32 +228,13 @@ impl<SP: SessionParameters> Debug for ThirdPartyAttributableVerificationFunction
 #[derive_where::derive_where(Clone)]
 pub(crate) struct SerializeAndSignFunction<SP: SessionParameters> {
     #[allow(clippy::type_complexity)]
-    function: Arc<
-        dyn Fn(
-            &mut dyn CryptoRngCore,
-            &SP::Signer,
-            &SP::Verifier,
-            &SessionId<SP>,
-            &Value,
-            &FullName,
-            &SerdeAdapter<SP::WireFormat>,
-        ) -> Result<Value, LocalError>,
-    >,
+    function: Arc<dyn Fn(&mut dyn CryptoRngCore, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, LocalError>>,
     name: String,
 }
 
 impl<SP: SessionParameters> SerializeAndSignFunction<SP> {
     pub fn new(
-        function: impl 'static
-        + Fn(
-            &mut dyn CryptoRngCore,
-            &SP::Signer,
-            &SP::Verifier,
-            &SessionId<SP>,
-            &Value,
-            &FullName,
-            &SerdeAdapter<SP::WireFormat>,
-        ) -> Result<Value, LocalError>,
+        function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, LocalError>,
     ) -> Self {
         let name = core::any::type_name_of_val(&function).to_string();
         Self {
@@ -263,19 +243,13 @@ impl<SP: SessionParameters> SerializeAndSignFunction<SP> {
         }
     }
 
-    // TODO: can we wrap some arguments into a struct?
-    #[allow(clippy::too_many_arguments)]
     pub fn call(
         &self,
         rng: &mut dyn CryptoRngCore,
-        signer: &SP::Signer,
         destination: &SP::Verifier,
-        session_id: &SessionId<SP>,
-        value: &Value,
-        message_name: &FullName,
-        serde_adapter: &SerdeAdapter<SP::WireFormat>,
+        args: &SerializeArgs<SP>,
     ) -> Result<Value, LocalError> {
-        (self.function)(rng, signer, destination, session_id, value, message_name, serde_adapter)
+        (self.function)(rng, destination, args)
     }
 }
 

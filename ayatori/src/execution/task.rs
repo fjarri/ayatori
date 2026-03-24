@@ -6,14 +6,13 @@ use signature::rand_core::CryptoRngCore;
 use super::{message::Message, session::SessionData};
 use crate::{
     entities::{
-        AnyTagRef, Args, AssociatedData, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
+        AnyTagRef, Args, AssociatedData, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
         InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingTag, MessageId, ScalarTag,
-        SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SerdeAdapter, SerializeAndSignFunction,
+        SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SerializeAndSignFunction, SerializeArgs,
         SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
         VerificationError,
     },
     errors::LocalError,
-    execution::SessionId,
     flat_representation::OnError,
     traits::SessionParameters,
 };
@@ -109,13 +108,9 @@ enum ComputeWithRngFunction<SP: SessionParameters> {
     },
     SerializeAndSign {
         store_in: MappingTag,
-        signer: Arc<SP::Signer>,
         function: SerializeAndSignFunction<SP>,
         id: SP::Verifier,
-        session_id: SessionId<SP>,
-        data: Value,
-        message_name: FullName,
-        serde_adapter: SerdeAdapter<SP::WireFormat>,
+        args: SerializeArgs<SP>,
     },
 }
 
@@ -146,15 +141,11 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
             }
             ComputeWithRngFunction::SerializeAndSign {
                 store_in,
-                signer,
                 function,
                 id,
-                session_id,
-                data,
-                message_name,
-                serde_adapter,
+                args,
             } => {
-                let result = function.call(rng, &signer, &id, &session_id, &data, &message_name, &serde_adapter)?;
+                let result = function.call(rng, &id, &args)?;
                 Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
         }
@@ -283,24 +274,16 @@ impl<SP: SessionParameters> Task<SP> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn compute_serialize_and_sign_elem(
         store_in: MappingTag,
-        signer: &Arc<SP::Signer>,
         id: SP::Verifier,
-        session_id: &SessionId<SP>,
         function: SerializeAndSignFunction<SP>,
-        data: Value,
-        message_name: FullName,
-        serde_adapter: SerdeAdapter<SP::WireFormat>,
+        args: SerializeArgs<SP>,
     ) -> Self {
         Self::ComputeWithRng(ComputeWithRngTask {
             function: ComputeWithRngFunction::SerializeAndSign {
                 store_in,
-                signer: signer.clone(),
                 id,
-                session_id: session_id.clone(),
                 function,
-                data,
-                message_name,
-                serde_adapter,
+                args,
             },
         })
     }

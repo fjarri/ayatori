@@ -4,13 +4,60 @@ use itertools::Itertools;
 
 use super::{
     tag::FullName,
-    value::{Erasable, Value},
+    value::{Erasable, SerdeAdapter, Value},
 };
 use crate::{
     errors::LocalError,
     execution::{SessionData, SessionId},
     traits::SessionParameters,
 };
+
+#[derive(Debug)]
+pub struct SerializeArgs<SP: SessionParameters> {
+    signer: Arc<SP::Signer>,
+    session_id: SessionId<SP>,
+    message_name: FullName,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+    value: Value,
+}
+
+impl<SP: SessionParameters> SerializeArgs<SP> {
+    pub(crate) fn new(
+        signer: &Arc<SP::Signer>,
+        session_data: &SessionData<SP>,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
+        value: Value,
+    ) -> Self {
+        Self {
+            signer: signer.clone(),
+            session_id: session_data.id.clone(),
+            message_name,
+            serde_adapter,
+            value,
+        }
+    }
+
+    pub fn signer(&self) -> &SP::Signer {
+        &self.signer
+    }
+
+    pub fn session_id(&self) -> &SessionId<SP> {
+        &self.session_id
+    }
+
+    pub fn message_name(&self) -> &FullName {
+        &self.message_name
+    }
+
+    pub fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
+        &self.serde_adapter
+    }
+
+    pub(crate) fn value(&self) -> &Value {
+        &self.value
+    }
+}
 
 #[derive(Debug)]
 #[derive_where::derive_where(Clone)]

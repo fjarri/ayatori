@@ -14,7 +14,7 @@ pub(crate) use function::{
 pub(crate) use tag::{AnyTag, AnyTagRef, MappingTag, ScalarTag};
 pub(crate) use value::Value;
 
-pub use args::Args;
+pub use args::{Args, SerializeArgs};
 pub use function::{AssociatedData, SenderError, ThirdPartyError};
 pub use message::{MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
 pub use party::PartyGroup;

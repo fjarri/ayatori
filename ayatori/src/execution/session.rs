@@ -24,8 +24,8 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag, SignedValue, Value,
-        VerifiedValue,
+        AnyTag, Args, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag, SerializeArgs,
+        SignedValue, Value, VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
@@ -313,15 +313,9 @@ where
                         AnyTag::Scalar(tag) => self.storage.get_scalar(&tag)?,
                         AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index)?,
                     };
+                    let args = SerializeArgs::new(signer, &self.data, message_name, serde_adapter, value);
                     return Ok(Some(Task::compute_serialize_and_sign_elem(
-                        store_in,
-                        signer,
-                        index,
-                        &self.data.id,
-                        function,
-                        value,
-                        message_name,
-                        serde_adapter,
+                        store_in, index, function, args,
                     )));
                 }
                 Action::Collect {

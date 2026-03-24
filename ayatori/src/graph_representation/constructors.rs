@@ -16,7 +16,7 @@ use crate::{
         Args, AssociatedData, Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
         InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction, MappingTag, PartyGroup,
         ScalarFunction, ScalarTag, SenderAttributableMappingFunction, SenderError, SerdeAdapter,
-        SerializeAndSignFunction, SignedValue, ThirdPartyAttributableMappingFunction,
+        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value, VerifiedValue,
     },
     errors::LocalError,
@@ -204,15 +204,18 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
 
 fn default_serialize_and_sign<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
-    signer: &SP::Signer,
     destination: &SP::Verifier,
-    session_id: &SessionId<SP>,
-    value: &Value,
-    message_name: &FullName,
-    serde_adapter: &SerdeAdapter<SP::WireFormat>,
+    args: &SerializeArgs<SP>,
 ) -> Result<Value, LocalError> {
-    let serialized_value = serde_adapter.serialize(value)?;
-    let signed_value = SignedValue::<SP>::new(rng, signer, session_id, message_name, destination, serialized_value)?;
+    let serialized_value = args.serde_adapter().serialize(args.value())?;
+    let signed_value = SignedValue::<SP>::new(
+        rng,
+        args.signer(),
+        args.session_id(),
+        args.message_name(),
+        destination,
+        serialized_value,
+    )?;
     Ok(Value::new(signed_value))
 }
 

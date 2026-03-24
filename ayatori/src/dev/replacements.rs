@@ -6,11 +6,10 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     entities::{
         AnyTag, Args, Erasable, FullName, InfallibleScalarFunction, MappingFunction, MappingTag, ScalarFunction,
-        ScalarTag, SerdeAdapter, SerializeAndSignFunction, SignedValue, ThirdPartyAttributableMappingFunction,
+        ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
         ThirdPartyError, Value,
     },
     errors::LocalError,
-    execution::SessionId,
     graph_representation::{Node, NodeKind},
     traits::SessionParameters,
 };
@@ -41,17 +40,8 @@ enum ReplacementEnum<SP: SessionParameters> {
         >,
     },
     Message {
-        function: Arc<
-            dyn Fn(
-                &mut dyn CryptoRngCore,
-                &SP::Signer,
-                &SP::Verifier,
-                &SessionId<SP>,
-                &Value,
-                &FullName,
-                &SerdeAdapter<SP::WireFormat>,
-            ) -> Result<Value, LocalError>,
-        >,
+        function:
+            Arc<dyn Fn(&mut dyn CryptoRngCore, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, LocalError>>,
     },
 }
 
@@ -102,33 +92,21 @@ impl<SP: SessionParameters> Replacement<SP> {
         F: 'static
             + Fn(
                 &mut dyn CryptoRngCore,
-                &SP::Signer,
-                &SP::Verifier,
-                &SessionId<SP>,
+                // TODO (#74): take by value
                 &SignedValue<SP>,
-                &FullName,
-                &SerdeAdapter<SP::WireFormat>,
+                &SP::Verifier,
+                &SerializeArgs<SP>,
             ) -> Result<SignedValue<SP>, LocalError>,
     {
         let tag = MappingTag::signed_local_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
             tag: AnyTag::Mapping(tag),
             kind: ReplacementEnum::Message {
-                function: Arc::new(
-                    move |rng, signer, destination, session_id, value, message_name, serde_adapter| {
-                        let typed_value = value.downcast_ref::<SignedValue<SP>>()?;
-                        let typed_result = function(
-                            rng,
-                            signer,
-                            destination,
-                            session_id,
-                            typed_value,
-                            message_name,
-                            serde_adapter,
-                        )?;
-                        Ok(Value::new(typed_result))
-                    },
-                ),
+                function: Arc::new(move |rng, orig_value, destination, args| {
+                    let typed_value = orig_value.downcast_ref::<SignedValue<SP>>()?;
+                    let typed_result = function(rng, typed_value, destination, args)?;
+                    Ok(Value::new(typed_result))
+                }),
             },
         })
     }
@@ -230,21 +208,10 @@ impl<SP: SessionParameters> Replacement<SP> {
             ) => {
                 let function = function.clone();
                 let replacement_function = replacement_function.clone();
-                let new_function = SerializeAndSignFunction::new(
-                    move |rng, signer, destination, session_id, value, message_name, serde_adapter| {
-                        let orig_value =
-                            function.call(rng, signer, destination, session_id, value, message_name, serde_adapter)?;
-                        replacement_function(
-                            rng,
-                            signer,
-                            destination,
-                            session_id,
-                            &orig_value,
-                            message_name,
-                            serde_adapter,
-                        )
-                    },
-                );
+                let new_function = SerializeAndSignFunction::new(move |rng, destination, args| {
+                    let orig_value = function.call(rng, destination, args)?;
+                    replacement_function(rng, orig_value, destination, args)
+                });
 
                 Node::new(NodeKind::SerializeAndSign {
                     store_in: store_in.clone(),

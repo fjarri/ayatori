@@ -1,7 +1,7 @@
 pub use crate::{
     entities::{
-        Args, AssociatedData, Erasable, FullName, PartyGroup, SenderError, SerdeAdapter, SerializedValue, SignedHash,
-        SignedValue, ThirdPartyError, VerificationError, VerifiedValue,
+        Args, AssociatedData, Erasable, FullName, PartyGroup, SenderError, SerdeAdapter, SerializeArgs,
+        SerializedValue, SignedHash, SignedValue, ThirdPartyError, VerificationError, VerifiedValue,
     },
     errors::LocalError,
     execution::EvidenceError,
