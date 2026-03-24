@@ -17,7 +17,7 @@ use crate::{
 
 #[derive_where::derive_where(Clone)]
 pub struct Replacement<SP: SessionParameters> {
-    tag: AnyTag, // TODO: or have tag field in every enum variant?
+    tag: AnyTag,
     kind: ReplacementEnum<SP>,
 }
 
@@ -31,11 +31,11 @@ impl<SP: SessionParameters> Debug for Replacement<SP> {
 #[allow(clippy::type_complexity)]
 enum ReplacementEnum<SP: SessionParameters> {
     ComputeScalar {
-        // TODO: should we take `Value` by value? And `Args` by reference?
+        // TODO (#74): take `Value` by value.
         function: Arc<dyn Fn(&Value, Args<SP>) -> Result<Value, LocalError>>,
     },
     ComputeMapping {
-        // TODO: should we take `Value` by value? And `Args` by reference?
+        // TODO (#74): take `Value` by value.
         function: Arc<
             dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
         >,
@@ -84,7 +84,7 @@ impl<SP: SessionParameters> Replacement<SP> {
             tag: AnyTag::Mapping(tag),
             kind: ReplacementEnum::ComputeMapping {
                 function: Arc::new(move |maybe_value: Result<Value, ThirdPartyError<SP>>, id, args| {
-                    // TODO: this can be avoided if we return BoxedValue from functions,
+                    // TODO (#74): this can be avoided if we return BoxedValue from functions,
                     // which can be unwrapped without cloning.
                     let typed_value = maybe_value
                         .as_ref()
