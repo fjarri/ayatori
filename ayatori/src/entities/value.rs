@@ -166,11 +166,10 @@ impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdap
 
 struct DynAdapterHolder<F, T>(PhantomData<(F, T)>);
 
-// TODO: made public in this PR. Think about whether it's necessary before merging.
 pub struct SerdeAdapter<F: WireFormat>(Box<dyn DynAdapter<F>>);
 
 impl<F: WireFormat> SerdeAdapter<F> {
-    pub(crate) fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>() -> Self {
+    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>() -> Self {
         Self(Box::new(DynAdapterHolder::<F, T>(PhantomData)))
     }
 
