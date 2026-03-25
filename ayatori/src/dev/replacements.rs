@@ -30,11 +30,9 @@ impl<SP: SessionParameters> Debug for Replacement<SP> {
 #[allow(clippy::type_complexity)]
 enum ReplacementEnum<SP: SessionParameters> {
     ComputeScalar {
-        // TODO (#74): take `Value` by value.
-        function: Arc<dyn Fn(&Value, &Args<SP>) -> Result<Value, LocalError>>,
+        function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, LocalError>>,
     },
     ComputeMapping {
-        // TODO (#74): take `Value` by value.
         function: Arc<
             dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
         >,
@@ -75,11 +73,9 @@ impl<SP: SessionParameters> Replacement<SP> {
             tag: AnyTag::Mapping(tag),
             kind: ReplacementEnum::ComputeMapping {
                 function: Arc::new(move |maybe_value: Result<Value, ThirdPartyError<SP>>, id, args| {
-                    // TODO (#74): this can be avoided if we return BoxedValue from functions,
-                    // which can be unwrapped without cloning.
                     let typed_value = maybe_value
                         .as_ref()
-                        .map_err(|err| (*err).clone())
+                        .map_err(|err| err.clone())
                         .and_then(|value| value.downcast_ref::<Ret>().map_err(ThirdPartyError::from));
                     let typed_result = function(typed_value, id, args)?;
                     Ok(Value::new(typed_result))
@@ -93,7 +89,6 @@ impl<SP: SessionParameters> Replacement<SP> {
         F: 'static
             + Fn(
                 &mut dyn CryptoRngCore,
-                // TODO (#74): take by value
                 &SignedValue<SP>,
                 &SP::Verifier,
                 &SerializeArgs<SP>,
@@ -134,7 +129,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                         format!("[modified] {orig_function}"),
                         move |args| {
                             let orig_value = orig_function.call(args)?;
-                            replacement_function(&orig_value, args)
+                            replacement_function(orig_value, args)
                         },
                     ))
                 } else {
