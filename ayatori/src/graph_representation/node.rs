@@ -429,7 +429,6 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         store_in: MappingTag,
         group: PartyGroup<SP::Verifier>,
         message_name: FullName,
-        serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
     ScalarArgument {
         store_in: ScalarTag,
@@ -491,7 +490,6 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                 store_in: _store_in,
                 group: _group,
                 message_name: _message_name,
-                serde_adapter: _serde_adapter,
             } => write!(f, "receive()"),
             Self::ScalarArgument {
                 store_in: _store_in,
@@ -607,12 +605,10 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 store_in,
                 group,
                 message_name,
-                serde_adapter,
             } => Self::Receive {
                 store_in: store_in.clone(),
                 group: group.clone(),
                 message_name: message_name.clone(),
-                serde_adapter: serde_adapter.clone(),
             },
             Self::ScalarArgument { store_in, name } => Self::ScalarArgument {
                 store_in: store_in.clone(),

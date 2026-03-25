@@ -371,7 +371,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     store_in: _store_in,
                     group,
                     message_name,
-                    serde_adapter: _serde_adapter,
                 } => {
                     expected_messages.insert(message_name.clone(), group.ids().cloned().collect());
                 }

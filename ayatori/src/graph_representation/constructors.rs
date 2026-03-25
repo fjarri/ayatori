@@ -293,46 +293,37 @@ fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Res
     Ok(value)
 }
 
-pub fn receive_signed<SP: SessionParameters>(
+pub fn receive_split<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     group: &PartyGroup<SP::Verifier>,
-) -> Node<SP> {
-    Node::new(NodeKind::Receive {
-        store_in: MappingTag::signed_remote(message.name()),
+) -> Result<(Node<SP>, Node<SP>), LocalError> {
+    let receive_store_in = MappingTag::signed_remote(message.name());
+    let deserialize_store_in = receive_store_in.to_received()?;
+    let message_name = FullName::new(message.name());
+
+    let receive = Node::new(NodeKind::Receive {
+        store_in: receive_store_in,
         group: group.clone(),
-        message_name: FullName::new(message.name()),
-        serde_adapter: message.serde_adapter().clone(),
-    })
-}
+        message_name: message_name.clone(),
+    });
 
-pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let (store_in, group, serde_adapter, message_name) = match received.kind() {
-        NodeKind::Receive {
-            store_in,
-            group,
-            serde_adapter,
-            message_name,
-            ..
-        } => (store_in, group, serde_adapter, message_name),
-        _ => return Err(LocalError::new("The given node must be a Receive node")),
-    };
-
-    Ok(Node::new(NodeKind::Deserialize {
-        store_in: store_in.to_received()?,
+    let deserialize = Node::new(NodeKind::Deserialize {
+        store_in: deserialize_store_in,
         function: DeserializeFunction::new(default_deserialize),
         group: group.clone(),
-        data: received.get_strong_ref(),
-        message_name: message_name.clone(),
-        serde_adapter: serde_adapter.clone(),
-    }))
+        data: receive.get_strong_ref(),
+        message_name,
+        serde_adapter: message.serde_adapter().clone(),
+    });
+
+    Ok((receive, deserialize))
 }
 
 pub fn receive<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     group: &PartyGroup<SP::Verifier>,
 ) -> Result<Node<SP>, LocalError> {
-    let received = receive_signed(message, group);
-    deserialize_received(&received)
+    receive_split(message, group).map(|(_receive, deserialize)| deserialize)
 }
 
 pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, LocalError> {

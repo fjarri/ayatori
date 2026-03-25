@@ -145,8 +145,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let my_value = inputs.get("value")?;
 
         let value_broadcasted = broadcast(message, my_value, all_parties)?;
-        let values_verified = receive_signed(message, all_parties);
-        let values = deserialize_received(&values_verified)?;
+        let (values_verified, values) = receive_split(message, all_parties)?;
 
         let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echo");
         let all_values_verified = collect(&values_verified)?;
