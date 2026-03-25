@@ -120,10 +120,6 @@ pub(crate) struct ScalarTag {
 }
 
 impl ScalarTag {
-    pub fn full_name(&self) -> &FullName {
-        &self.full_name
-    }
-
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self {
             full_name: self.full_name.with_added_prefix(prefix),
@@ -163,10 +159,6 @@ pub(crate) struct MappingTag {
 }
 
 impl MappingTag {
-    pub fn full_name(&self) -> &FullName {
-        &self.full_name
-    }
-
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self {
             full_name: self.full_name.with_added_prefix(prefix),

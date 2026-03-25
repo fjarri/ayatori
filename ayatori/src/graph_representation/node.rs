@@ -15,8 +15,8 @@ use itertools::Itertools;
 use super::args::BoundProtocolArgs;
 use crate::{
     entities::{
-        AnyTagRef, FullName, MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag, SerdeAdapter,
-        SerializeAndSignFunction,
+        AnyTagRef, DeserializeFunction, FullName, MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag,
+        SerdeAdapter, SerializeAndSignFunction,
     },
     errors::LocalError,
     traits::SessionParameters,
@@ -151,6 +151,8 @@ impl<SP: SessionParameters> Node<SP> {
                 }
                 // Requires RNG and secret information (signing key), so not reproducible.
                 NodeKind::SerializeAndSign { .. } => return Reproducibility::NotAvailable,
+                // This is essentially a subtype of compute-mapping with a reproducible function.
+                NodeKind::Deserialize { .. } => {}
                 // We can always reproduce the result of this, since it is an infallible `()`.
                 NodeKind::DirectMessage { .. } => {}
                 NodeKind::Collect { .. } => {
@@ -405,6 +407,14 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         message_name: FullName,
     },
+    Deserialize {
+        store_in: MappingTag,
+        function: DeserializeFunction<SP>,
+        data: Node<SP>,
+        group: PartyGroup<SP::Verifier>,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
+        message_name: FullName,
+    },
     DirectMessage {
         store_in: MappingTag,
         data: Node<SP>,
@@ -460,6 +470,9 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             Self::SerializeAndSign { data, .. } => {
                 write!(f, "serialize_and_sign[]({})", data.store_in())
             }
+            Self::Deserialize { data, .. } => {
+                write!(f, "deserialize[]({})", data.store_in())
+            }
             Self::DirectMessage {
                 store_in: _store_in,
                 data,
@@ -496,6 +509,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             | Self::ScalarArgument { store_in, .. } => AnyTagRef::Scalar(store_in),
             Self::ComputeMapping { store_in, .. }
             | Self::SerializeAndSign { store_in, .. }
+            | Self::Deserialize { store_in, .. }
             | Self::DirectMessage { store_in, .. }
             | Self::Receive { store_in, .. } => AnyTagRef::Mapping(store_in),
         }
@@ -505,6 +519,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         match self {
             Self::ComputeMapping { store_in, group, .. }
             | Self::SerializeAndSign { store_in, group, .. }
+            | Self::Deserialize { store_in, group, .. }
             | Self::DirectMessage { store_in, group, .. }
             | Self::Receive { store_in, group, .. } => Some((store_in, group)),
             Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
@@ -515,6 +530,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         match self {
             Self::ComputeMapping { group, .. }
             | Self::SerializeAndSign { group, .. }
+            | Self::Deserialize { group, .. }
             | Self::DirectMessage { group, .. }
             | Self::Receive { group, .. } => Some(group),
             Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
@@ -558,6 +574,21 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
+            Self::Deserialize {
+                store_in,
+                function,
+                data,
+                group,
+                message_name,
+                serde_adapter,
+            } => Self::Deserialize {
+                store_in: store_in.clone(),
+                function: function.clone(),
+                data: data.get_strong_ref(),
+                group: group.clone(),
+                message_name: message_name.clone(),
+                serde_adapter: serde_adapter.clone(),
+            },
             Self::DirectMessage { store_in, data, group } => Self::DirectMessage {
                 store_in: store_in.clone(),
                 data: data.get_strong_ref(),
@@ -594,6 +625,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         match self {
             Self::ComputeScalar { args, .. } | Self::ComputeMapping { args, .. } => Box::new(args.values()),
             Self::SerializeAndSign { data, .. } => Box::new(core::iter::once(data)),
+            Self::Deserialize { data, .. } => Box::new(core::iter::once(data)),
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
             Self::DirectMessage { data, .. } => Box::new(core::iter::once(data)),
             Self::Receive { .. } => Box::new(core::iter::empty()),
@@ -606,6 +638,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeScalar { args, .. } => maybe_replace_map(args, replacements),
             Self::ComputeMapping { args, .. } => maybe_replace_map(args, replacements),
             Self::SerializeAndSign { data, .. } => maybe_replace(data, replacements),
+            Self::Deserialize { data, .. } => maybe_replace(data, replacements),
             Self::Collect { values, .. } => maybe_replace(values, replacements),
             Self::DirectMessage { data, .. } => maybe_replace(data, replacements),
             Self::Receive { .. } | Self::ScalarArgument { .. } => {}
@@ -624,6 +657,12 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
             Self::SerializeAndSign {
+                store_in, message_name, ..
+            } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+                *message_name = message_name.clone().with_added_prefix(prefix);
+            }
+            Self::Deserialize {
                 store_in, message_name, ..
             } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);

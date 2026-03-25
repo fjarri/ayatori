@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
-    args::{Args, SerializeArgs},
+    args::{Args, DeserializeArgs, SerializeArgs},
     value::{Erasable, SerializedValue, Value},
 };
 use crate::{
@@ -256,6 +256,45 @@ impl<SP: SessionParameters> SerializeAndSignFunction<SP> {
 impl<SP: SessionParameters> Debug for SerializeAndSignFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "SerializeAndSignFunction {{ function: {} }}", self.name)
+    }
+}
+
+impl<SP: SessionParameters> Display for SerializeAndSignFunction<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.name)
+    }
+}
+
+#[derive_where::derive_where(Clone)]
+pub(crate) struct DeserializeFunction<SP: SessionParameters> {
+    #[allow(clippy::type_complexity)]
+    function: Arc<dyn Fn(&DeserializeArgs<SP>) -> Result<Value, SenderError>>,
+    name: String,
+}
+
+impl<SP: SessionParameters> DeserializeFunction<SP> {
+    pub fn new(function: impl 'static + Fn(&DeserializeArgs<SP>) -> Result<Value, SenderError>) -> Self {
+        let name = core::any::type_name_of_val(&function).to_string();
+        Self {
+            name,
+            function: Arc::new(function),
+        }
+    }
+
+    pub fn call(&self, args: &DeserializeArgs<SP>) -> Result<Value, SenderError> {
+        (self.function)(args)
+    }
+}
+
+impl<SP: SessionParameters> Debug for DeserializeFunction<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "DeserializeFunction {{ function: {} }}", self.name)
+    }
+}
+
+impl<SP: SessionParameters> Display for DeserializeFunction<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.name)
     }
 }
 

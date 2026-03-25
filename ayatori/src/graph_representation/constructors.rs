@@ -13,11 +13,11 @@ use super::{
 };
 use crate::{
     entities::{
-        Args, AssociatedData, Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
-        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction, MappingTag, PartyGroup,
-        ScalarFunction, ScalarTag, SenderAttributableMappingFunction, SenderError, SerdeAdapter,
-        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value, VerifiedValue,
+        Args, AssociatedData, DeserializeArgs, DeserializeFunction, Erasable, FullName, InfallibleMappingFunction,
+        InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction,
+        MappingTag, PartyGroup, ScalarFunction, ScalarTag, SenderAttributableMappingFunction, SenderError,
+        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
     execution::{EvidenceError, SessionId},
@@ -276,26 +276,18 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, mapping: &Node
     collect(&send_node)
 }
 
-fn deserialize<SP: SessionParameters>(
-    id: &SP::Verifier,
-    args: Args<SP>,
-    arg_name: &str,
-    serde_adapter: &SerdeAdapter<SP::WireFormat>,
-) -> Result<Value, SenderError> {
-    let received = args.get::<VerifiedValue<SP>>(arg_name)?;
+fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderError> {
+    let verified_value = args.verified_value()?;
 
-    let expected_senders = args
-        .session_data()
-        .expected_messages
-        .get(args.store_in_name())
-        .ok_or_else(SenderError::new)?;
+    let expected_senders = args.expected_senders().ok_or_else(SenderError::new)?;
 
-    if !expected_senders.contains(id) {
+    if !expected_senders.contains(verified_value.source()) {
         return Err(SenderError::new());
     }
 
-    let value = serde_adapter
-        .deserialize(received.serialized_value())
+    let value = args
+        .serde_adapter()
+        .deserialize(verified_value.serialized_value())
         .map_err(|_err| SenderError::new())?;
 
     Ok(value)
@@ -314,28 +306,24 @@ pub fn receive_signed<SP: SessionParameters>(
 }
 
 pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let (store_in, group, serde_adapter) = match received.kind() {
+    let (store_in, group, serde_adapter, message_name) = match received.kind() {
         NodeKind::Receive {
             store_in,
             group,
             serde_adapter,
+            message_name,
             ..
-        } => (store_in, group, serde_adapter),
+        } => (store_in, group, serde_adapter, message_name),
         _ => return Err(LocalError::new("The given node must be a Receive node")),
     };
 
-    let arg_name = "_value".to_string();
-    let serde_adapter = serde_adapter.clone();
-    let args = [(arg_name.clone(), received.get_strong_ref())].into();
-
-    Ok(Node::new(NodeKind::ComputeMapping {
+    Ok(Node::new(NodeKind::Deserialize {
         store_in: store_in.to_received()?,
-        function: MappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_pre_erased(
-            "deserialize",
-            move |id, args| deserialize(id, args, &arg_name, &serde_adapter),
-        )),
+        function: DeserializeFunction::new(default_deserialize),
         group: group.clone(),
-        args,
+        data: received.get_strong_ref(),
+        message_name: message_name.clone(),
+        serde_adapter: serde_adapter.clone(),
     }))
 }
 
