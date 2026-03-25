@@ -329,12 +329,11 @@ where
                     function,
                     index,
                     data,
-                    message_name,
                     serde_adapter,
                     on_error,
                 } => {
                     let value = self.storage.get_elem(&data, &index)?;
-                    let args = DeserializeArgs::new(&self.data, message_name, serde_adapter, value);
+                    let args = DeserializeArgs::new(&self.data, serde_adapter, value)?;
                     return Ok(Some(Task::compute_deserialize_elem(
                         store_in, index, function, args, on_error,
                     )));

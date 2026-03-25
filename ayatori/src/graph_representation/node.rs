@@ -413,7 +413,6 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         data: Node<SP>,
         group: PartyGroup<SP::Verifier>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
-        message_name: FullName,
     },
     DirectMessage {
         store_in: MappingTag,
@@ -577,14 +576,12 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 function,
                 data,
                 group,
-                message_name,
                 serde_adapter,
             } => Self::Deserialize {
                 store_in: store_in.clone(),
                 function: function.clone(),
                 data: data.get_strong_ref(),
                 group: group.clone(),
-                message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
             Self::DirectMessage { store_in, data, group } => Self::DirectMessage {
@@ -658,11 +655,8 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 *store_in = store_in.clone().with_added_prefix(prefix);
                 *message_name = message_name.clone().with_added_prefix(prefix);
             }
-            Self::Deserialize {
-                store_in, message_name, ..
-            } => {
+            Self::Deserialize { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
-                *message_name = message_name.clone().with_added_prefix(prefix);
             }
             Self::Receive {
                 store_in, message_name, ..
