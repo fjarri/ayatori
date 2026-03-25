@@ -150,36 +150,36 @@ macro_rules! define_mapping_constructor {
 define_scalar_constructor!(
     compute_scalar<SP>,
     ScalarFunction::Infallible(InfallibleScalarFunction),
-    (Args<SP>) -> LocalError
+    (&Args<SP>) -> LocalError
 );
 
 define_scalar_constructor!(
     compute_scalar_with_rng<SP>,
     ScalarFunction::InfallibleWithRng(InfallibleScalarFunctionWithRng),
-    (&mut dyn CryptoRngCore, Args<SP>) -> LocalError
+    (&mut dyn CryptoRngCore, &Args<SP>) -> LocalError
 );
 
 define_mapping_constructor!(
     compute_mapping<SP>,
     MappingFunction::Infallible(InfallibleMappingFunction),
-    (&SP::Verifier, Args<SP>) -> LocalError
+    (&SP::Verifier, &Args<SP>) -> LocalError
 );
 
 define_mapping_constructor!(
     compute_mapping_sender_fallible<SP>,
     MappingFunction::SenderAttributable(SenderAttributableMappingFunction),
-    (&SP::Verifier, Args<SP>) -> SenderError
+    (&SP::Verifier, &Args<SP>) -> SenderError
 );
 
 define_mapping_constructor!(
     compute_mapping_with_rng<SP>,
     MappingFunction::InfallibleWithRng(InfallibleMappingFunctionWithRng),
-    (&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> LocalError
+    (&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> LocalError
 );
 
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
+    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
     group: &PartyGroup<SP::Verifier>,
     args: &[(&str, &Node<SP>)],
     verification: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,

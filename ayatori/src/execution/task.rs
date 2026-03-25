@@ -65,7 +65,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 function,
                 args,
             } => {
-                let result = function.call(args)?;
+                let result = function.call(&args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeFunction::MappingInfallible {
@@ -74,7 +74,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 id,
                 args,
             } => {
-                let result = function.call(&id, args)?;
+                let result = function.call(&id, &args)?;
                 Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
             ComputeFunction::MappingSenderAttributable {
@@ -84,7 +84,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 args,
                 on_error,
             } => {
-                let result = match function.call(&id, args) {
+                let result = match function.call(&id, &args) {
                     Ok(result) => result,
                     Err(SenderError(SenderErrorEnum::Local(error))) => return Err(error),
                     Err(SenderError(SenderErrorEnum::Error)) => {
@@ -99,7 +99,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 id,
                 args,
             } => {
-                let result = match function.call(&id, args) {
+                let result = match function.call(&id, &args) {
                     Ok(result) => result,
                     Err(ThirdPartyError(ThirdPartyErrorEnum::Local(error))) => return Err(error),
                     Err(ThirdPartyError(ThirdPartyErrorEnum::Error {
@@ -169,7 +169,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 function,
                 args,
             } => {
-                let result = function.call(rng, args)?;
+                let result = function.call(rng, &args)?;
                 Ok(TaskResult(TaskResultEnum::Compute { store_in, result }))
             }
             ComputeWithRngFunction::MappingInfallible {
@@ -178,7 +178,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 id,
                 args,
             } => {
-                let result = function.call(rng, &id, args)?;
+                let result = function.call(rng, &id, &args)?;
                 Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
             ComputeWithRngFunction::SerializeAndSign {

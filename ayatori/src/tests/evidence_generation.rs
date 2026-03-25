@@ -12,11 +12,11 @@ use crate::{
 #[derive(Debug)]
 struct TestProtocol;
 
-fn gen_value<SP: SessionParameters>(_args: Args<SP>) -> Result<u64, LocalError> {
+fn gen_value<SP: SessionParameters>(_args: &Args<SP>) -> Result<u64, LocalError> {
     Ok(1)
 }
 
-fn verify<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), SenderError> {
+fn verify<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderError> {
     let x = args.get::<u64>("x")?;
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
@@ -27,7 +27,7 @@ fn verify<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<()
     }
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
     let xs = args.get_map::<u64>("x")?;
     Ok(xs.values().copied().sum())
 }
@@ -117,7 +117,7 @@ fn provable_error() {
         .map(|(idx, signer)| {
             if idx == 0 {
                 let replacement =
-                    Replacement::<SP>::compute_scalar(&["my_x"], |_orig_value: &u64, _args: Args<SP>| Ok(2)).unwrap();
+                    Replacement::<SP>::compute_scalar(&["my_x"], |_orig_value: &u64, _args: &Args<SP>| Ok(2)).unwrap();
                 S::new_with_replacements(session_id.clone(), signer, &(), &party_group, &[&replacement]).unwrap()
             } else {
                 S::new(session_id.clone(), signer, &(), &party_group).unwrap()

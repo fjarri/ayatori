@@ -22,25 +22,25 @@ struct Message2<Id>(Id, Id);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message3<Id>(Id, Id);
 
-fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
+fn make_scalar_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
     Ok(Message1(args.my_id().clone()))
 }
 
 fn make_mapping_elem<SP: SessionParameters>(
     id: &SP::Verifier,
-    args: Args<SP>,
+    args: &Args<SP>,
 ) -> Result<Message2<SP::Verifier>, LocalError> {
     Ok(Message2(args.my_id().clone(), id.clone()))
 }
 
 fn make_mapping_elem_sans_me<SP: SessionParameters>(
     id: &SP::Verifier,
-    args: Args<SP>,
+    args: &Args<SP>,
 ) -> Result<Message3<SP::Verifier>, LocalError> {
     Ok(Message3(args.my_id().clone(), id.clone()))
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<(), LocalError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);

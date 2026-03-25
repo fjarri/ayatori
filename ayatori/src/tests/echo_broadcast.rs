@@ -17,7 +17,7 @@ use crate::{
 };
 
 fn prepare_echo_pack<SP: SessionParameters>(
-    args: Args<SP>,
+    args: &Args<SP>,
 ) -> Result<BTreeMap<SP::Verifier, SignedHash<SP>>, LocalError> {
     let values = args.get_map::<VerifiedValue<SP>>("values_verified_map")?;
     let cloned = values
@@ -29,7 +29,7 @@ fn prepare_echo_pack<SP: SessionParameters>(
     Ok(cloned)
 }
 
-fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), SenderError> {
+fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderError> {
     let all_ids = args.get::<BTreeSet<SP::Verifier>>("all_ids")?;
 
     // The messages we received from all nodes
@@ -78,7 +78,7 @@ fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args
     Ok(())
 }
 
-fn verify_echo_contents<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), ThirdPartyError<SP>> {
+fn verify_echo_contents<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), ThirdPartyError<SP>> {
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
     if id == args.my_id() {
@@ -201,11 +201,11 @@ struct TestProtocol;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message1<Id>(Id);
 
-fn make_scalar_value<SP: SessionParameters>(args: Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
+fn make_scalar_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
     Ok(Message1(args.my_id().clone()))
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<(), LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<(), LocalError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -310,7 +310,7 @@ fn serialize_replacement(
 fn dummy_verification(
     _orig_value: Result<&(), ThirdPartyError<SP>>,
     _id: &<SP as SessionParameters>::Verifier,
-    _args: Args<SP>,
+    _args: &Args<SP>,
 ) -> Result<(), ThirdPartyError<SP>> {
     Ok(())
 }

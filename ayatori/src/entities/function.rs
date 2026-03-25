@@ -159,32 +159,32 @@ macro_rules! define_function_type {
 
 define_function_type!(
     InfallibleScalarFunction<SP>,
-    (args: Args<SP>) -> LocalError
+    (args: &Args<SP>) -> LocalError
 );
 
 define_function_type!(
     InfallibleScalarFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, args: Args<SP>) -> LocalError
+    (rng: &mut dyn CryptoRngCore, args: &Args<SP>) -> LocalError
 );
 
 define_function_type!(
     InfallibleMappingFunction<SP>,
-    (id: &SP::Verifier, args: Args<SP>) -> LocalError
+    (id: &SP::Verifier, args: &Args<SP>) -> LocalError
 );
 
 define_function_type!(
     InfallibleMappingFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>) -> LocalError
+    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: &Args<SP>) -> LocalError
 );
 
 define_function_type!(
     SenderAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: Args<SP>) -> SenderError
+    (id: &SP::Verifier, args: &Args<SP>) -> SenderError
 );
 
 define_function_type!(
     ThirdPartyAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: Args<SP>) -> ThirdPartyError<SP>
+    (id: &SP::Verifier, args: &Args<SP>) -> ThirdPartyError<SP>
 );
 
 #[derive_where::derive_where(Clone)]

@@ -31,12 +31,12 @@ impl<SP: SessionParameters> Debug for Replacement<SP> {
 enum ReplacementEnum<SP: SessionParameters> {
     ComputeScalar {
         // TODO (#74): take `Value` by value.
-        function: Arc<dyn Fn(&Value, Args<SP>) -> Result<Value, LocalError>>,
+        function: Arc<dyn Fn(&Value, &Args<SP>) -> Result<Value, LocalError>>,
     },
     ComputeMapping {
         // TODO (#74): take `Value` by value.
         function: Arc<
-            dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
+            dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
         >,
     },
     Message {
@@ -49,7 +49,7 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub fn compute_scalar<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
     where
         Ret: Erasable,
-        F: 'static + Fn(&Ret, Args<SP>) -> Result<Ret, LocalError>,
+        F: 'static + Fn(&Ret, &Args<SP>) -> Result<Ret, LocalError>,
     {
         let tag = ScalarTag::computed_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
@@ -67,7 +67,8 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub fn compute_mapping_third_party_attributable<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
     where
         Ret: Erasable,
-        F: 'static + Fn(Result<&Ret, ThirdPartyError<SP>>, &SP::Verifier, Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
+        F: 'static
+            + Fn(Result<&Ret, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
     {
         let tag = MappingTag::computed_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
@@ -132,7 +133,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                     ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(
                         format!("[modified] {orig_function}"),
                         move |args| {
-                            let orig_value = orig_function.call(args.clone())?;
+                            let orig_value = orig_function.call(args)?;
                             replacement_function(&orig_value, args)
                         },
                     ))
@@ -172,7 +173,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                         function: ThirdPartyAttributableMappingFunction::new_pre_erased(
                             format!("[modified] {orig_function}"),
                             move |id, args| {
-                                let orig_value = orig_function.call(id, args.clone());
+                                let orig_value = orig_function.call(id, args);
                                 replacement_function(orig_value, id, args)
                             },
                         ),

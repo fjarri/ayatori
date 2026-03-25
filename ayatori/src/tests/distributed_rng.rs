@@ -15,28 +15,28 @@ use crate::{
 #[derive(Debug)]
 struct DistributedRNG;
 
-fn sample_value<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, LocalError> {
+fn sample_value<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: &Args<SP>) -> Result<u64, LocalError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn sample_nonce<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: Args<SP>) -> Result<u64, LocalError> {
+fn sample_nonce<SP: SessionParameters>(rng: &mut dyn CryptoRngCore, _args: &Args<SP>) -> Result<u64, LocalError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn commit_to_value<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
+fn commit_to_value<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
     let b = args.get::<u64>("b")?;
     let r = args.get::<u64>("r")?;
     Ok(b + r)
 }
 
-fn verify_commitment<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) -> Result<(), SenderError> {
+fn verify_commitment<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderError> {
     let b = args.get::<u64>("b")?;
     let r = args.get::<u64>("r")?;
     let c = args.get::<u64>("c")?;
     if b + r == *c { Ok(()) } else { Err(SenderError::new()) }
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
     let bs = args.get_map::<u64>("b")?;
     Ok(bs.values().copied().sum())
 }
