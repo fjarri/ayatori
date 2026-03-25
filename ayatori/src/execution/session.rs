@@ -24,8 +24,8 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        Args, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag, SignedValue, Value,
-        VerifiedValue,
+        AnyTag, Args, DeserializeArgs, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag,
+        SerializeArgs, SignedValue, Value, VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
@@ -39,6 +39,12 @@ pub(crate) struct SessionData<SP: SessionParameters> {
     pub(crate) participants: BTreeSet<SP::Verifier>,
     pub(crate) local_participants: BTreeSet<SP::Verifier>,
     pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
+}
+
+impl<SP: SessionParameters> SessionData<SP> {
+    pub fn expected_senders(&self, message_name: &FullName) -> Option<BTreeSet<SP::Verifier>> {
+        self.expected_messages.get(message_name).cloned()
+    }
 }
 
 #[derive(Debug)]
@@ -177,11 +183,13 @@ where
         signer: SP::Signer,
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
-        replacement: Replacement<SP>,
+        replacements: &[&Replacement<SP>],
     ) -> Result<Self, LocalError> {
         let verifier = signer.verifying_key();
-        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
-        let output_node = replacement.apply(output_node)?;
+        let mut output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        for replacement in replacements {
+            output_node = replacement.apply(output_node)?;
+        }
         let private_inputs = P::make_private_inputs(private_data);
         Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
     }
@@ -261,7 +269,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
-                    let args = Args::new(store_in.full_name(), &self.data, self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data.id, self.verifier(), arg_values)?;
                     return Ok(Some(match function {
                         ScalarFunction::Infallible(function) => {
                             Task::compute_scalar_infallible(store_in, function, args)
@@ -279,7 +287,7 @@ where
                     on_error,
                 } => {
                     let arg_values = self.storage.get_scalar_or_mapping_args(&index, args)?;
-                    let args = Args::new(store_in.full_name(), &self.data, self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data.id, self.verifier(), arg_values)?;
                     return Ok(Some(match function {
                         MappingFunction::Infallible(function) => {
                             Task::compute_mapping_elem_infallible(store_in, index, function, args)
@@ -287,20 +295,49 @@ where
                         MappingFunction::InfallibleWithRng(function) => {
                             Task::compute_mapping_elem_infallible_with_rng(store_in, index, function, args)
                         }
-                        MappingFunction::InfallibleWithSigner(function) => {
-                            let signer = self
-                                .signer
-                                .as_ref()
-                                .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
-                            Task::compute_mapping_elem_infallible_with_signer(store_in, signer, index, function, args)
-                        }
                         MappingFunction::SenderAttributable(function) => {
                             Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
                         }
-                        MappingFunction::ThirdPartyAttributable(function) => {
+                        MappingFunction::ThirdPartyAttributable { function, .. } => {
                             Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
                         }
                     }));
+                }
+                Action::ComputeSerializeAndSignElement {
+                    store_in,
+                    function,
+                    index,
+                    data,
+                    message_name,
+                    serde_adapter,
+                } => {
+                    let signer = self
+                        .signer
+                        .as_ref()
+                        .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
+                    let value = match data {
+                        AnyTag::Scalar(tag) => self.storage.get_scalar(&tag)?,
+                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index)?,
+                    };
+                    let args = SerializeArgs::new(signer, &self.data, message_name, serde_adapter, value);
+                    return Ok(Some(Task::compute_serialize_and_sign_elem(
+                        store_in, index, function, args,
+                    )));
+                }
+                Action::ComputeDeserializeElement {
+                    store_in,
+                    function,
+                    index,
+                    data,
+                    message_name,
+                    serde_adapter,
+                    on_error,
+                } => {
+                    let value = self.storage.get_elem(&data, &index)?;
+                    let args = DeserializeArgs::new(&self.data, message_name, serde_adapter, value);
+                    return Ok(Some(Task::compute_deserialize_elem(
+                        store_in, index, function, args, on_error,
+                    )));
                 }
                 Action::Collect {
                     store_in,
@@ -377,7 +414,7 @@ where
         }
     }
 
-    pub fn add_result(&mut self, result: TaskResult<SP::Verifier>) -> Result<(), LocalError> {
+    pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), LocalError> {
         match result.into_enum() {
             TaskResultEnum::Send { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
@@ -409,7 +446,11 @@ where
                 id,
                 associated_data,
             } => {
-                let evidence = EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(&store_in, associated_data));
+                let evidence = EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(
+                    &self.verifier,
+                    &store_in,
+                    associated_data,
+                ));
                 self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
             }
         }

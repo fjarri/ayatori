@@ -13,13 +13,14 @@ use super::{
 };
 use crate::{
     entities::{
-        Args, Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
-        InfallibleMappingFunctionWithSigner, InfallibleScalarFunction, InfallibleScalarFunctionWithRng,
-        MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
-        SenderError, SerdeAdapter, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, Value,
-        VerifiedValue,
+        Args, AssociatedData, DeserializeArgs, DeserializeFunction, Erasable, FullName, InfallibleMappingFunction,
+        InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction,
+        MappingTag, PartyGroup, ScalarFunction, ScalarTag, SenderAttributableMappingFunction, SenderError,
+        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
+    execution::{EvidenceError, SessionId},
     traits::{ComposableProtocol, SessionParameters},
 };
 
@@ -124,7 +125,7 @@ macro_rules! define_mapping_constructor {
         pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
             name: &str,
             function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
-            group: &PartyGroup<SP::Verifier>,
+            group: &PartyGroup<$SP::Verifier>,
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
             let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
@@ -171,55 +172,48 @@ define_mapping_constructor!(
 );
 
 define_mapping_constructor!(
-    compute_mapping_third_party_fallible<SP>,
-    MappingFunction::ThirdPartyAttributable(ThirdPartyAttributableMappingFunction),
-    (&SP::Verifier, Args<SP>) -> ThirdPartyError<SP>
-);
-
-define_mapping_constructor!(
     compute_mapping_with_rng<SP>,
     MappingFunction::InfallibleWithRng(InfallibleMappingFunctionWithRng),
     (&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> LocalError
 );
 
-/// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
-/// since some RustCrypto libraries don't accept a `?Sized` RNG.
-struct Rng<'a>(&'a mut dyn CryptoRngCore);
+pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
+    group: &PartyGroup<SP::Verifier>,
+    args: &[(&str, &Node<SP>)],
+    verification: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
+) -> Result<Node<SP>, LocalError> {
+    let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
+    if arg_groups.iter().any(|g| g != &group) {
+        return Err(LocalError::new(
+            "The group of all arguments must be equal to the one provided to the constructor",
+        ));
+    }
 
-impl signature::rand_core::RngCore for Rng<'_> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-    fn fill_bytes(&mut self, bytes: &mut [u8]) {
-        self.0.fill_bytes(bytes);
-    }
-    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), signature::rand_core::Error> {
-        self.0.try_fill_bytes(bytes)
-    }
+    Ok(Node::new(NodeKind::ComputeMapping {
+        store_in: MappingTag::computed(name),
+        function: MappingFunction::ThirdPartyAttributable {
+            function: ThirdPartyAttributableMappingFunction::new(function),
+            verification: ThirdPartyAttributableVerificationFunction::new(verification),
+        },
+        args: args_to_owned(args.iter().cloned())?,
+        group: group.clone(),
+    }))
 }
 
-impl signature::rand_core::CryptoRng for Rng<'_> {}
-
-fn serialize<SP: SessionParameters>(
+fn default_serialize_and_sign<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
-    signer: &SP::Signer,
-    id: &SP::Verifier,
-    args: Args<SP>,
-    arg_name: &str,
-    serde_adapter: &SerdeAdapter<SP::WireFormat>,
+    destination: &SP::Verifier,
+    args: &SerializeArgs<SP>,
 ) -> Result<Value, LocalError> {
-    let value = args.get_value(arg_name)?;
-    let serialized_value = serde_adapter.serialize(value)?;
-    let mut typed_rng = Rng(rng);
+    let serialized_value = args.serde_adapter().serialize(args.value())?;
     let signed_value = SignedValue::<SP>::new(
-        &mut typed_rng,
-        signer,
+        rng,
+        args.signer(),
         args.session_id(),
-        args.store_in_name(),
-        id,
+        args.message_name(),
+        destination,
         serialized_value,
     )?;
     Ok(Value::new(signed_value))
@@ -236,19 +230,15 @@ pub fn broadcast<SP: SessionParameters>(
         ));
     }
 
-    let arg_name = "_value".to_string();
-    let serde_adapter = message.serde_adapter().clone();
-    let args = [(arg_name.clone(), scalar.get_strong_ref())].into();
     let tag = MappingTag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(NodeKind::ComputeMapping {
+    let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
         store_in: tag.clone(),
-        function: MappingFunction::InfallibleWithSigner(InfallibleMappingFunctionWithSigner::new_pre_erased(
-            "serialize",
-            move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
-        )),
+        function: SerializeAndSignFunction::new(default_serialize_and_sign),
+        data: scalar.get_strong_ref(),
         group: group.clone(),
-        args,
+        message_name: FullName::new(message.name()),
+        serde_adapter: message.serde_adapter().clone(),
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {
@@ -266,20 +256,15 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, mapping: &Node
         .ok_or_else(|| LocalError::new("`mapping` argument of `send()` must be an mapping node"))?
         .clone();
 
-    let arg_name = "_value".to_string();
-    let serde_adapter = message.serde_adapter().clone();
-    let args = [(arg_name.clone(), mapping.get_strong_ref())].into();
     let tag = MappingTag::signed_local(message.name());
 
-    let serialize_and_sign = Node::new(NodeKind::ComputeMapping {
+    let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
         store_in: tag.clone(),
-
-        function: MappingFunction::InfallibleWithSigner(InfallibleMappingFunctionWithSigner::new_pre_erased(
-            "serialize",
-            move |rng, signer, id, args| serialize(rng, signer, id, args, &arg_name, &serde_adapter),
-        )),
+        function: SerializeAndSignFunction::new(default_serialize_and_sign),
+        data: mapping.get_strong_ref(),
         group: group.clone(),
-        args,
+        message_name: FullName::new(message.name()),
+        serde_adapter: message.serde_adapter().clone(),
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {
@@ -291,26 +276,18 @@ pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, mapping: &Node
     collect(&send_node)
 }
 
-fn deserialize<SP: SessionParameters>(
-    id: &SP::Verifier,
-    args: Args<SP>,
-    arg_name: &str,
-    serde_adapter: &SerdeAdapter<SP::WireFormat>,
-) -> Result<Value, SenderError> {
-    let received = args.get::<VerifiedValue<SP>>(arg_name)?;
+fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderError> {
+    let verified_value = args.verified_value()?;
 
-    let expected_senders = args
-        .session_data()
-        .expected_messages
-        .get(args.store_in_name())
-        .ok_or_else(SenderError::new)?;
+    let expected_senders = args.expected_senders().ok_or_else(SenderError::new)?;
 
-    if !expected_senders.contains(id) {
+    if !expected_senders.contains(verified_value.source()) {
         return Err(SenderError::new());
     }
 
-    let value = serde_adapter
-        .deserialize(received.serialized_value())
+    let value = args
+        .serde_adapter()
+        .deserialize(verified_value.serialized_value())
         .map_err(|_err| SenderError::new())?;
 
     Ok(value)
@@ -329,28 +306,24 @@ pub fn receive_signed<SP: SessionParameters>(
 }
 
 pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let (store_in, group, serde_adapter) = match received.kind() {
+    let (store_in, group, serde_adapter, message_name) = match received.kind() {
         NodeKind::Receive {
             store_in,
             group,
             serde_adapter,
+            message_name,
             ..
-        } => (store_in, group, serde_adapter),
+        } => (store_in, group, serde_adapter, message_name),
         _ => return Err(LocalError::new("The given node must be a Receive node")),
     };
 
-    let arg_name = "_value".to_string();
-    let serde_adapter = serde_adapter.clone();
-    let args = [(arg_name.clone(), received.get_strong_ref())].into();
-
-    Ok(Node::new(NodeKind::ComputeMapping {
+    Ok(Node::new(NodeKind::Deserialize {
         store_in: store_in.to_received()?,
-        function: MappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_pre_erased(
-            "deserialize",
-            move |id, args| deserialize(id, args, &arg_name, &serde_adapter),
-        )),
+        function: DeserializeFunction::new(default_deserialize),
         group: group.clone(),
-        args,
+        data: received.get_strong_ref(),
+        message_name: message_name.clone(),
+        serde_adapter: serde_adapter.clone(),
     }))
 }
 

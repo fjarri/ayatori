@@ -166,18 +166,22 @@ impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdap
 
 struct DynAdapterHolder<F, T>(PhantomData<(F, T)>);
 
-pub(crate) struct SerdeAdapter<F: WireFormat>(Box<dyn DynAdapter<F>>);
+pub struct SerdeAdapter<F: WireFormat>(Box<dyn DynAdapter<F>>);
 
 impl<F: WireFormat> SerdeAdapter<F> {
     pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>() -> Self {
         Self(Box::new(DynAdapterHolder::<F, T>(PhantomData)))
     }
 
-    pub fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError> {
+    pub(crate) fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError> {
         self.0.serialize(value)
     }
 
-    pub fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError> {
+    pub fn serialize_typed<T: Erasable>(&self, value: T) -> Result<SerializedValue, LocalError> {
+        self.serialize(&Value::new(value))
+    }
+
+    pub(crate) fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError> {
         self.0.deserialize(serialized_value)
     }
 }
@@ -195,14 +199,14 @@ impl<F: WireFormat> Debug for SerdeAdapter<F> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct SerializedValue(#[serde(with = "SliceLike::<Hex>")] Box<[u8]>);
+pub struct SerializedValue(#[serde(with = "SliceLike::<Hex>")] Box<[u8]>);
 
 impl SerializedValue {
-    pub fn new(data: Box<[u8]>) -> Self {
+    pub(crate) fn new(data: Box<[u8]>) -> Self {
         Self(data)
     }
 
-    pub fn as_ref(&self) -> &[u8] {
+    pub(crate) fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }

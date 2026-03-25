@@ -5,10 +5,13 @@ use alloc::{
 
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
-use signature::{Keypair, rand_core::SeedableRng};
+use signature::{
+    Keypair,
+    rand_core::{CryptoRngCore, SeedableRng},
+};
 
 use crate::{
-    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+    dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
     protocol_author_api::*,
     protocol_user_api::*,
 };
@@ -19,6 +22,8 @@ fn prepare_echo_pack<SP: SessionParameters>(
     let values = args.get_map::<VerifiedValue<SP>>("values_verified_map")?;
     let cloned = values
         .iter()
+        // Don't send out our own message the second time
+        .filter(|(id, _value)| id != &&args.my_id())
         .map(|(id, value)| value.to_signed_hash().map(|value| ((*id).clone(), value)))
         .collect::<Result<BTreeMap<_, _>, _>>()?;
     Ok(cloned)
@@ -36,8 +41,11 @@ fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args
     let echoed = args.get::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echoed")?;
 
     // Check that all the parties are present in the `echos_map`
+    // (except for the sender, who intentionally didn't resend their original message).
     let ids_received = echoed.keys().cloned().collect::<BTreeSet<_>>();
-    if &ids_received != all_ids {
+    let mut all_ids_except_for_sender = all_ids.clone();
+    all_ids_except_for_sender.remove(id);
+    if ids_received != all_ids_except_for_sender {
         return Err(SenderError::new());
     }
 
@@ -70,7 +78,13 @@ fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: Args
     Ok(())
 }
 
-fn verify_echo_contents<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP>) -> Result<(), ThirdPartyError<SP>> {
+fn verify_echo_contents<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), ThirdPartyError<SP>> {
+    // TODO (#9): since we're sending a message to ourself too, we need to account for that.
+    // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
+    if id == args.my_id() {
+        return Ok(());
+    }
+
     // The messages we received from all nodes
     // Their validity (correct metadata and contents) is checked elsewhere,
     // so here we assumed they are correct.
@@ -86,9 +100,27 @@ fn verify_echo_contents<SP: SessionParameters>(_id: &SP::Verifier, args: Args<SP
             .expect("we checked that the ID is present in the message map");
 
         if !ethalon.payload_hash_matches(message)? {
-            let associated_data = ((*ethalon).clone().unverify(), message);
+            let associated_data = ((*ethalon).clone().unverify(), message.clone());
             return Err(ThirdPartyError::new(from, associated_data)?);
         }
+    }
+
+    Ok(())
+}
+
+fn verify_echo_contents_error<SP: SessionParameters>(
+    session_id: &SessionId<SP>,
+    _guilty_party: &SP::Verifier,
+    associated_data: &AssociatedData<SP>,
+) -> Result<(), EvidenceError> {
+    let (message1, message2) = associated_data.deserialize::<(SignedValue<SP>, SignedValue<SP>)>()?;
+
+    if message1.metadata().session_id() != session_id {
+        return Err(EvidenceError::new("Session ID mismatch"));
+    }
+
+    if message2.metadata().session_id() != session_id {
+        return Err(EvidenceError::new("Session ID mismatch"));
     }
 
     Ok(())
@@ -147,6 +179,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
             verify_echo_contents,
             all_parties,
             &[("received", &all_values_verified), ("echoed", &echo_pack)],
+            verify_echo_contents_error,
         )?;
 
         let all_echo_packs_correct = collect(&echo_packs_correct)?;
@@ -234,6 +267,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     }
 }
 
+type SP = TestSessionParams<BinaryFormat>;
+type S = Session<SP, TestProtocol>;
+
 #[test]
 fn happy_path() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
@@ -245,10 +281,91 @@ fn happy_path() {
 
     let sessions = signers
         .into_iter()
-        .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(session_id.clone(), signer, &(), &party_group)
-                .unwrap()
-        })
+        .map(|signer| S::new(session_id.clone(), signer, &(), &party_group).unwrap())
         .collect::<Vec<_>>();
     let _results = run_sessions_sync(&mut rng, sessions).unwrap();
+}
+
+fn serialize_replacement(
+    rng: &mut dyn CryptoRngCore,
+    orig_value: &SignedValue<SP>,
+    destination: &<SP as SessionParameters>::Verifier,
+    args: &SerializeArgs<SP>,
+) -> Result<SignedValue<SP>, LocalError> {
+    if destination == &TestSigner::new(2).verifying_key() {
+        let serialized_value = args.serde_adapter().serialize_typed(Message1(*destination))?;
+        SignedValue::<SP>::new(
+            rng,
+            args.signer(),
+            args.session_id(),
+            args.message_name(),
+            destination,
+            serialized_value,
+        )
+    } else {
+        Ok(orig_value.clone())
+    }
+}
+
+fn dummy_verification(
+    _orig_value: Result<&(), ThirdPartyError<SP>>,
+    _id: &<SP as SessionParameters>::Verifier,
+    _args: Args<SP>,
+) -> Result<(), ThirdPartyError<SP>> {
+    Ok(())
+}
+
+#[test]
+fn third_party_error() {
+    let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+    let party_group = PartyGroup::new(&ids);
+
+    let mut rng = ChaCha8Rng::seed_from_u64(123);
+    let session_id = SessionId::random(&mut rng);
+
+    let sessions = signers
+        .into_iter()
+        .enumerate()
+        .map(|(idx, signer)| {
+            if idx == 0 {
+                let replacement1 = Replacement::<SP>::message(&["echo_x", "x"], serialize_replacement).unwrap();
+                let replacement2 = Replacement::<SP>::compute_mapping_third_party_attributable(
+                    &["echo_x", "echo_contents_correct"],
+                    dummy_verification,
+                )
+                .unwrap();
+                S::new_with_replacements(
+                    session_id.clone(),
+                    signer,
+                    &(),
+                    &party_group,
+                    &[&replacement1, &replacement2],
+                )
+                .unwrap()
+            } else {
+                S::new(session_id.clone(), signer, &(), &party_group).unwrap()
+            }
+        })
+        .collect::<Vec<_>>();
+    let results = run_sessions_sync(&mut rng, sessions).unwrap();
+
+    assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &());
+    assert!(results.reports[&ids[0]].provable_errors.is_empty());
+
+    assert!(results.reports[&ids[1]].is_unfinishable());
+    assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
+    assert!(
+        results.reports[&ids[1]].provable_errors[&ids[0]]
+            .verify(&party_group)
+            .is_ok()
+    );
+
+    assert!(results.reports[&ids[2]].is_unfinishable());
+    assert!(results.reports[&ids[2]].provable_errors.contains_key(&ids[0]));
+    assert!(
+        results.reports[&ids[2]].provable_errors[&ids[0]]
+            .verify(&party_group)
+            .is_ok()
+    );
 }

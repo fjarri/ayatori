@@ -6,15 +6,17 @@ mod tag;
 mod value;
 
 pub(crate) use function::{
-    InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleMappingFunctionWithSigner,
-    InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction, ScalarFunction,
-    SenderAttributableMappingFunction, SenderErrorEnum, ThirdPartyAttributableMappingFunction, ThirdPartyErrorEnum,
+    DeserializeFunction, InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
+    InfallibleScalarFunctionWithRng, MappingFunction, ScalarFunction, SenderAttributableMappingFunction,
+    SenderErrorEnum, SerializeAndSignFunction, ThirdPartyAttributableMappingFunction,
+    ThirdPartyAttributableVerificationFunction, ThirdPartyErrorEnum,
 };
-pub(crate) use tag::{AnyTag, AnyTagRef, FullName, MappingTag, ScalarTag};
-pub(crate) use value::{SerdeAdapter, SerializedValue, Value};
+pub(crate) use tag::{AnyTag, AnyTagRef, MappingTag, ScalarTag};
+pub(crate) use value::Value;
 
-pub use args::Args;
-pub use function::{SenderError, ThirdPartyError};
+pub use args::{Args, DeserializeArgs, SerializeArgs};
+pub use function::{AssociatedData, SenderError, ThirdPartyError};
 pub use message::{MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
 pub use party::PartyGroup;
-pub use value::Erasable;
+pub use tag::FullName;
+pub use value::{Erasable, SerdeAdapter, SerializedValue};

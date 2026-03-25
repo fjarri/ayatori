@@ -85,6 +85,15 @@ impl FullName {
         }
     }
 
+    #[cfg(any(test, feature = "dev"))]
+    pub(crate) fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, LocalError> {
+        let mut names = prefix_and_name.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        let name = names
+            .pop()
+            .ok_or_else(|| LocalError::new("The name must have at least one element"))?;
+        Ok(Self { prefix: names, name })
+    }
+
     pub(crate) fn with_added_prefix(self, prefix: &str) -> Self {
         let mut full_prefix = self.prefix;
         full_prefix.push(prefix.to_string());
@@ -111,10 +120,6 @@ pub(crate) struct ScalarTag {
 }
 
 impl ScalarTag {
-    pub fn full_name(&self) -> &FullName {
-        &self.full_name
-    }
-
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self {
             full_name: self.full_name.with_added_prefix(prefix),
@@ -125,6 +130,14 @@ impl ScalarTag {
     pub fn computed(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
+            kind: ScalarTagKind::Computed,
+        }
+    }
+
+    #[cfg(any(test, feature = "dev"))]
+    pub fn computed_with_full_name(full_name: FullName) -> Self {
+        Self {
+            full_name,
             kind: ScalarTagKind::Computed,
         }
     }
@@ -146,10 +159,6 @@ pub(crate) struct MappingTag {
 }
 
 impl MappingTag {
-    pub fn full_name(&self) -> &FullName {
-        &self.full_name
-    }
-
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self {
             full_name: self.full_name.with_added_prefix(prefix),
@@ -164,6 +173,14 @@ impl MappingTag {
         }
     }
 
+    #[cfg(any(test, feature = "dev"))]
+    pub fn computed_with_full_name(full_name: FullName) -> Self {
+        Self {
+            full_name,
+            kind: MappingTagKind::Computed,
+        }
+    }
+
     pub fn signed_remote(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
@@ -174,6 +191,14 @@ impl MappingTag {
     pub fn signed_local(name: &str) -> Self {
         Self {
             full_name: FullName::new(name),
+            kind: MappingTagKind::SignedLocal,
+        }
+    }
+
+    #[cfg(any(test, feature = "dev"))]
+    pub fn signed_local_with_full_name(full_name: FullName) -> Self {
+        Self {
+            full_name,
             kind: MappingTagKind::SignedLocal,
         }
     }
@@ -264,6 +289,16 @@ impl<'a> Display for AnyTagRef<'a> {
 pub(crate) enum AnyTag {
     Scalar(ScalarTag),
     Mapping(MappingTag),
+}
+
+impl AnyTag {
+    #[cfg(any(test, feature = "dev"))]
+    pub fn as_ref(&self) -> AnyTagRef<'_> {
+        match self {
+            Self::Scalar(tag) => AnyTagRef::Scalar(tag),
+            Self::Mapping(tag) => AnyTagRef::Mapping(tag),
+        }
+    }
 }
 
 impl Display for AnyTag {

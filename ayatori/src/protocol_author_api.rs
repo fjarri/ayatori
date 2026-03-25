@@ -1,9 +1,10 @@
 pub use crate::{
     entities::{
-        Args, Erasable, PartyGroup, SenderError, SignedHash, SignedValue, ThirdPartyError, VerificationError,
-        VerifiedValue,
+        Args, AssociatedData, Erasable, FullName, PartyGroup, SenderError, SerdeAdapter, SerializeArgs,
+        SerializedValue, SignedHash, SignedValue, ThirdPartyError, VerificationError, VerifiedValue,
     },
     errors::LocalError,
+    execution::EvidenceError,
     graph_representation::{
         ArgNodes, Node, PrivateInputs, ProtocolArgs, ProtocolMessage, ProtocolSignature, PublicInputs, alias,
         broadcast, call_protocol, collect, compute_mapping, compute_mapping_sender_fallible,

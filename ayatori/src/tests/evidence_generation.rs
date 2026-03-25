@@ -116,8 +116,9 @@ fn provable_error() {
         .enumerate()
         .map(|(idx, signer)| {
             if idx == 0 {
-                let replacement = Replacement::<SP>::compute_scalar("my_x", |_orig_value: &u64, _args: Args<SP>| Ok(2));
-                S::new_with_replacements(session_id.clone(), signer, &(), &party_group, replacement).unwrap()
+                let replacement =
+                    Replacement::<SP>::compute_scalar(&["my_x"], |_orig_value: &u64, _args: Args<SP>| Ok(2)).unwrap();
+                S::new_with_replacements(session_id.clone(), signer, &(), &party_group, &[&replacement]).unwrap()
             } else {
                 S::new(session_id.clone(), signer, &(), &party_group).unwrap()
             }
