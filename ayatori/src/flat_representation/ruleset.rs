@@ -139,6 +139,83 @@ fn get_on_error<SP: SessionParameters>(node: &Node<SP>, private_inputs: &BTreeSe
     }
 }
 
+fn propagate_groups<SP: SessionParameters>(
+    root: &Node<SP>,
+) -> Result<BTreeMap<MappingTag, BTreeSet<SP::Verifier>>, LocalError> {
+    let mut result: BTreeMap<MappingTag, BTreeSet<SP::Verifier>> = BTreeMap::new();
+
+    // TODO: We can have a separate iterator that walks the nodes root first,
+    // then we won't have to collect.
+    let mut nodes = root.flattened().collect::<Vec<_>>();
+    nodes.reverse();
+
+    for node in nodes {
+        match node.kind() {
+            NodeKind::ScalarArgument { .. } => {}
+            NodeKind::ComputeScalar { .. } => {}
+            NodeKind::ComputeMapping { store_in, args, .. } => {
+                let ids = result
+                    .get(store_in)
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                for arg in args.values() {
+                    if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                        result.entry(tag.clone()).or_insert(BTreeSet::new()).extend(ids.clone());
+                    }
+                }
+            }
+            NodeKind::SerializeAndSign { store_in, data, .. } => {
+                let ids = result
+                    .get(store_in)
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                if let AnyTagRef::Mapping(tag) = data.store_in() {
+                    result.entry(tag.clone()).or_insert(BTreeSet::new()).extend(ids);
+                }
+            }
+            NodeKind::Deserialize { store_in, data, .. } => {
+                let ids = result
+                    .get(store_in)
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                let tag = data
+                    .store_in()
+                    .mapping()
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: Deserialize's argument is a mapping node"))?;
+                result.entry(tag).or_insert(BTreeSet::new()).extend(ids);
+            }
+            NodeKind::DirectMessage { store_in, data, .. } => {
+                let ids = result
+                    .get(store_in)
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                let tag = data
+                    .store_in()
+                    .mapping()
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: DirectMessage's argument is a mapping node"))?;
+                result.entry(tag).or_insert(BTreeSet::new()).extend(ids);
+            }
+
+            NodeKind::Collect { values, group, .. } => {
+                let tag = values
+                    .store_in()
+                    .mapping()
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: Collect's argument is a mapping node"))?;
+                result
+                    .entry(tag)
+                    .or_insert(BTreeSet::new())
+                    .extend(group.ids().cloned());
+            }
+            NodeKind::Receive { .. } => {}
+        }
+    }
+
+    Ok(result)
+}
+
 #[derive(Debug)]
 enum State {
     InProgress,
@@ -167,6 +244,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
             .scalar()
             .cloned()
             .ok_or_else(|| LocalError::new("The output node must be a scalar node"))?;
+
+        let propagated_ids = propagate_groups(output_node)?;
 
         let mut compute_scalar_rules = Vec::new();
         let mut compute_mapping_rules = Vec::new();
@@ -221,11 +300,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     store_in,
                     function,
                     args,
-                    group,
                 } => {
                     let on_error = get_on_error(&node, private_inputs);
+                    let possible_ids = propagated_ids.get(store_in).ok_or_else(|| {
+                        LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                    })?;
 
-                    let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
                     let mut scalar_condition = ScalarCondition::empty();
                     let mut element_condition = ElementCondition::empty();
                     for arg in args.values() {
@@ -238,7 +318,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     }
 
                     let element_conditions = possible_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(|id| (id, element_condition.clone()))
                         .collect();
 
@@ -264,11 +345,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     store_in,
                     function,
                     data,
-                    group,
                     message_name,
                     serde_adapter,
                 } => {
-                    let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
+                    let possible_ids = propagated_ids.get(store_in).ok_or_else(|| {
+                        LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                    })?;
 
                     let tag = data.store_in();
 
@@ -281,7 +363,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     }
 
                     let element_conditions = possible_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(|id| (id, element_condition.clone()))
                         .collect();
 
@@ -300,12 +383,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     store_in,
                     function,
                     data,
-                    group,
                     serde_adapter,
                 } => {
                     let on_error = get_on_error(&node, private_inputs);
 
-                    let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
+                    let possible_ids = propagated_ids.get(store_in).ok_or_else(|| {
+                        LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                    })?;
 
                     let tag = data
                         .store_in()
@@ -314,7 +398,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     let element_condition = ElementCondition::empty().and(tag);
                     let element_conditions = possible_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(|id| (id, element_condition.clone()))
                         .collect();
 
@@ -328,15 +413,18 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         on_error,
                     })
                 }
-                NodeKind::DirectMessage { store_in, data, group } => {
-                    let possible_ids = group.ids().cloned().collect::<BTreeSet<_>>();
+                NodeKind::DirectMessage { store_in, data } => {
+                    let possible_ids = propagated_ids.get(store_in).ok_or_else(|| {
+                        LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                    })?;
 
                     let tag = data.store_in().mapping().ok_or_else(|| {
                         LocalError::new("Assumption: DirectMessage node is expected to send mapping data")
                     })?;
                     let element_condition = ElementCondition::empty().and(tag);
                     let element_conditions = possible_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(|id| (id, element_condition.clone()))
                         .collect();
                     send_rules.push(SendRule {
@@ -363,12 +451,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         values: tag.clone(),
                     });
                 }
-                NodeKind::Receive {
-                    store_in: _store_in,
-                    group,
-                    message_name,
-                } => {
-                    expected_messages.insert(message_name.clone(), group.ids().cloned().collect());
+                NodeKind::Receive { store_in, message_name } => {
+                    let possible_ids = propagated_ids.get(store_in).ok_or_else(|| {
+                        LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                    })?;
+                    expected_messages.insert(message_name.clone(), possible_ids.clone());
                 }
             };
         }

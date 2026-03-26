@@ -71,10 +71,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let all_parties = build_data;
         let my_x = compute_scalar("my_x", gen_value, &[])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x, all_parties)?;
-        let x_correct = compute_mapping_sender_fallible("x_correct", verify, all_parties, &[("x", &x)])?;
-        let all_x_correct = collect(&x_correct)?.with_dependencies(&[&x_broadcasted])?;
-        let all_x = collect(&x)?;
+        let x = receive(&message_x)?;
+        let x_correct = compute_mapping_sender_fallible("x_correct", verify, &[("x", &x)])?;
+        let all_x_correct = collect(&x_correct, all_parties)?.with_dependencies(&[&x_broadcasted])?;
+        let all_x = collect(&x, all_parties)?;
         compute_scalar("output", gen_output, &[("x", &all_x)])?.with_dependencies(&[&all_x_correct])
     }
 }

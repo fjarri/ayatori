@@ -18,7 +18,7 @@ use crate::{
     traits::SessionParameters,
 };
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct SerializeArgs<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
     session_id: SessionId<SP>,
@@ -65,7 +65,7 @@ impl<SP: SessionParameters> SerializeArgs<SP> {
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct DeserializeArgs<SP: SessionParameters> {
     serde_adapter: SerdeAdapter<SP::WireFormat>,
     value: Value,
@@ -102,8 +102,7 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
     }
 }
 
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
+#[derive_where::derive_where(Debug, Clone)]
 pub struct Args<SP: SessionParameters> {
     session_id: SessionId<SP>,
     my_id: SP::Verifier,

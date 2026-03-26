@@ -44,12 +44,8 @@ impl<SP: SessionParameters> Node<SP> {
         Self::new_typed(TypedNode::new(kind))
     }
 
-    pub fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
-        self.0.group()
-    }
-
     pub fn with_dependencies(self, dependencies: &[&Self]) -> Result<Self, LocalError> {
-        if !dependencies.iter().all(|node| node.group().is_none()) {
+        if !dependencies.iter().all(|node| node.store_in().scalar().is_some()) {
             return Err(LocalError::new("Dependencies must be scalar nodes"));
         }
         Ok(Self::new_typed(
@@ -69,10 +65,6 @@ impl<SP: SessionParameters> Node<SP> {
 
     pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
         self.0.store_in()
-    }
-
-    pub(crate) fn store_in_and_group(&self) -> Option<(&MappingTag, &PartyGroup<SP::Verifier>)> {
-        self.0.kind().store_in_and_group()
     }
 
     pub(crate) fn dependencies(&self) -> &[Node<SP>] {
@@ -106,19 +98,19 @@ impl<SP: SessionParameters> Node<SP> {
     pub(crate) fn get_reproduction_subtree(
         &self,
         tag: &MappingTag,
-        verifier: &SP::Verifier,
+        guilty_party: &SP::Verifier,
     ) -> Result<Self, LocalError> {
         let node = self
             .find_subnode(AnyTagRef::Mapping(tag))
             .ok_or_else(|| LocalError::new(format!("Node {tag} was not found")))?;
         let node = node.tree_without_dependencies();
 
-        // The output must be a scalar node, and `node` is an mapping node.
+        // The output must be a scalar node, and `node` is a mapping node.
         // So we wrap it in a collection node.
         let wrapped = Node::new(NodeKind::Collect {
             store_in: tag.collected(),
             values: node.get_strong_ref(),
-            group: PartyGroup::new(core::slice::from_ref(verifier)),
+            group: PartyGroup::new(core::slice::from_ref(guilty_party)),
         });
 
         Ok(wrapped)
@@ -325,10 +317,6 @@ impl<SP: SessionParameters> TypedNode<SP> {
         &self.dependencies
     }
 
-    fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
-        self.kind.group()
-    }
-
     fn kind(&self) -> &NodeKind<SP> {
         &self.kind
     }
@@ -396,14 +384,12 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeMapping {
         store_in: MappingTag,
         function: MappingFunction<SP>,
-        group: PartyGroup<SP::Verifier>,
         args: BTreeMap<String, Node<SP>>,
     },
     SerializeAndSign {
         store_in: MappingTag,
         function: SerializeAndSignFunction<SP>,
         data: Node<SP>,
-        group: PartyGroup<SP::Verifier>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         message_name: FullName,
     },
@@ -411,13 +397,11 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         store_in: MappingTag,
         function: DeserializeFunction<SP>,
         data: Node<SP>,
-        group: PartyGroup<SP::Verifier>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
     DirectMessage {
         store_in: MappingTag,
         data: Node<SP>,
-        group: PartyGroup<SP::Verifier>,
     },
     Collect {
         store_in: ScalarTag,
@@ -426,7 +410,6 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
     },
     Receive {
         store_in: MappingTag,
-        group: PartyGroup<SP::Verifier>,
         message_name: FullName,
     },
     ScalarArgument {
@@ -454,7 +437,6 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             Self::ComputeMapping {
                 store_in: _store_in,
                 function,
-                group: _group,
                 args,
             } => {
                 write!(
@@ -474,7 +456,6 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             Self::DirectMessage {
                 store_in: _store_in,
                 data,
-                group: _group,
             } => {
                 write!(f, "direct_message({})", data.store_in())
             }
@@ -487,7 +468,7 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
             }
             Self::Receive {
                 store_in: _store_in,
-                group: _group,
+
                 message_name: _message_name,
             } => write!(f, "receive()"),
             Self::ScalarArgument {
@@ -512,28 +493,6 @@ impl<SP: SessionParameters> NodeKind<SP> {
         }
     }
 
-    fn store_in_and_group(&self) -> Option<(&MappingTag, &PartyGroup<SP::Verifier>)> {
-        match self {
-            Self::ComputeMapping { store_in, group, .. }
-            | Self::SerializeAndSign { store_in, group, .. }
-            | Self::Deserialize { store_in, group, .. }
-            | Self::DirectMessage { store_in, group, .. }
-            | Self::Receive { store_in, group, .. } => Some((store_in, group)),
-            Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
-        }
-    }
-
-    fn group(&self) -> Option<&PartyGroup<SP::Verifier>> {
-        match self {
-            Self::ComputeMapping { group, .. }
-            | Self::SerializeAndSign { group, .. }
-            | Self::Deserialize { group, .. }
-            | Self::DirectMessage { group, .. }
-            | Self::Receive { group, .. } => Some(group),
-            Self::Collect { .. } | Self::ComputeScalar { .. } | Self::ScalarArgument { .. } => None,
-        }
-    }
-
     fn shallow_clone(&self) -> Self {
         match self {
             Self::ComputeScalar {
@@ -548,26 +507,22 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeMapping {
                 store_in,
                 function,
-                group,
                 args,
             } => Self::ComputeMapping {
                 store_in: store_in.clone(),
                 function: function.clone(),
-                group: group.clone(),
                 args: arg_map_to_owned(args),
             },
             Self::SerializeAndSign {
                 store_in,
                 function,
                 data,
-                group,
                 message_name,
                 serde_adapter,
             } => Self::SerializeAndSign {
                 store_in: store_in.clone(),
                 function: function.clone(),
                 data: data.get_strong_ref(),
-                group: group.clone(),
                 message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
@@ -575,19 +530,16 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 store_in,
                 function,
                 data,
-                group,
                 serde_adapter,
             } => Self::Deserialize {
                 store_in: store_in.clone(),
                 function: function.clone(),
                 data: data.get_strong_ref(),
-                group: group.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
-            Self::DirectMessage { store_in, data, group } => Self::DirectMessage {
+            Self::DirectMessage { store_in, data } => Self::DirectMessage {
                 store_in: store_in.clone(),
                 data: data.get_strong_ref(),
-                group: group.clone(),
             },
             Self::Collect {
                 store_in,
@@ -598,13 +550,8 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 values: values.get_strong_ref(),
                 group: group.clone(),
             },
-            Self::Receive {
-                store_in,
-                group,
-                message_name,
-            } => Self::Receive {
+            Self::Receive { store_in, message_name } => Self::Receive {
                 store_in: store_in.clone(),
-                group: group.clone(),
                 message_name: message_name.clone(),
             },
             Self::ScalarArgument { store_in, name } => Self::ScalarArgument {

@@ -17,7 +17,7 @@ use crate::{
     traits::SessionParameters,
 };
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 enum ComputeFunction<SP: SessionParameters> {
     ScalarInfallible {
         store_in: ScalarTag,
@@ -52,7 +52,7 @@ enum ComputeFunction<SP: SessionParameters> {
     },
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct ComputeTask<SP: SessionParameters> {
     function: ComputeFunction<SP>,
 }
@@ -135,7 +135,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 enum ComputeWithRngFunction<SP: SessionParameters> {
     ScalarInfallible {
         store_in: ScalarTag,
@@ -156,7 +156,7 @@ enum ComputeWithRngFunction<SP: SessionParameters> {
     },
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct ComputeWithRngTask<SP: SessionParameters> {
     function: ComputeWithRngFunction<SP>,
 }
@@ -194,7 +194,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct SendTask<SP: SessionParameters> {
     store_in: MappingTag,
     destination: SP::Verifier,
@@ -232,7 +232,7 @@ impl FinalizeWithStallTask {
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum Task<SP: SessionParameters> {
     Send(SendTask<SP>),
     Compute(ComputeTask<SP>),

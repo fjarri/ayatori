@@ -143,6 +143,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
             session_id.clone(),
             &self.failed_at,
             &self.reported_by,
+            guilty_party,
             shared_data,
         )?;
 

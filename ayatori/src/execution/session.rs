@@ -169,12 +169,13 @@ where
     pub(crate) fn new_with_reproduction_subtree(
         id: SessionId<SP>,
         subtree_root: &MappingTag,
-        verifier: &SP::Verifier,
+        reported_by: &SP::Verifier,
+        guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
     ) -> Result<Self, LocalError> {
         let output_node =
-            make_tree::<SP, P>(verifier, shared_data)?.get_reproduction_subtree(subtree_root, verifier)?;
-        Self::new_inner(id, None, verifier, output_node, PrivateInputs::new(), shared_data)
+            make_tree::<SP, P>(reported_by, shared_data)?.get_reproduction_subtree(subtree_root, guilty_party)?;
+        Self::new_inner(id, None, reported_by, output_node, PrivateInputs::new(), shared_data)
     }
 
     #[cfg(any(test, feature = "dev"))]

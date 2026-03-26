@@ -151,7 +151,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                     store_in,
                     function,
                     args,
-                    group,
                 },
                 ReplacementEnum::ComputeMapping {
                     function: replacement_function,
@@ -185,7 +184,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                         .iter()
                         .map(|(name, node)| (name.clone(), node.get_strong_ref()))
                         .collect(),
-                    group: group.clone(),
                 })
                 .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
             }
@@ -194,7 +192,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                     store_in,
                     function,
                     data,
-                    group,
                     serde_adapter,
                     message_name,
                 },
@@ -213,7 +210,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                     store_in: store_in.clone(),
                     function: new_function,
                     data: data.get_strong_ref(),
-                    group: group.clone(),
                     serde_adapter: serde_adapter.clone(),
                     message_name: message_name.clone(),
                 })

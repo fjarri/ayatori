@@ -145,11 +145,11 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let my_value = inputs.get("value")?;
 
         let value_broadcasted = broadcast(message, my_value, all_parties)?;
-        let (values_verified, values) = receive_split(message, all_parties)?;
+        let (values_verified, values) = receive_split(message)?;
 
         let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echo");
-        let all_values_verified = collect(&values_verified)?;
-        let all_values_deserialized = collect(&values)?;
+        let all_values_verified = collect(&values_verified, all_parties)?;
+        let all_values_deserialized = collect(&values, all_parties)?;
 
         let my_echo_pack_sendable = compute_scalar(
             "my_echo_pack_signed",
@@ -160,13 +160,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         .with_dependencies(&[&all_values_deserialized])?;
 
         let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties)?;
-        let echo_pack = receive(&message_echo, all_parties)?;
+        let echo_pack = receive(&message_echo)?;
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
         let echo_packs_correct = compute_mapping_sender_fallible(
             "echo_packs_correct",
             verify_echo_pack_correct,
-            all_parties,
             &[
                 ("all_ids", &all_ids),
                 ("received", &all_values_verified),
@@ -176,13 +175,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let echo_contents_correct = compute_mapping_third_party_fallible(
             "echo_contents_correct",
             verify_echo_contents,
-            all_parties,
             &[("received", &all_values_verified), ("echoed", &echo_pack)],
             verify_echo_contents_error,
         )?;
 
-        let all_echo_packs_correct = collect(&echo_packs_correct)?;
-        let all_echo_contents_correct = collect(&echo_contents_correct)?;
+        let all_echo_packs_correct = collect(&echo_packs_correct, all_parties)?;
+        let all_echo_contents_correct = collect(&echo_contents_correct, all_parties)?;
         let output = alias("output", &values).with_dependencies(&[
             &value_broadcasted,
             &all_echo_packs_correct,
@@ -260,7 +258,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             ProtocolArgs::new().input("value", &my_x),
         )?;
 
-        let all_x = collect(&x)?;
+        let all_x = collect(&x, all_parties)?;
 
         compute_scalar("output", gen_output, &[("x", &all_x)])
     }
