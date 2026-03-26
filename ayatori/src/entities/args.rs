@@ -102,7 +102,7 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
     }
 }
 
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug)]
 pub struct Args<SP: SessionParameters> {
     session_id: SessionId<SP>,
     my_id: SP::Verifier,
