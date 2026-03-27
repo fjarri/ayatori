@@ -8,7 +8,7 @@ mod task;
 pub(crate) use session::SessionData;
 
 pub use evidence::{Evidence, EvidenceError};
-pub use message::{Message, MessageWithId};
-pub use session::{PreprocessingError, Session, SessionReport};
+pub use message::Message;
+pub use session::{Session, SessionReport, TaskError};
 pub use session_id::SessionId;
 pub use task::Task;

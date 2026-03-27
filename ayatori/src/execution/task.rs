@@ -6,7 +6,7 @@ use signature::rand_core::CryptoRngCore;
 use super::{message::Message, session::SessionData};
 use crate::{
     entities::{
-        AnyTagRef, Args, AssociatedData, DeserializeArgs, DeserializeFunction, InfallibleMappingFunction,
+        Args, AssociatedData, DeserializeArgs, DeserializeFunction, InfallibleMappingFunction,
         InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingTag,
         MessageId, ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum,
         SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError,
@@ -49,6 +49,9 @@ enum ComputeFunction<SP: SessionParameters> {
         id: SP::Verifier,
         args: DeserializeArgs<SP>,
         on_error: OnError,
+    },
+    PreprocessMessage {
+        task: PreprocessingTask<SP>,
     },
 }
 
@@ -131,6 +134,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 };
                 Ok(TaskResult(TaskResultEnum::ComputeMapping { store_in, id, result }))
             }
+            ComputeFunction::PreprocessMessage { task } => task.execute(),
         }
     }
 }
@@ -242,6 +246,12 @@ pub enum Task<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Task<SP> {
+    pub(crate) fn preprocess_message(task: PreprocessingTask<SP>) -> Self {
+        Self::Compute(ComputeTask {
+            function: ComputeFunction::PreprocessMessage { task },
+        })
+    }
+
     pub(crate) fn finalize_with_success(tag: ScalarTag) -> Self {
         Self::FinalizeWithSuccess(FinalizeWithSuccessTask(tag))
     }
@@ -398,16 +408,6 @@ impl<SP: SessionParameters> TaskResult<SP> {
     pub(crate) fn into_enum(self) -> TaskResultEnum<SP> {
         self.0
     }
-
-    pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
-        match &self.0 {
-            TaskResultEnum::Compute { store_in, .. } => AnyTagRef::Scalar(store_in),
-            TaskResultEnum::Send { store_in, .. }
-            | TaskResultEnum::ComputeMapping { store_in, .. }
-            | TaskResultEnum::SenderError { store_in, .. }
-            | TaskResultEnum::ThirdPartyError { store_in, .. } => AnyTagRef::Mapping(store_in),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -435,9 +435,18 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
         id: SP::Verifier,
         associated_data: AssociatedData<SP>,
     },
+    PreprocessingSuccess {
+        store_in: MappingTag,
+        id: SP::Verifier,
+        value: Value,
+    },
+    MessageError {
+        message_id: MessageId<SP>,
+        description: String,
+    },
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct PreprocessingTask<SP: SessionParameters> {
     session_data: Arc<SessionData<SP>>,
     message_id: MessageId<SP>,
@@ -457,7 +466,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         }
     }
 
-    pub fn execute(self) -> Result<PreprocessingResult<SP>, LocalError> {
+    pub fn execute(self) -> Result<TaskResult<SP>, LocalError> {
         // Before storing the value in the database, we check for the failures that are unattributable at this level.
         // In case of a failure all we can do is report the message ID and let the user deal with it
         // if their transport protocol allows it.
@@ -470,7 +479,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         // If it is not, even if we detect something provably wrong with it,
         // the proof will be useless.
         if !self.session_data.participants.contains(self.signed_value.source()) {
-            return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
+            return Ok(TaskResult(TaskResultEnum::MessageError {
                 message_id: self.message_id,
                 description: format!("A sender {source:?} is not one of the participants"),
             }));
@@ -483,7 +492,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             .local_participants
             .contains(self.signed_value.metadata().destination())
         {
-            return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
+            return Ok(TaskResult(TaskResultEnum::MessageError {
                 message_id: self.message_id,
                 description: format!(
                     "A destination {:?} is not one of the local participants",
@@ -495,7 +504,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         // Check that the value belongs to the this session.
         // If it does not, it may be a replay attack.
         if self.signed_value.metadata().session_id() != &self.session_data.id {
-            return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
+            return Ok(TaskResult(TaskResultEnum::MessageError {
                 message_id: self.message_id,
                 description: "Invalid session ID".into(),
             }));
@@ -506,7 +515,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             Ok(value) => value,
             Err(VerificationError::Local(error)) => return Err(error),
             Err(VerificationError::SignatureMismatch) => {
-                return Ok(PreprocessingResult(PreprocessingResultEnum::MessageError {
+                return Ok(TaskResult(TaskResultEnum::MessageError {
                     message_id: self.message_id.clone(),
                     description: format!("Verification error for a message from {source:?}"),
                 }));
@@ -516,32 +525,10 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         let store_in = MappingTag::signed_remote_with_full_name(verified_value.metadata().full_name());
         let value = Value::new(verified_value);
 
-        Ok(PreprocessingResult(PreprocessingResultEnum::Success {
+        Ok(TaskResult(TaskResultEnum::PreprocessingSuccess {
             store_in,
             id: source,
             value,
         }))
     }
-}
-
-#[derive(Debug)]
-pub struct PreprocessingResult<SP: SessionParameters>(PreprocessingResultEnum<SP>);
-
-impl<SP: SessionParameters> PreprocessingResult<SP> {
-    pub(crate) fn into_enum(self) -> PreprocessingResultEnum<SP> {
-        self.0
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum PreprocessingResultEnum<SP: SessionParameters> {
-    Success {
-        store_in: MappingTag,
-        id: SP::Verifier,
-        value: Value,
-    },
-    MessageError {
-        message_id: MessageId<SP>,
-        description: String,
-    },
 }

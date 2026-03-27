@@ -12,20 +12,17 @@ use signature::Keypair;
 
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
-    message::MessageWithId,
+    message::Message,
     session_id::SessionId,
     storage::Storage,
-    task::{
-        FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingResult, PreprocessingResultEnum,
-        PreprocessingTask, Task, TaskResult, TaskResultEnum,
-    },
+    task::{FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
 #[cfg(any(test, feature = "dev"))]
 use crate::dev::Replacement;
 use crate::{
     entities::{
         AnyTag, Args, DeserializeArgs, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag,
-        SerializeArgs, SignedValue, Value, VerifiedValue,
+        SerializeArgs, Value, VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
@@ -33,7 +30,7 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct SessionData<SP: SessionParameters> {
     pub(crate) id: SessionId<SP>,
     pub(crate) participants: BTreeSet<SP::Verifier>,
@@ -56,6 +53,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     data: Arc<SessionData<SP>>,
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
+    preprocessing_tasks: Vec<PreprocessingTask<SP>>,
     phantom: PhantomData<P>,
 }
 
@@ -105,6 +103,7 @@ where
             data,
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
+            preprocessing_tasks: Vec::new(),
             phantom: PhantomData,
         };
 
@@ -247,7 +246,19 @@ where
         self.make_report(SessionOutcome::ManuallyTerminated)
     }
 
+    pub fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
+        let tasks = message
+            .into_values()
+            .map(|signed_value| PreprocessingTask::new(&self.data, message_id.clone(), signed_value))
+            .collect::<Vec<_>>();
+        self.preprocessing_tasks.extend(tasks);
+    }
+
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
+        if let Some(task) = self.preprocessing_tasks.pop() {
+            return Ok(Some(Task::preprocess_message(task)));
+        }
+
         while let Some(action) = self.ruleset.pop_action()? {
             match action {
                 Action::ReturnOutput(tag) => {
@@ -352,69 +363,7 @@ where
         Ok(None)
     }
 
-    pub(crate) fn make_preprocessing_task(
-        &self,
-        message_id: &MessageId<SP>,
-        signed_value: SignedValue<SP>,
-    ) -> PreprocessingTask<SP> {
-        PreprocessingTask::new(&self.data, message_id.clone(), signed_value)
-    }
-
-    pub fn preprocess_message(&self, message: MessageWithId<SP>) -> impl Iterator<Item = PreprocessingTask<SP>> {
-        let message_id = message.id().clone();
-        message
-            .into_values()
-            .map(move |signed_value| self.make_preprocessing_task(&message_id, signed_value))
-    }
-
-    pub fn add_preprocess_result(&mut self, result: PreprocessingResult<SP>) -> Result<(), PreprocessingError<SP>> {
-        match result.into_enum() {
-            PreprocessingResultEnum::Success { store_in, id, value } => {
-                if let Ok(existing_value) = self.storage.get_elem(&store_in, &id) {
-                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
-                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
-
-                    // Both values are signed, contain the same named value, but are different.
-                    // This is a provable failure.
-                    // Note that the payload or metadata of either value may still be invalid
-                    // (it is possible that it has not been checked yet at this point),
-                    // but it does not matter since we already got our evidence.
-                    if typed_existing_value.metadata() != typed_received_value.metadata()
-                        || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
-                    {
-                        let evidence = EvidenceEnum::ConflictingMessages(ConflictingMessagesEvidence::new(
-                            typed_existing_value,
-                            typed_received_value,
-                        ));
-                        self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
-                        return Ok(());
-                    }
-
-                    // The message is a duplicate, we cannot do anything at this point.
-                    // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
-                    // For now we can only report both message IDs that delivered these values,
-                    // and let the user deal with it, if possible.
-                    return Err(PreprocessingError::DuplicateMessages(DuplicateMessagesError {
-                        first: typed_existing_value.message_id().clone(),
-                        second: typed_existing_value.message_id().clone(),
-                    }));
-                }
-
-                self.add_element(&store_in, &id, value)?;
-
-                Ok(())
-            }
-            PreprocessingResultEnum::MessageError {
-                message_id,
-                description,
-            } => Err(PreprocessingError::InvalidMessage(InvalidMessageError {
-                message_id,
-                description,
-            })),
-        }
-    }
-
-    pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), LocalError> {
+    pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
             TaskResultEnum::Send { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
@@ -453,13 +402,55 @@ where
                 ));
                 self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
             }
+            TaskResultEnum::PreprocessingSuccess { store_in, id, value } => {
+                if let Ok(existing_value) = self.storage.get_elem(&store_in, &id) {
+                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
+                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+
+                    // Both values are signed, contain the same named value, but are different.
+                    // This is a provable failure.
+                    // Note that the payload or metadata of either value may still be invalid
+                    // (it is possible that it has not been checked yet at this point),
+                    // but it does not matter since we already got our evidence.
+                    if typed_existing_value.metadata() != typed_received_value.metadata()
+                        || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
+                    {
+                        let evidence = EvidenceEnum::ConflictingMessages(ConflictingMessagesEvidence::new(
+                            typed_existing_value,
+                            typed_received_value,
+                        ));
+                        self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
+                        return Ok(());
+                    }
+
+                    // The message is a duplicate, we cannot do anything at this point.
+                    // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
+                    // For now we can only report both message IDs that delivered these values,
+                    // and let the user deal with it, if possible.
+                    return Err(TaskError::DuplicateMessages(DuplicateMessagesError {
+                        first: typed_existing_value.message_id().clone(),
+                        second: typed_existing_value.message_id().clone(),
+                    }));
+                }
+
+                self.add_element(&store_in, &id, value)?;
+            }
+            TaskResultEnum::MessageError {
+                message_id,
+                description,
+            } => {
+                return Err(TaskError::InvalidMessage(InvalidMessageError {
+                    message_id,
+                    description,
+                }));
+            }
         }
         Ok(())
     }
 }
 
 #[derive_where::derive_where(Debug)]
-pub enum PreprocessingError<SP: SessionParameters> {
+pub enum TaskError<SP: SessionParameters> {
     Local(LocalError),
     InvalidMessage(InvalidMessageError<SP>),
     DuplicateMessages(DuplicateMessagesError<SP>),
@@ -471,15 +462,9 @@ pub struct InvalidMessageError<SP: SessionParameters> {
     pub description: String,
 }
 
-impl<SP: SessionParameters> From<LocalError> for PreprocessingError<SP> {
+impl<SP: SessionParameters> From<LocalError> for TaskError<SP> {
     fn from(source: LocalError) -> Self {
         Self::Local(source)
-    }
-}
-
-impl<SP: SessionParameters> From<InvalidMessageError<SP>> for PreprocessingError<SP> {
-    fn from(source: InvalidMessageError<SP>) -> Self {
-        Self::InvalidMessage(source)
     }
 }
 

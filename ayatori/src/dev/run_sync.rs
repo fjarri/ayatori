@@ -3,8 +3,9 @@ use alloc::{collections::BTreeMap, format, vec::Vec};
 use signature::rand_core::CryptoRngCore;
 
 use crate::{
+    entities::MessageId,
     errors::LocalError,
-    execution::{Message, PreprocessingError, Session, SessionReport, Task},
+    execution::{Message, Session, SessionReport, Task, TaskError},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -33,34 +34,19 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
                 .drain(..)
             {
-                let message_with_id = message.attach_id(rng);
-                let tasks = session.preprocess_message(message_with_id).collect::<Vec<_>>();
-
-                for task in tasks {
-                    let result = task.execute()?;
-                    match session.add_preprocess_result(result) {
-                        Ok(()) => {}
-                        Err(PreprocessingError::Local(error)) => return Err(error),
-                        // TODO (#40): record this for the final report instead of terminating straight away
-                        Err(PreprocessingError::InvalidMessage(error)) => {
-                            return Err(LocalError::new(format!("Invalid message: {error:?}")));
-                        }
-                        Err(PreprocessingError::DuplicateMessages(error)) => {
-                            return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
-                        }
-                    };
-                }
+                let message_id = MessageId::random(rng);
+                session.add_message(&message_id, message);
             }
 
             if let Some(task) = session.make_task()? {
-                match task {
+                let task_result = match task {
                     Task::Compute(task) => {
                         let result = task.compute()?;
-                        session.add_result(result)?;
+                        session.add_result(result)
                     }
                     Task::ComputeWithRng(task) => {
                         let result = task.compute(rng)?;
-                        session.add_result(result)?;
+                        session.add_result(result)
                     }
                     Task::Send(task) => {
                         let (message, result) = task.compute()?;
@@ -69,16 +55,29 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                             .get_mut(&destination)
                             .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
                             .push(message);
-                        session.add_result(result)?;
+                        session.add_result(result)
                     }
                     Task::FinalizeWithSuccess(token) => {
                         finished_with_success.push((id.clone(), token));
+                        Ok(())
                     }
                     Task::FinalizeWithStall(token) => {
                         finished_with_stall.push((id.clone(), token));
+                        Ok(())
+                    }
+                };
+                task_processed = true;
+
+                match task_result {
+                    Ok(()) => {}
+                    Err(TaskError::Local(error)) => return Err(error),
+                    Err(TaskError::InvalidMessage(error)) => {
+                        return Err(LocalError::new(format!("Invalid message: {error:?}")));
+                    }
+                    Err(TaskError::DuplicateMessages(error)) => {
+                        return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
                     }
                 }
-                task_processed = true;
             }
         }
 
