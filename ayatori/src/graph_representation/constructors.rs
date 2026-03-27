@@ -49,13 +49,10 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
 }
 
 pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
-    Node::new(
-        // TODO (#62): a special tag type?
-        NodeKind::ScalarArgument {
-            store_in: ScalarTag::computed(name),
-            name: name.to_string(),
-        },
-    )
+    Node::new(NodeKind::ScalarArgument {
+        store_in: ScalarTag::argument(name),
+        name: name.to_string(),
+    })
 }
 
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {

@@ -15,6 +15,7 @@ pub(crate) enum ScalarTagKind {
     /// The name of the tag will come from what the user provided when creating the node.
     /// The contents are of some user type.
     Computed,
+    Argument,
     Collected(MappingTagKind),
 }
 
@@ -22,6 +23,7 @@ impl Display for ScalarTagKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::Computed => write!(f, ""),
+            Self::Argument => write!(f, "arg"),
             Self::Collected(kind) => {
                 write!(f, "collected")?;
                 if !matches!(kind, MappingTagKind::Computed) {
@@ -124,6 +126,13 @@ impl ScalarTag {
         Self {
             full_name: self.full_name.with_added_prefix(prefix),
             kind: self.kind,
+        }
+    }
+
+    pub fn argument(name: &str) -> Self {
+        Self {
+            full_name: FullName::new(name),
+            kind: ScalarTagKind::Argument,
         }
     }
 

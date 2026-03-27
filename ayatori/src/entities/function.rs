@@ -138,6 +138,7 @@ macro_rules! define_function_type_erased {
     }
 }
 
+// TODO: do we still need this separate from the macro above?
 macro_rules! define_function_type {
     ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> $error_type:ty ) => {
 
