@@ -89,7 +89,7 @@ impl<SP: SessionParameters> Node<SP> {
 
     pub fn display_tree(&self) -> String {
         let mut s = String::new();
-        for node in self.flattened() {
+        for node in self.flattened_post_order() {
             writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
         }
         s
@@ -117,7 +117,7 @@ impl<SP: SessionParameters> Node<SP> {
     }
 
     fn is_local(&self) -> bool {
-        for node in self.flattened_args() {
+        for node in self.flattened_post_order_args_only() {
             if matches!(node.kind(), NodeKind::Receive { .. }) {
                 return false;
             }
@@ -129,7 +129,7 @@ impl<SP: SessionParameters> Node<SP> {
         let mut arguments = BTreeSet::<String>::new();
         let mut messages = BTreeSet::<FullName>::new();
 
-        for node in self.flattened_args() {
+        for node in self.flattened_post_order_args_only() {
             match node.kind() {
                 NodeKind::ComputeScalar { function, .. } => {
                     if !function.is_reproducible() {
@@ -166,16 +166,23 @@ impl<SP: SessionParameters> Node<SP> {
         Reproducibility::Available { arguments, messages }
     }
 
-    pub(crate) fn flattened(&self) -> TreeIterator<SP> {
-        TreeIterator::new(self, false)
+    pub(crate) fn flattened_pre_order(&self) -> Vec<Self> {
+        // TODO: actual pre-order iterator.
+        let mut post_order = self.flattened_post_order().collect::<Vec<_>>();
+        post_order.reverse();
+        post_order
     }
 
-    pub(crate) fn flattened_args(&self) -> TreeIterator<SP> {
-        TreeIterator::new(self, true)
+    pub(crate) fn flattened_post_order(&self) -> PostOrderTreeIterator<SP> {
+        PostOrderTreeIterator::new(self, false)
+    }
+
+    pub(crate) fn flattened_post_order_args_only(&self) -> PostOrderTreeIterator<SP> {
+        PostOrderTreeIterator::new(self, true)
     }
 
     pub(crate) fn find_subnode(&self, tag: AnyTagRef<'_>) -> Option<Self> {
-        self.flattened()
+        self.flattened_post_order()
             .find(|subnode| subnode.store_in() == tag)
             .map(|node| node.get_strong_ref())
     }
@@ -219,7 +226,7 @@ impl<SP: SessionParameters> Node<SP> {
     fn mutate_tree(&self, f: impl Fn(Self) -> Result<Self, LocalError>) -> Result<Self, LocalError> {
         let mut replacement_nodes = BTreeMap::new();
 
-        for node in self.flattened() {
+        for node in self.flattened_post_order() {
             if node.id() == self.id() {
                 // This is the last element of the iterator, and we will process it separately.
                 break;
@@ -237,15 +244,16 @@ impl<SP: SessionParameters> Node<SP> {
     }
 }
 
-/// Iterates over the node subtree including the root node depth-first.
+/// Iterates over the node subtree including the root node in post-order.
+///
 /// That is, the nodes are emitted in such a way that for every node all its dependencies preceed it.
-pub(crate) struct TreeIterator<SP: SessionParameters> {
+pub(crate) struct PostOrderTreeIterator<SP: SessionParameters> {
     queue: Vec<Node<SP>>,
     seen: BTreeSet<usize>,
     args_only: bool,
 }
 
-impl<SP: SessionParameters> TreeIterator<SP> {
+impl<SP: SessionParameters> PostOrderTreeIterator<SP> {
     fn new(root: &Node<SP>, args_only: bool) -> Self {
         Self {
             queue: vec![root.get_strong_ref()],
@@ -255,7 +263,7 @@ impl<SP: SessionParameters> TreeIterator<SP> {
     }
 }
 
-impl<SP: SessionParameters> Iterator for TreeIterator<SP> {
+impl<SP: SessionParameters> Iterator for PostOrderTreeIterator<SP> {
     type Item = Node<SP>;
 
     fn next(&mut self) -> Option<Self::Item> {

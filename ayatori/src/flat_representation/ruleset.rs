@@ -138,12 +138,7 @@ fn propagate_groups<SP: SessionParameters>(
 ) -> Result<BTreeMap<MappingTag, BTreeSet<SP::Verifier>>, LocalError> {
     let mut result: BTreeMap<MappingTag, BTreeSet<SP::Verifier>> = BTreeMap::new();
 
-    // TODO: We can have a separate iterator that walks the nodes root first,
-    // then we won't have to collect.
-    let mut nodes = root.flattened().collect::<Vec<_>>();
-    nodes.reverse();
-
-    for node in nodes {
+    for node in root.flattened_pre_order() {
         match node.kind() {
             NodeKind::ScalarArgument { .. } => {}
             NodeKind::ComputeScalar { .. } => {}
@@ -245,7 +240,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
         let mut arguments = BTreeMap::new();
 
-        for node in output_node.flattened() {
+        for node in output_node.flattened_post_order() {
             let mut dependencies_condition = ScalarCondition::empty();
 
             for dependency in node.dependencies() {
