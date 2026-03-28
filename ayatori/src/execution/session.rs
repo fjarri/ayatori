@@ -12,7 +12,6 @@ use signature::Keypair;
 
 use super::{
     evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
-    message::Message,
     session_id::SessionId,
     storage::Storage,
     task::{FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
@@ -21,8 +20,8 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, DeserializeArgs, FullName, MappingFunction, MappingTag, MessageId, ScalarFunction, ScalarTag,
-        SerializeArgs, Value, VerifiedValue,
+        AnyTag, Args, DeserializeArgs, FullName, MappingFunction, MappingTag, Message, MessageId, ScalarFunction,
+        ScalarTag, SerializeArgs, Value, VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},

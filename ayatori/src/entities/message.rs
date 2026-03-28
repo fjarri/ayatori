@@ -1,4 +1,4 @@
-use alloc::format;
+use alloc::{format, vec::Vec};
 use core::fmt::{self, Debug};
 
 use serde::{Deserialize, Serialize};
@@ -274,5 +274,25 @@ impl<SP: SessionParameters> MessageId<SP> {
 impl<SP: SessionParameters> Debug for MessageId<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "MessageId({})", hex::encode(self.0.as_ref()))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message<SP: SessionParameters> {
+    destination: SP::Verifier,
+    values: Vec<SignedValue<SP>>,
+}
+
+impl<SP: SessionParameters> Message<SP> {
+    pub(crate) fn new(destination: SP::Verifier, values: Vec<SignedValue<SP>>) -> Self {
+        Self { destination, values }
+    }
+
+    pub fn destination(&self) -> &SP::Verifier {
+        &self.destination
+    }
+
+    pub(crate) fn into_values(self) -> impl Iterator<Item = SignedValue<SP>> {
+        self.values.into_iter()
     }
 }

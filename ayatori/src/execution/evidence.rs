@@ -4,14 +4,13 @@ use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    message::Message,
     session::Session,
     session_id::SessionId,
     task::{Task, TaskResultEnum},
 };
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, MappingFunction, MappingTag, MessageId, SignedValue, VerificationError,
+        AnyTagRef, AssociatedData, MappingFunction, MappingTag, Message, MessageId, SignedValue, VerificationError,
         VerifiedValue,
     },
     errors::LocalError,

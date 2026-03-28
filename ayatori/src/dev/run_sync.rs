@@ -3,9 +3,9 @@ use alloc::{collections::BTreeMap, format, vec::Vec};
 use signature::rand_core::CryptoRngCore;
 
 use crate::{
-    entities::MessageId,
+    entities::{Message, MessageId},
     errors::LocalError,
-    execution::{Message, Session, SessionReport, Task, TaskError},
+    execution::{Session, SessionReport, Task, TaskError},
     traits::{ExecutableProtocol, SessionParameters},
 };
 

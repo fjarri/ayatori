@@ -16,7 +16,7 @@ pub(crate) use value::Value;
 
 pub use args::{Args, DeserializeArgs, SerializeArgs};
 pub use function::{AssociatedData, SenderError, ThirdPartyError};
-pub use message::{MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
+pub use message::{Message, MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
 pub use party::PartyGroup;
 pub use tag::FullName;
 pub use value::{Erasable, SerdeAdapter, SerializedValue};

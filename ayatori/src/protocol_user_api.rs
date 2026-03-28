@@ -1,5 +1,5 @@
 pub use crate::{
-    entities::MessageId,
-    execution::{Evidence, EvidenceError, Message, Session, SessionId, SessionReport, Task, TaskError},
+    entities::{Message, MessageId},
+    execution::{Evidence, EvidenceError, Session, SessionId, SessionReport, Task, TaskError},
     traits::SessionParameters,
 };

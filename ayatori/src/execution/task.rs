@@ -3,12 +3,12 @@ use core::fmt::Debug;
 
 use signature::rand_core::CryptoRngCore;
 
-use super::{message::Message, session::SessionData};
+use super::session::SessionData;
 use crate::{
     entities::{
         Args, AssociatedData, DeserializeArgs, DeserializeFunction, InfallibleMappingFunction,
         InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingTag,
-        MessageId, ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum,
+        Message, MessageId, ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum,
         SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError,
         ThirdPartyErrorEnum, Value, VerificationError,
     },
