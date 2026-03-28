@@ -59,7 +59,7 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     let erased_value = Value::new(value);
     Node::new(NodeKind::ComputeScalar {
         store_in: ScalarTag::computed(name),
-        function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(name, move |_args| {
+        function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(name, move |_args| {
             Ok(erased_value.clone())
         })),
         args: BTreeMap::new(),
@@ -71,7 +71,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     match node.store_in() {
         AnyTagRef::Mapping(_) => Node::new(NodeKind::ComputeMapping {
             store_in: MappingTag::computed(name),
-            function: MappingFunction::Infallible(InfallibleMappingFunction::new_pre_erased(
+            function: MappingFunction::Infallible(InfallibleMappingFunction::new_with_name(
                 "alias",
                 move |_id, args| args.get_value(arg_name).cloned(),
             )),
@@ -79,7 +79,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         }),
         AnyTagRef::Scalar(_) => Node::new(NodeKind::ComputeScalar {
             store_in: ScalarTag::computed(name),
-            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased("alias", move |args| {
+            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name("alias", move |args| {
                 args.get_value(arg_name).cloned()
             })),
             args: [(arg_name.into(), node.get_strong_ref())].into(),
@@ -105,7 +105,7 @@ macro_rules! define_scalar_constructor {
             Ok(Node::new(
                 NodeKind::ComputeScalar {
                     store_in: ScalarTag::computed(name),
-                    function: $outer_type::$outer_ctr($inner_type::new(function)),
+                    function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
             ))
@@ -125,7 +125,7 @@ macro_rules! define_mapping_constructor {
             Ok(Node::new(
                 NodeKind::ComputeMapping {
                     store_in: MappingTag::computed(name),
-                    function: $outer_type::$outer_ctr($inner_type::new(function)),
+                    function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
             ))
@@ -172,7 +172,7 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     Ok(Node::new(NodeKind::ComputeMapping {
         store_in: MappingTag::computed(name),
         function: MappingFunction::ThirdPartyAttributable {
-            function: ThirdPartyAttributableMappingFunction::new(function),
+            function: ThirdPartyAttributableMappingFunction::new_erased(function),
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
         args: args_to_owned(args.iter().cloned())?,

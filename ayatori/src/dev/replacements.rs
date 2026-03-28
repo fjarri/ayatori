@@ -125,7 +125,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 let new_function = if let ScalarFunction::Infallible(orig_function) = function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(
+                    ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(
                         format!("[modified] {orig_function}"),
                         move |args| {
                             let orig_value = orig_function.call(args)?;
@@ -164,7 +164,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
                     MappingFunction::ThirdPartyAttributable {
-                        function: ThirdPartyAttributableMappingFunction::new_pre_erased(
+                        function: ThirdPartyAttributableMappingFunction::new_with_name(
                             format!("[modified] {orig_function}"),
                             move |id, args| {
                                 let orig_value = orig_function.call(id, args);
