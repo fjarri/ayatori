@@ -11,7 +11,10 @@ pub(crate) use function::{
     SenderErrorEnum, SerializeAndSignFunction, ThirdPartyAttributableMappingFunction,
     ThirdPartyAttributableVerificationFunction, ThirdPartyErrorEnum,
 };
-pub(crate) use tag::{AnyTag, AnyTagRef, MappingTag, ScalarTag};
+pub(crate) use tag::{
+    AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedTag, MappingTag, MappingTagRef,
+    ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarTag, ScalarTagRef, SentTag,
+};
 pub(crate) use value::Value;
 
 pub use args::{Args, DeserializeArgs, SerializeArgs};

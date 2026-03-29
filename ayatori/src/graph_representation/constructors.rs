@@ -12,12 +12,12 @@ use super::{
 };
 use crate::{
     entities::{
-        AnyTagRef, Args, AssociatedData, DeserializeArgs, DeserializeFunction, Erasable, FullName,
-        InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
-        InfallibleScalarFunctionWithRng, MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag,
-        SenderAttributableMappingFunction, SenderError, SerdeAdapter, SerializeAndSignFunction, SerializeArgs,
-        SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
-        ThirdPartyError, Value,
+        AnyTagRef, Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
+        Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
+        InfallibleScalarFunctionWithRng, LocalSignedTag, MappingFunction, PartyGroup, RemoteSignedTag,
+        ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction, SenderError, SerdeAdapter,
+        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
     execution::{EvidenceError, SessionId},
@@ -50,7 +50,7 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
 
 pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
     Node::new(NodeKind::ScalarArgument {
-        store_in: ScalarTag::argument(name),
+        store_in: ScalarArgumentTag::new(name),
         name: name.to_string(),
     })
 }
@@ -58,7 +58,7 @@ pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
     Node::new(NodeKind::ComputeScalar {
-        store_in: ScalarTag::computed(name),
+        store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(name, move |_args| {
             Ok(erased_value.clone())
         })),
@@ -70,7 +70,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
     match node.store_in() {
         AnyTagRef::Mapping(_) => Node::new(NodeKind::ComputeMapping {
-            store_in: MappingTag::computed(name),
+            store_in: ComputedMappingTag::new(name),
             function: MappingFunction::Infallible(InfallibleMappingFunction::new_with_name(
                 "alias",
                 move |_id, args| args.get_value(arg_name).cloned(),
@@ -78,7 +78,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
             args: [(arg_name.into(), node.get_strong_ref())].into(),
         }),
         AnyTagRef::Scalar(_) => Node::new(NodeKind::ComputeScalar {
-            store_in: ScalarTag::computed(name),
+            store_in: ComputedScalarTag::new(name),
             function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name("alias", move |args| {
                 args.get_value(arg_name).cloned()
             })),
@@ -104,7 +104,7 @@ macro_rules! define_scalar_constructor {
 
             Ok(Node::new(
                 NodeKind::ComputeScalar {
-                    store_in: ScalarTag::computed(name),
+                    store_in: ComputedScalarTag::new(name),
                     function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
@@ -124,7 +124,7 @@ macro_rules! define_mapping_constructor {
         ) -> Result<Node<$SP>, LocalError> {
             Ok(Node::new(
                 NodeKind::ComputeMapping {
-                    store_in: MappingTag::computed(name),
+                    store_in: ComputedMappingTag::new(name),
                     function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
@@ -170,7 +170,7 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     verification: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
 ) -> Result<Node<SP>, LocalError> {
     Ok(Node::new(NodeKind::ComputeMapping {
-        store_in: MappingTag::computed(name),
+        store_in: ComputedMappingTag::new(name),
         function: MappingFunction::ThirdPartyAttributable {
             function: ThirdPartyAttributableMappingFunction::new_erased(function),
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
@@ -207,10 +207,11 @@ pub fn broadcast<SP: SessionParameters>(
         ));
     }
 
-    let tag = MappingTag::signed_local(message.name());
+    let signed_tag = LocalSignedTag::new(message.name());
+    let sent_tag = signed_tag.to_sent();
 
     let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
-        store_in: tag.clone(),
+        store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
         data: scalar.get_strong_ref(),
         message_name: FullName::new(message.name()),
@@ -218,7 +219,7 @@ pub fn broadcast<SP: SessionParameters>(
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {
-        store_in: tag.to_sent()?,
+        store_in: sent_tag,
         data: serialize_and_sign,
     });
 
@@ -230,10 +231,11 @@ pub fn send<SP: SessionParameters>(
     mapping: &Node<SP>,
     group: &PartyGroup<SP::Verifier>,
 ) -> Result<Node<SP>, LocalError> {
-    let tag = MappingTag::signed_local(message.name());
+    let signed_tag = LocalSignedTag::new(message.name());
+    let sent_tag = signed_tag.to_sent();
 
     let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
-        store_in: tag.clone(),
+        store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
         data: mapping.get_strong_ref(),
         message_name: FullName::new(message.name()),
@@ -241,7 +243,7 @@ pub fn send<SP: SessionParameters>(
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {
-        store_in: tag.to_sent()?,
+        store_in: sent_tag,
         data: serialize_and_sign,
     });
 
@@ -266,8 +268,8 @@ fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Res
 }
 
 pub fn receive_split<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Result<(Node<SP>, Node<SP>), LocalError> {
-    let receive_store_in = MappingTag::signed_remote(message.name());
-    let deserialize_store_in = receive_store_in.to_received()?;
+    let receive_store_in = RemoteSignedTag::new(message.name());
+    let deserialize_store_in = receive_store_in.to_received();
     let message_name = FullName::new(message.name());
 
     let receive = Node::new(NodeKind::Receive {
@@ -298,7 +300,7 @@ pub fn collect<SP: SessionParameters>(
         .mapping()
         .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be a mapping node"))?;
     Ok(Node::new(NodeKind::Collect {
-        store_in: store_in.collected(),
+        store_in: store_in.to_collected(),
         values: values.get_strong_ref(),
         group: group.clone(),
     }))

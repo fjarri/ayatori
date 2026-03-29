@@ -225,7 +225,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         let arg_nodes = ArgNodes::new(&signature);
         let output = P::build(&self.reported_by, &build_data, arg_nodes)?;
         let node = output
-            .find_subnode(AnyTagRef::Mapping(&self.failed_at))
+            .find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref()))
             .ok_or_else(|| EvidenceError::new(format!("Could not find subnode {}", self.failed_at)))?;
 
         let function = match node.kind() {

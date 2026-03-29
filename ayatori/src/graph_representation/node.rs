@@ -12,11 +12,15 @@ use core::fmt::Debug;
 
 use itertools::Itertools;
 
-use super::args::BoundProtocolArgs;
+use super::{
+    args::BoundProtocolArgs,
+    constructors::{alias, collect},
+};
 use crate::{
     entities::{
-        AnyTagRef, DeserializeFunction, FullName, MappingFunction, MappingTag, PartyGroup, ScalarFunction, ScalarTag,
-        SerdeAdapter, SerializeAndSignFunction,
+        AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedTag,
+        MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag, ScalarArgumentTag,
+        ScalarFunction, ScalarTagRef, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
     errors::LocalError,
     traits::SessionParameters,
@@ -101,17 +105,15 @@ impl<SP: SessionParameters> Node<SP> {
         guilty_party: &SP::Verifier,
     ) -> Result<Self, LocalError> {
         let node = self
-            .find_subnode(AnyTagRef::Mapping(tag))
+            .find_subnode(AnyTagRef::Mapping(tag.as_ref()))
             .ok_or_else(|| LocalError::new(format!("Node {tag} was not found")))?;
         let node = node.tree_without_dependencies();
 
         // The output must be a scalar node, and `node` is a mapping node.
-        // So we wrap it in a collection node.
-        let wrapped = Node::new(NodeKind::Collect {
-            store_in: tag.collected(),
-            values: node.get_strong_ref(),
-            group: PartyGroup::new(core::slice::from_ref(guilty_party)),
-        });
+        // So we wrap it in a collect + alias node.
+        let collected = collect(&node, &PartyGroup::new(core::slice::from_ref(guilty_party)))?;
+        // TODO: this can cause a name clash.
+        let wrapped = alias("_collected", &collected);
 
         Ok(wrapped)
     }
@@ -436,43 +438,43 @@ impl<SP: SessionParameters> Display for TypedNode<SP> {
 #[derive(Debug)]
 pub(crate) enum NodeKind<SP: SessionParameters> {
     ComputeScalar {
-        store_in: ScalarTag,
+        store_in: ComputedScalarTag,
         function: ScalarFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
     },
     ComputeMapping {
-        store_in: MappingTag,
+        store_in: ComputedMappingTag,
         function: MappingFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
     },
     SerializeAndSign {
-        store_in: MappingTag,
+        store_in: LocalSignedTag,
         function: SerializeAndSignFunction<SP>,
         data: Node<SP>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         message_name: FullName,
     },
     Deserialize {
-        store_in: MappingTag,
+        store_in: ReceivedTag,
         function: DeserializeFunction<SP>,
         data: Node<SP>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
     DirectMessage {
-        store_in: MappingTag,
+        store_in: SentTag,
         data: Node<SP>,
     },
     Collect {
-        store_in: ScalarTag,
+        store_in: CollectedTag,
         values: Node<SP>,
         group: PartyGroup<SP::Verifier>,
     },
     Receive {
-        store_in: MappingTag,
+        store_in: RemoteSignedTag,
         message_name: FullName,
     },
     ScalarArgument {
-        store_in: ScalarTag,
+        store_in: ScalarArgumentTag,
         name: String,
     },
 }
@@ -541,14 +543,14 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
 impl<SP: SessionParameters> NodeKind<SP> {
     fn store_in(&self) -> AnyTagRef<'_> {
         match self {
-            Self::ComputeScalar { store_in, .. }
-            | Self::Collect { store_in, .. }
-            | Self::ScalarArgument { store_in, .. } => AnyTagRef::Scalar(store_in),
-            Self::ComputeMapping { store_in, .. }
-            | Self::SerializeAndSign { store_in, .. }
-            | Self::Deserialize { store_in, .. }
-            | Self::DirectMessage { store_in, .. }
-            | Self::Receive { store_in, .. } => AnyTagRef::Mapping(store_in),
+            Self::ComputeScalar { store_in, .. } => AnyTagRef::Scalar(ScalarTagRef::Computed(store_in)),
+            Self::Collect { store_in, .. } => AnyTagRef::Scalar(ScalarTagRef::Collected(store_in)),
+            Self::ScalarArgument { store_in, .. } => AnyTagRef::Scalar(ScalarTagRef::Argument(store_in)),
+            Self::ComputeMapping { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::Computed(store_in)),
+            Self::SerializeAndSign { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::LocalSigned(store_in)),
+            Self::Deserialize { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::Received(store_in)),
+            Self::DirectMessage { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::Sent(store_in)),
+            Self::Receive { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::RemoteSigned(store_in)),
         }
     }
 
@@ -647,12 +649,19 @@ impl<SP: SessionParameters> NodeKind<SP> {
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut result = self;
         match &mut result {
-            Self::ComputeScalar { store_in, .. }
-            | Self::ScalarArgument { store_in, .. }
-            | Self::Collect { store_in, .. } => {
+            Self::ComputeScalar { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
-            Self::ComputeMapping { store_in, .. } | Self::DirectMessage { store_in, .. } => {
+            Self::ScalarArgument { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::Collect { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::ComputeMapping { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
+            Self::DirectMessage { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
             Self::SerializeAndSign {

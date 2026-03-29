@@ -4,7 +4,7 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use crate::{
-    entities::{MappingTag, PartyGroup, ScalarTag},
+    entities::{MappingTag, MappingTagRef, PartyGroup, ScalarTag, ScalarTagRef},
     traits::PartyId,
 };
 
@@ -24,9 +24,9 @@ impl ScalarCondition {
         self.all_of.is_empty()
     }
 
-    pub fn and(self, tag: &ScalarTag) -> Self {
+    pub fn and(self, tag: ScalarTagRef<'_>) -> Self {
         let mut result = self;
-        result.all_of.insert(tag.clone());
+        result.all_of.insert(tag.to_owned());
         result
     }
 
@@ -51,9 +51,9 @@ impl ElementCondition {
         self.all_of.is_empty()
     }
 
-    pub fn and(self, tag: &MappingTag) -> Self {
+    pub fn and(self, tag: MappingTagRef<'_>) -> Self {
         let mut result = self;
-        result.all_of.insert(tag.clone());
+        result.all_of.insert(tag.to_owned());
         result
     }
 
@@ -71,9 +71,9 @@ pub(crate) struct QuorumCondition<Id: PartyId> {
 }
 
 impl<Id: PartyId> QuorumCondition<Id> {
-    pub fn new(tag: &MappingTag, group: &PartyGroup<Id>) -> Self {
+    pub fn new(tag: MappingTagRef<'_>, group: &PartyGroup<Id>) -> Self {
         Self {
-            tag: tag.clone(),
+            tag: tag.to_owned(),
             group: group.clone(),
             got_ids: BTreeSet::new(),
             banned_ids: BTreeSet::new(),

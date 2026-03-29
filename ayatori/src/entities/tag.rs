@@ -6,72 +6,8 @@ use core::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, feature = "dev"))]
 use crate::errors::LocalError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum ScalarTagKind {
-    /// A locally computed value coming from an explicit computation/verification node
-    /// (not from serialization/deserialization).
-    /// The name of the tag will come from what the user provided when creating the node.
-    /// The contents are of some user type.
-    Computed,
-    Argument,
-    Collected(MappingTagKind),
-}
-
-impl Display for ScalarTagKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::Computed => write!(f, ""),
-            Self::Argument => write!(f, "arg"),
-            Self::Collected(kind) => {
-                write!(f, "collected")?;
-                if !matches!(kind, MappingTagKind::Computed) {
-                    write!(f, "-{kind}")
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum MappingTagKind {
-    /// A locally computed value coming from an explicit computation/verification node
-    /// (not from serialization/deserialization).
-    /// The name of the tag will come from what the user provided when creating the node.
-    /// The contents are of some user type.
-    Computed,
-    /// A marker indicating that a value was sent out.
-    /// The name of the tag will come from the protocol message name.
-    /// The contents of the value are `()`.
-    Sent,
-    /// A signed value + metadata originating from another node.
-    /// The name of the tag will come from the protocol message name.
-    /// The contents are `SignedValue`.
-    SignedRemote,
-    /// A signed value + metadata originating from this node.
-    /// The name of the tag will come from the protocol message name.
-    /// The contents are `SignedValue`.
-    SignedLocal,
-    /// A value deserialized from a message received from another node.
-    /// The name of the tag will come from the protocol message name.
-    /// The contents are of some user type.
-    Received,
-}
-
-impl Display for MappingTagKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::Computed => write!(f, ""),
-            Self::Sent => write!(f, "sent"),
-            Self::Received => write!(f, "received"),
-            Self::SignedLocal => write!(f, "signed-local"),
-            Self::SignedRemote => write!(f, "signed-remote"),
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FullName {
@@ -115,188 +51,298 @@ impl Display for FullName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct ScalarTag {
-    full_name: FullName,
-    kind: ScalarTagKind,
-}
+/// A locally computed value coming from an explicit computation/verification node
+/// (not from serialization/deserialization).
+/// The name of the tag will come from what the user provided when creating the node.
+/// The contents are of some user type.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("{0}")]
+pub(crate) struct ComputedScalarTag(pub(crate) FullName);
 
-impl ScalarTag {
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self {
-            full_name: self.full_name.with_added_prefix(prefix),
-            kind: self.kind,
-        }
-    }
-
-    pub fn argument(name: &str) -> Self {
-        Self {
-            full_name: FullName::new(name),
-            kind: ScalarTagKind::Argument,
-        }
-    }
-
-    pub fn computed(name: &str) -> Self {
-        Self {
-            full_name: FullName::new(name),
-            kind: ScalarTagKind::Computed,
-        }
+impl ComputedScalarTag {
+    pub fn new(name: &str) -> Self {
+        Self(FullName::new(name))
     }
 
     #[cfg(any(test, feature = "dev"))]
-    pub fn computed_with_full_name(full_name: FullName) -> Self {
-        Self {
-            full_name,
-            kind: ScalarTagKind::Computed,
+    pub fn new_with_full_name(full_name: FullName) -> Self {
+        Self(full_name)
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("arg({0})")]
+pub(crate) struct ScalarArgumentTag(pub(crate) FullName);
+
+impl ScalarArgumentTag {
+    pub fn new(name: &str) -> Self {
+        Self(FullName::new(name))
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("collected({0})")]
+pub(crate) struct CollectedTag(pub(crate) MappingTag);
+
+impl CollectedTag {
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+/// A locally computed value coming from an explicit computation/verification node
+/// (not from serialization/deserialization).
+/// The name of the tag will come from what the user provided when creating the node.
+/// The contents are of some user type.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("{0}")]
+pub(crate) struct ComputedMappingTag(pub(crate) FullName);
+
+impl ComputedMappingTag {
+    pub fn new(name: &str) -> Self {
+        Self(FullName::new(name))
+    }
+
+    #[cfg(any(test, feature = "dev"))]
+    pub fn new_with_full_name(full_name: FullName) -> Self {
+        Self(full_name)
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+/// A marker indicating that a value was sent out.
+/// The name of the tag will come from the protocol message name.
+/// The contents of the value are `()`.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("sent({0})")]
+pub(crate) struct SentTag(pub(crate) FullName);
+
+impl SentTag {
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+/// A value deserialized from a message received from another node.
+/// The name of the tag will come from the protocol message name.
+/// The contents are of some user type.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("received({0})")]
+pub(crate) struct ReceivedTag(pub(crate) FullName);
+
+impl ReceivedTag {
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+/// A signed value + metadata originating from this node.
+/// The name of the tag will come from the protocol message name.
+/// The contents are `SignedValue`.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("signed-local({0})")]
+pub(crate) struct LocalSignedTag(pub(crate) FullName);
+
+impl LocalSignedTag {
+    pub fn new(name: &str) -> Self {
+        Self(FullName::new(name))
+    }
+
+    #[cfg(any(test, feature = "dev"))]
+    pub fn new_with_full_name(full_name: FullName) -> Self {
+        Self(full_name)
+    }
+
+    pub fn to_sent(&self) -> SentTag {
+        SentTag(self.0.clone())
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+/// A signed value + metadata originating from another node.
+/// The name of the tag will come from the protocol message name.
+/// The contents are `SignedValue`.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("signed-remote({0})")]
+pub(crate) struct RemoteSignedTag(pub(crate) FullName);
+
+impl RemoteSignedTag {
+    pub fn new(name: &str) -> Self {
+        Self(FullName::new(name))
+    }
+
+    pub fn new_with_full_name(full_name: &FullName) -> Self {
+        Self(full_name.clone())
+    }
+
+    pub fn to_received(&self) -> ReceivedTag {
+        ReceivedTag(self.0.clone())
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) enum ScalarTag {
+    #[displaydoc("{0}")]
+    Computed(ComputedScalarTag),
+    #[displaydoc("{0}")]
+    Argument(ScalarArgumentTag),
+    #[displaydoc("{0}")]
+    Collected(CollectedTag),
+}
+
+impl ScalarTag {
+    #[cfg(any(test, feature = "dev"))]
+    pub fn as_ref(&self) -> ScalarTagRef<'_> {
+        match self {
+            Self::Computed(tag) => ScalarTagRef::Computed(tag),
+            Self::Argument(tag) => ScalarTagRef::Argument(tag),
+            Self::Collected(tag) => ScalarTagRef::Collected(tag),
         }
     }
 }
 
-impl Display for ScalarTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self.kind {
-            ScalarTagKind::Computed => write!(f, "{}", self.full_name),
-            _ => write!(f, "{}({})", self.kind, self.full_name),
-        }
-    }
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) enum MappingTag {
+    #[displaydoc("{0}")]
+    Computed(ComputedMappingTag),
+    #[displaydoc("{0}")]
+    Sent(SentTag),
+    #[displaydoc("{0}")]
+    Received(ReceivedTag),
+    #[displaydoc("{0}")]
+    LocalSigned(LocalSignedTag),
+    #[displaydoc("{0}")]
+    RemoteSigned(RemoteSignedTag),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct MappingTag {
-    full_name: FullName,
-    kind: MappingTagKind,
+impl MappingTag {
+    pub fn as_ref(&self) -> MappingTagRef<'_> {
+        match self {
+            Self::Computed(tag) => MappingTagRef::Computed(tag),
+            Self::Sent(tag) => MappingTagRef::Sent(tag),
+            Self::Received(tag) => MappingTagRef::Received(tag),
+            Self::LocalSigned(tag) => MappingTagRef::LocalSigned(tag),
+            Self::RemoteSigned(tag) => MappingTagRef::RemoteSigned(tag),
+        }
+    }
 }
 
 impl MappingTag {
     pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self {
-            full_name: self.full_name.with_added_prefix(prefix),
-            kind: self.kind,
-        }
-    }
-
-    pub fn computed(name: &str) -> Self {
-        Self {
-            full_name: FullName::new(name),
-            kind: MappingTagKind::Computed,
-        }
-    }
-
-    #[cfg(any(test, feature = "dev"))]
-    pub fn computed_with_full_name(full_name: FullName) -> Self {
-        Self {
-            full_name,
-            kind: MappingTagKind::Computed,
-        }
-    }
-
-    pub fn signed_remote(name: &str) -> Self {
-        Self {
-            full_name: FullName::new(name),
-            kind: MappingTagKind::SignedRemote,
-        }
-    }
-
-    pub fn signed_local(name: &str) -> Self {
-        Self {
-            full_name: FullName::new(name),
-            kind: MappingTagKind::SignedLocal,
-        }
-    }
-
-    #[cfg(any(test, feature = "dev"))]
-    pub fn signed_local_with_full_name(full_name: FullName) -> Self {
-        Self {
-            full_name,
-            kind: MappingTagKind::SignedLocal,
-        }
-    }
-
-    pub fn to_sent(&self) -> Result<Self, LocalError> {
-        if self.kind != MappingTagKind::SignedLocal {
-            return Err(LocalError::new("Only SignedLocal tags can be converted to Sent"));
-        }
-        Ok(Self {
-            full_name: self.full_name.clone(),
-            kind: MappingTagKind::Sent,
-        })
-    }
-
-    pub fn signed_remote_with_full_name(full_name: &FullName) -> Self {
-        Self {
-            full_name: full_name.clone(),
-            kind: MappingTagKind::SignedRemote,
-        }
-    }
-
-    pub fn to_received(&self) -> Result<Self, LocalError> {
-        if self.kind != MappingTagKind::SignedRemote {
-            return Err(LocalError::new("Only SignedRemote tags can be converted to Received"));
-        }
-        Ok(Self {
-            full_name: self.full_name.clone(),
-            kind: MappingTagKind::Received,
-        })
-    }
-
-    pub fn collected(&self) -> ScalarTag {
-        ScalarTag {
-            full_name: self.full_name.clone(),
-            kind: ScalarTagKind::Collected(self.kind),
+        match self {
+            Self::Computed(tag) => Self::Computed(tag.with_added_prefix(prefix)),
+            Self::Sent(tag) => Self::Sent(tag.with_added_prefix(prefix)),
+            Self::Received(tag) => Self::Received(tag.with_added_prefix(prefix)),
+            Self::LocalSigned(tag) => Self::LocalSigned(tag.with_added_prefix(prefix)),
+            Self::RemoteSigned(tag) => Self::RemoteSigned(tag.with_added_prefix(prefix)),
         }
     }
 }
 
-impl Display for MappingTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self.kind {
-            MappingTagKind::Computed => write!(f, "{}", self.full_name),
-            _ => write!(f, "{}({})", self.kind, self.full_name),
+#[derive(displaydoc::Display, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScalarTagRef<'a> {
+    #[displaydoc("{0}")]
+    Computed(&'a ComputedScalarTag),
+    #[displaydoc("{0}")]
+    Argument(&'a ScalarArgumentTag),
+    #[displaydoc("{0}")]
+    Collected(&'a CollectedTag),
+}
+
+impl<'a> ScalarTagRef<'a> {
+    pub fn to_owned(self) -> ScalarTag {
+        match self {
+            Self::Computed(tag) => ScalarTag::Computed((*tag).clone()),
+            Self::Argument(tag) => ScalarTag::Argument((*tag).clone()),
+            Self::Collected(tag) => ScalarTag::Collected((*tag).clone()),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(displaydoc::Display, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MappingTagRef<'a> {
+    #[displaydoc("{0}")]
+    Computed(&'a ComputedMappingTag),
+    #[displaydoc("{0}")]
+    Sent(&'a SentTag),
+    #[displaydoc("{0}")]
+    Received(&'a ReceivedTag),
+    #[displaydoc("{0}")]
+    LocalSigned(&'a LocalSignedTag),
+    #[displaydoc("{0}")]
+    RemoteSigned(&'a RemoteSignedTag),
+}
+
+impl<'a> MappingTagRef<'a> {
+    pub fn to_owned(self) -> MappingTag {
+        match self {
+            Self::Computed(tag) => MappingTag::Computed((*tag).clone()),
+            Self::Sent(tag) => MappingTag::Sent((*tag).clone()),
+            Self::Received(tag) => MappingTag::Received((*tag).clone()),
+            Self::LocalSigned(tag) => MappingTag::LocalSigned((*tag).clone()),
+            Self::RemoteSigned(tag) => MappingTag::RemoteSigned((*tag).clone()),
+        }
+    }
+
+    pub fn to_collected(self) -> CollectedTag {
+        CollectedTag(self.to_owned())
+    }
+}
+
+#[derive(displaydoc::Display, Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AnyTagRef<'a> {
-    Scalar(&'a ScalarTag),
-    Mapping(&'a MappingTag),
+    #[displaydoc("{0}")]
+    Scalar(ScalarTagRef<'a>),
+    #[displaydoc("{0}")]
+    Mapping(MappingTagRef<'a>),
 }
 
 impl<'a> AnyTagRef<'a> {
-    pub fn scalar(&self) -> Option<&'a ScalarTag> {
+    pub fn scalar(&self) -> Option<ScalarTagRef<'a>> {
         match self {
-            Self::Scalar(tag) => Some(tag),
+            Self::Scalar(tag) => Some(*tag),
             Self::Mapping(_) => None,
         }
     }
 
-    pub fn mapping(&self) -> Option<&'a MappingTag> {
+    pub fn mapping(&self) -> Option<MappingTagRef<'a>> {
         match self {
             Self::Scalar(_) => None,
-            Self::Mapping(tag) => Some(tag),
+            Self::Mapping(tag) => Some(*tag),
         }
     }
 
-    pub fn to_owned(&self) -> AnyTag {
+    pub fn to_owned(self) -> AnyTag {
         match self {
-            Self::Scalar(tag) => AnyTag::Scalar((*tag).clone()),
-            Self::Mapping(tag) => AnyTag::Mapping((*tag).clone()),
+            Self::Scalar(tag) => AnyTag::Scalar(tag.to_owned()),
+            Self::Mapping(tag) => AnyTag::Mapping(tag.to_owned()),
         }
     }
 }
 
-impl<'a> Display for AnyTagRef<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::Scalar(tag) => write!(f, "{tag}"),
-            Self::Mapping(tag) => write!(f, "{tag}"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AnyTag {
+    #[displaydoc("{0}")]
     Scalar(ScalarTag),
+    #[displaydoc("{0}")]
     Mapping(MappingTag),
 }
 
@@ -304,17 +350,8 @@ impl AnyTag {
     #[cfg(any(test, feature = "dev"))]
     pub fn as_ref(&self) -> AnyTagRef<'_> {
         match self {
-            Self::Scalar(tag) => AnyTagRef::Scalar(tag),
-            Self::Mapping(tag) => AnyTagRef::Mapping(tag),
-        }
-    }
-}
-
-impl Display for AnyTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::Scalar(tag) => write!(f, "{tag}"),
-            Self::Mapping(tag) => write!(f, "{tag}"),
+            Self::Scalar(tag) => AnyTagRef::Scalar(tag.as_ref()),
+            Self::Mapping(tag) => AnyTagRef::Mapping(tag.as_ref()),
         }
     }
 }

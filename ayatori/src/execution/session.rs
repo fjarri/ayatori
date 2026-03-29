@@ -20,8 +20,8 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, DeserializeArgs, FullName, MappingFunction, MappingTag, Message, MessageId, ScalarFunction,
-        ScalarTag, SerializeArgs, Value, VerifiedValue,
+        AnyTag, Args, DeserializeArgs, FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag,
+        ScalarFunction, ScalarTag, SerializeArgs, Value, VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
@@ -139,14 +139,14 @@ where
             let store_in = arguments.get(&name).ok_or_else(|| {
                 LocalError::new(format!("Public argument {name} not found in the protocol signature"))
             })?;
-            self.add_scalar(store_in, value)?;
+            self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
         }
 
         for (name, value) in private_values {
             let store_in = arguments.get(&name).ok_or_else(|| {
                 LocalError::new(format!("Private argument {name} not found in the protocol signature"))
             })?;
-            self.add_scalar(store_in, value)?;
+            self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
         }
 
         Ok(())
@@ -229,7 +229,9 @@ where
     }
 
     pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, LocalError> {
-        let value = self.storage.get_scalar(task.output_tag())?;
+        let value = self
+            .storage
+            .get_scalar(&ScalarTag::Computed(task.output_tag().clone()))?;
         let result = value.downcast::<P::Output>()?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
@@ -354,7 +356,10 @@ where
                     values,
                     indices,
                 } => {
-                    self.add_scalar(&store_in, self.storage.get_mapping_as_value(&values, &indices)?)?;
+                    self.add_scalar(
+                        &ScalarTag::Collected(store_in.clone()),
+                        self.storage.get_mapping_as_value(&values, &indices)?,
+                    )?;
                 }
             }
         }
@@ -378,9 +383,10 @@ where
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self
-                            .storage
-                            .get_elem(&MappingTag::signed_remote_with_full_name(&name), &id)?;
+                        let value = self.storage.get_elem(
+                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                            &id,
+                        )?;
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }

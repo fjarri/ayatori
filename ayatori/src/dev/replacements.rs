@@ -5,9 +5,9 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{
-        AnyTag, Args, Erasable, FullName, InfallibleScalarFunction, MappingFunction, MappingTag, ScalarFunction,
-        ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
-        ThirdPartyError, Value,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, InfallibleScalarFunction,
+        LocalSignedTag, MappingFunction, MappingTag, ScalarFunction, ScalarTag, SerializeAndSignFunction,
+        SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
     graph_representation::{Node, NodeKind},
@@ -49,9 +49,9 @@ impl<SP: SessionParameters> Replacement<SP> {
         Ret: Erasable,
         F: 'static + Fn(&Ret, &Args<SP>) -> Result<Ret, LocalError>,
     {
-        let tag = ScalarTag::computed_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = ComputedScalarTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
-            tag: AnyTag::Scalar(tag),
+            tag: AnyTag::Scalar(ScalarTag::Computed(tag)),
             kind: ReplacementEnum::ComputeScalar {
                 function: Arc::new(move |value, args| {
                     let typed_value = value.downcast_ref::<Ret>()?;
@@ -68,9 +68,9 @@ impl<SP: SessionParameters> Replacement<SP> {
         F: 'static
             + Fn(Result<&Ret, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
     {
-        let tag = MappingTag::computed_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
-            tag: AnyTag::Mapping(tag),
+            tag: AnyTag::Mapping(MappingTag::Computed(tag)),
             kind: ReplacementEnum::ComputeMapping {
                 function: Arc::new(move |maybe_value: Result<Value, ThirdPartyError<SP>>, id, args| {
                     let typed_value = maybe_value
@@ -94,9 +94,9 @@ impl<SP: SessionParameters> Replacement<SP> {
                 &SerializeArgs<SP>,
             ) -> Result<SignedValue<SP>, LocalError>,
     {
-        let tag = MappingTag::signed_local_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = LocalSignedTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
-            tag: AnyTag::Mapping(tag),
+            tag: AnyTag::Mapping(MappingTag::LocalSigned(tag)),
             kind: ReplacementEnum::Message {
                 function: Arc::new(move |rng, orig_value, destination, args| {
                     let typed_value = orig_value.downcast_ref::<SignedValue<SP>>()?;
