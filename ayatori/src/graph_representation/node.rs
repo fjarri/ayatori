@@ -89,7 +89,7 @@ impl<SP: SessionParameters> Node<SP> {
 
     pub fn display_tree(&self) -> String {
         let mut s = String::new();
-        for node in self.flattened_post_order() {
+        for node in self.flattened_leaves_first() {
             writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
         }
         s
@@ -117,7 +117,7 @@ impl<SP: SessionParameters> Node<SP> {
     }
 
     fn is_local(&self) -> bool {
-        for node in self.flattened_post_order_args_only() {
+        for node in self.flattened_args_only() {
             if matches!(node.kind(), NodeKind::Receive { .. }) {
                 return false;
             }
@@ -129,7 +129,7 @@ impl<SP: SessionParameters> Node<SP> {
         let mut arguments = BTreeSet::<String>::new();
         let mut messages = BTreeSet::<FullName>::new();
 
-        for node in self.flattened_post_order_args_only() {
+        for node in self.flattened_args_only() {
             match node.kind() {
                 NodeKind::ComputeScalar { function, .. } => {
                     if !function.is_reproducible() {
@@ -166,23 +166,31 @@ impl<SP: SessionParameters> Node<SP> {
         Reproducibility::Available { arguments, messages }
     }
 
-    pub(crate) fn flattened_pre_order(&self) -> Vec<Self> {
-        // TODO: actual pre-order iterator.
-        let mut post_order = self.flattened_post_order().collect::<Vec<_>>();
-        post_order.reverse();
-        post_order
+    fn flattened(&self) -> UnorderedIterator<SP> {
+        UnorderedIterator::new(self, false)
     }
 
-    pub(crate) fn flattened_post_order(&self) -> PostOrderTreeIterator<SP> {
-        PostOrderTreeIterator::new(self, false)
+    fn flattened_args_only(&self) -> UnorderedIterator<SP> {
+        UnorderedIterator::new(self, true)
     }
 
-    pub(crate) fn flattened_post_order_args_only(&self) -> PostOrderTreeIterator<SP> {
-        PostOrderTreeIterator::new(self, true)
+    /// Returns the nodes in topological order.
+    ///
+    /// That is, every node will come prior to its dependencies.
+    pub(crate) fn flattened_roots_first(&self) -> Vec<Self> {
+        // Reusing the reverse topological sort logic for simplicity.
+        // Can use a dedicated algorithm (e.g. Kahn's) if it becomes a bottleneck.
+        let mut ordered = self.flattened_leaves_first().collect::<Vec<_>>();
+        ordered.reverse();
+        ordered
+    }
+
+    pub(crate) fn flattened_leaves_first(&self) -> LeavesFirstIterator<SP> {
+        LeavesFirstIterator::new(self)
     }
 
     pub(crate) fn find_subnode(&self, tag: AnyTagRef<'_>) -> Option<Self> {
-        self.flattened_post_order()
+        self.flattened()
             .find(|subnode| subnode.store_in() == tag)
             .map(|node| node.get_strong_ref())
     }
@@ -226,7 +234,7 @@ impl<SP: SessionParameters> Node<SP> {
     fn mutate_tree(&self, f: impl Fn(Self) -> Result<Self, LocalError>) -> Result<Self, LocalError> {
         let mut replacement_nodes = BTreeMap::new();
 
-        for node in self.flattened_post_order() {
+        for node in self.flattened_leaves_first() {
             if node.id() == self.id() {
                 // This is the last element of the iterator, and we will process it separately.
                 break;
@@ -244,54 +252,97 @@ impl<SP: SessionParameters> Node<SP> {
     }
 }
 
-/// Iterates over the node subtree including the root node in post-order.
+/// Iterates over the node subtree in unspecified order.
 ///
-/// That is, the nodes are emitted in such a way that for every node all its dependencies preceed it.
-pub(crate) struct PostOrderTreeIterator<SP: SessionParameters> {
+/// Guaranteed to only emit each node once.
+pub(crate) struct UnorderedIterator<SP: SessionParameters> {
     queue: Vec<Node<SP>>,
-    seen: BTreeSet<usize>,
+    emitted: BTreeSet<usize>,
     args_only: bool,
 }
 
-impl<SP: SessionParameters> PostOrderTreeIterator<SP> {
+impl<SP: SessionParameters> UnorderedIterator<SP> {
     fn new(root: &Node<SP>, args_only: bool) -> Self {
         Self {
             queue: vec![root.get_strong_ref()],
-            seen: BTreeSet::new(),
+            emitted: BTreeSet::new(),
             args_only,
         }
     }
 }
 
-impl<SP: SessionParameters> Iterator for PostOrderTreeIterator<SP> {
+impl<SP: SessionParameters> Iterator for UnorderedIterator<SP> {
     type Item = Node<SP>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(node) = self.queue.pop() {
-            let all_dependencies = if self.args_only {
+        if let Some(node) = self.queue.pop() {
+            let children = if self.args_only {
                 node.kind().args()
             } else {
                 Box::new(node.dependencies().iter().chain(node.kind().args()))
             };
+            for child_node in children {
+                if !self.emitted.contains(&child_node.id()) {
+                    self.queue.push(child_node.get_strong_ref());
+                }
+            }
+            self.emitted.insert(node.id());
+            return Some(node);
+        }
+        None
+    }
+}
 
-            let unprocessed_dependencies = all_dependencies
-                .filter_map(|dependency| {
-                    let id = dependency.id();
-                    if self.seen.contains(&id) {
+/// Iterates over the node subtree including the root node in reverse topological order.
+///
+/// That is, the nodes are emitted in such a way that for every node all its dependencies preceed it.
+pub(crate) struct LeavesFirstIterator<SP: SessionParameters> {
+    queue: Vec<Node<SP>>,
+    emitted: BTreeSet<usize>,
+}
+
+impl<SP: SessionParameters> LeavesFirstIterator<SP> {
+    fn new(root: &Node<SP>) -> Self {
+        Self {
+            queue: vec![root.get_strong_ref()],
+            emitted: BTreeSet::new(),
+        }
+    }
+}
+
+impl<SP: SessionParameters> Iterator for LeavesFirstIterator<SP> {
+    type Item = Node<SP>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(node) = self.queue.pop() {
+            if self.emitted.contains(&node.id()) {
+                continue;
+            }
+
+            let unprocessed_children = node
+                .dependencies()
+                .iter()
+                .chain(node.kind().args())
+                .filter_map(|child_node| {
+                    let id = child_node.id();
+                    if self.emitted.contains(&id) {
                         None
                     } else {
-                        Some(dependency.get_strong_ref())
+                        Some(child_node.get_strong_ref())
                     }
                 })
                 .collect::<Vec<_>>();
 
-            if unprocessed_dependencies.is_empty() {
-                self.seen.insert(node.id());
+            if unprocessed_children.is_empty() {
+                self.emitted.insert(node.id());
                 return Some(node);
             }
 
             self.queue.push(node.get_strong_ref());
-            self.queue.extend(unprocessed_dependencies.into_iter());
+            // Note that this may push some nodes that are already in the queue (if they had multiple parents).
+            // We will pop the last pushed instance first, so it is guaranteed to be emitted before any of its parents,
+            // and the rest will be skipped by the condition at the start of the loop.
+            self.queue.extend(unprocessed_children.into_iter());
         }
         None
     }
