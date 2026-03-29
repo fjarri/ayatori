@@ -369,13 +369,13 @@ where
 
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
-            TaskResultEnum::Send { store_in, destination } => {
+            TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
             }
-            TaskResultEnum::Compute { store_in, result } => {
+            TaskResultEnum::ComputedScalar { store_in, result } => {
                 self.add_scalar(&store_in, result)?;
             }
-            TaskResultEnum::ComputeMapping { store_in, id, result } => {
+            TaskResultEnum::ComputedMappingElement { store_in, id, result } => {
                 self.add_element(&store_in, &id, result)?;
             }
             TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
@@ -407,7 +407,7 @@ where
                 ));
                 self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
             }
-            TaskResultEnum::PreprocessingSuccess { store_in, id, value } => {
+            TaskResultEnum::Preprocessed { store_in, id, value } => {
                 if let Ok(existing_value) = self.storage.get_elem(&store_in, &id) {
                     let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
                     let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
