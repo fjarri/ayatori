@@ -4,17 +4,17 @@ use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    session::{PreprocessingError, Session},
+    session::Session,
     session_id::SessionId,
     task::{Task, TaskResultEnum},
 };
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, MappingFunction, MappingTag, MessageId, SignedValue, VerificationError,
+        AnyTagRef, AssociatedData, MappingFunction, MappingTag, Message, MessageId, SignedValue, VerificationError,
         VerifiedValue,
     },
     errors::LocalError,
-    graph_representation::{ArgNodes, NodeKind},
+    graph_representation::{ArgNodes, NodeKind, PartyBuildData},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -143,29 +143,32 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
             session_id.clone(),
             &self.failed_at,
             &self.reported_by,
+            guilty_party,
             shared_data,
         )?;
 
-        for (idx, signed_value) in self.signed_values.iter().enumerate() {
+        for signed_value in self.signed_values.iter() {
             if signed_value.source() != guilty_party {
                 return Err(EvidenceError::new("The message source is not that of the guilty party"));
             }
-            let message_id = MessageId::from_usize(idx);
-            let task = session.make_preprocessing_task(&message_id, signed_value.clone());
-            let result = task.execute()?;
-            session.add_preprocess_result(result)?;
         }
 
+        let message_id = MessageId::from_usize(0);
+        session.add_message(
+            &message_id,
+            Message::new(self.reported_by.clone(), self.signed_values.clone()),
+        );
+
         while let Some(task) = session.make_task()? {
-            match task {
+            let task_result = match task {
                 Task::Compute(task) => {
                     let result = task.compute()?;
-                    if result.store_in().mapping() == Some(&self.failed_at)
-                        && matches!(result.as_enum(), TaskResultEnum::SenderError { .. })
+                    if let TaskResultEnum::SenderError { store_in, .. } = result.as_enum()
+                        && store_in == &self.failed_at
                     {
                         return Ok(());
                     }
-                    session.add_result(result)?;
+                    session.add_result(result)
                 }
                 Task::ComputeWithRng(_task) => {
                     return Err(EvidenceError::new(
@@ -174,7 +177,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
                 }
                 Task::Send(task) => {
                     let (_message, result) = task.compute()?;
-                    session.add_result(result)?;
+                    session.add_result(result)
                 }
                 Task::FinalizeWithSuccess(_task) => {
                     return Err(EvidenceError::new("Unexpected finalization with success task"));
@@ -182,6 +185,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
                 Task::FinalizeWithStall(_task) => {
                     return Err(EvidenceError::new("Unexpected finalization with stall task"));
                 }
+            };
+
+            if let Some(error) = task_result.err() {
+                return Err(EvidenceError::new(format!("Unexpected task error: {error:?}")));
             }
         }
 
@@ -216,9 +223,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         let build_data = P::make_build_data(shared_data);
         let signature = P::signature();
         let arg_nodes = ArgNodes::new(&signature);
-        let output = P::build(&self.reported_by, &build_data, arg_nodes)?;
+        let party_build_data = PartyBuildData::new(&self.reported_by);
+        let output = P::build(&party_build_data, &build_data, arg_nodes)?;
         let node = output
-            .find_subnode(AnyTagRef::Mapping(&self.failed_at))
+            .find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref()))
             .ok_or_else(|| EvidenceError::new(format!("Could not find subnode {}", self.failed_at)))?;
 
         let function = match node.kind() {
@@ -255,11 +263,5 @@ impl From<LocalError> for EvidenceError {
 impl From<VerificationError> for EvidenceError {
     fn from(source: VerificationError) -> Self {
         EvidenceError::new(format!("Verification error: {source:?}"))
-    }
-}
-
-impl<SP: SessionParameters> From<PreprocessingError<SP>> for EvidenceError {
-    fn from(source: PreprocessingError<SP>) -> Self {
-        EvidenceError::new(format!("Preprocessing error: {source:?}"))
     }
 }

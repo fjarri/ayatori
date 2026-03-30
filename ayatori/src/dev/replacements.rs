@@ -5,9 +5,9 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{
-        AnyTag, Args, Erasable, FullName, InfallibleScalarFunction, MappingFunction, MappingTag, ScalarFunction,
-        ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
-        ThirdPartyError, Value,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, InfallibleScalarFunction,
+        LocalSignedTag, MappingFunction, MappingTag, ScalarFunction, ScalarTag, SerializeAndSignFunction,
+        SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
     graph_representation::{Node, NodeKind},
@@ -30,13 +30,11 @@ impl<SP: SessionParameters> Debug for Replacement<SP> {
 #[allow(clippy::type_complexity)]
 enum ReplacementEnum<SP: SessionParameters> {
     ComputeScalar {
-        // TODO (#74): take `Value` by value.
-        function: Arc<dyn Fn(&Value, Args<SP>) -> Result<Value, LocalError>>,
+        function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, LocalError>>,
     },
     ComputeMapping {
-        // TODO (#74): take `Value` by value.
         function: Arc<
-            dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
+            dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
         >,
     },
     Message {
@@ -49,11 +47,11 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub fn compute_scalar<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
     where
         Ret: Erasable,
-        F: 'static + Fn(&Ret, Args<SP>) -> Result<Ret, LocalError>,
+        F: 'static + Fn(&Ret, &Args<SP>) -> Result<Ret, LocalError>,
     {
-        let tag = ScalarTag::computed_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = ComputedScalarTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
-            tag: AnyTag::Scalar(tag),
+            tag: AnyTag::Scalar(ScalarTag::Computed(tag)),
             kind: ReplacementEnum::ComputeScalar {
                 function: Arc::new(move |value, args| {
                     let typed_value = value.downcast_ref::<Ret>()?;
@@ -67,18 +65,17 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub fn compute_mapping_third_party_attributable<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
     where
         Ret: Erasable,
-        F: 'static + Fn(Result<&Ret, ThirdPartyError<SP>>, &SP::Verifier, Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
+        F: 'static
+            + Fn(Result<&Ret, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
     {
-        let tag = MappingTag::computed_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
-            tag: AnyTag::Mapping(tag),
+            tag: AnyTag::Mapping(MappingTag::Computed(tag)),
             kind: ReplacementEnum::ComputeMapping {
                 function: Arc::new(move |maybe_value: Result<Value, ThirdPartyError<SP>>, id, args| {
-                    // TODO (#74): this can be avoided if we return BoxedValue from functions,
-                    // which can be unwrapped without cloning.
                     let typed_value = maybe_value
                         .as_ref()
-                        .map_err(|err| (*err).clone())
+                        .map_err(|err| err.clone())
                         .and_then(|value| value.downcast_ref::<Ret>().map_err(ThirdPartyError::from));
                     let typed_result = function(typed_value, id, args)?;
                     Ok(Value::new(typed_result))
@@ -92,15 +89,14 @@ impl<SP: SessionParameters> Replacement<SP> {
         F: 'static
             + Fn(
                 &mut dyn CryptoRngCore,
-                // TODO (#74): take by value
                 &SignedValue<SP>,
                 &SP::Verifier,
                 &SerializeArgs<SP>,
             ) -> Result<SignedValue<SP>, LocalError>,
     {
-        let tag = MappingTag::signed_local_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = LocalSignedTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
-            tag: AnyTag::Mapping(tag),
+            tag: AnyTag::Mapping(MappingTag::LocalSigned(tag)),
             kind: ReplacementEnum::Message {
                 function: Arc::new(move |rng, orig_value, destination, args| {
                     let typed_value = orig_value.downcast_ref::<SignedValue<SP>>()?;
@@ -129,11 +125,11 @@ impl<SP: SessionParameters> Replacement<SP> {
                 let new_function = if let ScalarFunction::Infallible(orig_function) = function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(
+                    ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(
                         format!("[modified] {orig_function}"),
                         move |args| {
-                            let orig_value = orig_function.call(args.clone())?;
-                            replacement_function(&orig_value, args)
+                            let orig_value = orig_function.call(args)?;
+                            replacement_function(orig_value, args)
                         },
                     ))
                 } else {
@@ -155,7 +151,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                     store_in,
                     function,
                     args,
-                    group,
                 },
                 ReplacementEnum::ComputeMapping {
                     function: replacement_function,
@@ -169,10 +164,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
                     MappingFunction::ThirdPartyAttributable {
-                        function: ThirdPartyAttributableMappingFunction::new_pre_erased(
+                        function: ThirdPartyAttributableMappingFunction::new_with_name(
                             format!("[modified] {orig_function}"),
                             move |id, args| {
-                                let orig_value = orig_function.call(id, args.clone());
+                                let orig_value = orig_function.call(id, args);
                                 replacement_function(orig_value, id, args)
                             },
                         ),
@@ -189,7 +184,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                         .iter()
                         .map(|(name, node)| (name.clone(), node.get_strong_ref()))
                         .collect(),
-                    group: group.clone(),
                 })
                 .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
             }
@@ -198,7 +192,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                     store_in,
                     function,
                     data,
-                    group,
                     serde_adapter,
                     message_name,
                 },
@@ -217,7 +210,6 @@ impl<SP: SessionParameters> Replacement<SP> {
                     store_in: store_in.clone(),
                     function: new_function,
                     data: data.get_strong_ref(),
-                    group: group.clone(),
                     serde_adapter: serde_adapter.clone(),
                     message_name: message_name.clone(),
                 })

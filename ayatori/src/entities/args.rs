@@ -18,7 +18,7 @@ use crate::{
     traits::SessionParameters,
 };
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct SerializeArgs<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
     session_id: SessionId<SP>,
@@ -65,7 +65,7 @@ impl<SP: SessionParameters> SerializeArgs<SP> {
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct DeserializeArgs<SP: SessionParameters> {
     serde_adapter: SerdeAdapter<SP::WireFormat>,
     value: Value,
@@ -75,16 +75,16 @@ pub struct DeserializeArgs<SP: SessionParameters> {
 impl<SP: SessionParameters> DeserializeArgs<SP> {
     pub(crate) fn new(
         session_data: &SessionData<SP>,
-        message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         value: Value,
-    ) -> Self {
-        let expected_senders = session_data.expected_senders(&message_name);
-        Self {
+    ) -> Result<Self, LocalError> {
+        let message_name = value.downcast_ref::<VerifiedValue<SP>>()?.metadata().full_name();
+        let expected_senders = session_data.expected_senders(message_name);
+        Ok(Self {
             serde_adapter,
             value,
             expected_senders,
-        }
+        })
     }
 
     pub fn expected_senders(&self) -> Option<&BTreeSet<SP::Verifier>> {
@@ -95,13 +95,14 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
         &self.serde_adapter
     }
 
-    pub(crate) fn verified_value(&self) -> Result<&VerifiedValue<SP>, LocalError> {
-        self.value.downcast_ref::<VerifiedValue<SP>>()
+    pub(crate) fn verified_value(&self) -> &VerifiedValue<SP> {
+        self.value
+            .downcast_ref::<VerifiedValue<SP>>()
+            .expect("the value type was already checked in the constructor")
     }
 }
 
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
+#[derive_where::derive_where(Debug)]
 pub struct Args<SP: SessionParameters> {
     session_id: SessionId<SP>,
     my_id: SP::Verifier,

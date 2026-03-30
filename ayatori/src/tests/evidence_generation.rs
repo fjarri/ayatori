@@ -12,11 +12,11 @@ use crate::{
 #[derive(Debug)]
 struct TestProtocol;
 
-fn gen_value<SP: SessionParameters>(_args: Args<SP>) -> Result<u64, LocalError> {
+fn gen_value<SP: SessionParameters>(_args: &Args<SP>) -> Result<u64, LocalError> {
     Ok(1)
 }
 
-fn verify<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<(), SenderError> {
+fn verify<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderError> {
     let x = args.get::<u64>("x")?;
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
@@ -27,7 +27,7 @@ fn verify<SP: SessionParameters>(id: &SP::Verifier, args: Args<SP>) -> Result<()
     }
 }
 
-fn gen_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
     let xs = args.get_map::<u64>("x")?;
     Ok(xs.values().copied().sum())
 }
@@ -62,7 +62,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     }
 
     fn build(
-        _my_id: &SP::Verifier,
+        _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
@@ -71,10 +71,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let all_parties = build_data;
         let my_x = compute_scalar("my_x", gen_value, &[])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x, all_parties)?;
-        let x_correct = compute_mapping_sender_fallible("x_correct", verify, all_parties, &[("x", &x)])?;
-        let all_x_correct = collect(&x_correct)?.with_dependencies(&[&x_broadcasted])?;
-        let all_x = collect(&x)?;
+        let x = receive(&message_x)?;
+        let x_correct = compute_mapping_sender_fallible("x_correct", verify, &[("x", &x)])?;
+        let all_x_correct = collect(&x_correct, all_parties)?.with_dependencies(&[&x_broadcasted])?;
+        let all_x = collect(&x, all_parties)?;
         compute_scalar("output", gen_output, &[("x", &all_x)])?.with_dependencies(&[&all_x_correct])
     }
 }
@@ -117,7 +117,7 @@ fn provable_error() {
         .map(|(idx, signer)| {
             if idx == 0 {
                 let replacement =
-                    Replacement::<SP>::compute_scalar(&["my_x"], |_orig_value: &u64, _args: Args<SP>| Ok(2)).unwrap();
+                    Replacement::<SP>::compute_scalar(&["my_x"], |_orig_value: &u64, _args: &Args<SP>| Ok(2)).unwrap();
                 S::new_with_replacements(session_id.clone(), signer, &(), &party_group, &[&replacement]).unwrap()
             } else {
                 S::new(session_id.clone(), signer, &(), &party_group).unwrap()

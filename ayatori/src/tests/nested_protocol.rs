@@ -16,12 +16,12 @@ struct Protocol2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Protocol2Message(u64);
 
-fn make_protocol2_value<SP: SessionParameters>(args: Args<SP>) -> Result<Protocol2Message, LocalError> {
+fn make_protocol2_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Protocol2Message, LocalError> {
     let p2 = args.get::<u64>("p2")?;
     Ok(Protocol2Message(*p2))
 }
 
-fn make_protocol2_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
+fn make_protocol2_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
     let xs = args.get_map::<Protocol2Message>("x")?;
     Ok(xs.values().map(|message| message.0).sum())
 }
@@ -34,7 +34,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
     }
 
     fn build(
-        _my_id: &SP::Verifier,
+        _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
@@ -45,8 +45,8 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
 
         let my_x = compute_scalar("my_x", make_protocol2_value, &[("p2", p2)])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x, all_parties)?;
-        let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted])?;
+        let x = receive(&message_x)?;
+        let all_x = collect(&x, all_parties)?.with_dependencies(&[&x_broadcasted])?;
 
         compute_scalar("output", make_protocol2_output, &[("x", &all_x)])
     }
@@ -64,12 +64,12 @@ struct Protocol1SharedData<SP: SessionParameters> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Protocol1Message(u64);
 
-fn make_protocol1_value<SP: SessionParameters>(args: Args<SP>) -> Result<Protocol1Message, LocalError> {
+fn make_protocol1_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Protocol1Message, LocalError> {
     let p1 = args.get::<u64>("p1")?;
     Ok(Protocol1Message(*p1))
 }
 
-fn make_protocol1_output<SP: SessionParameters>(args: Args<SP>) -> Result<u64, LocalError> {
+fn make_protocol1_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
     let xs = args.get_map::<Protocol1Message>("x")?;
     Ok(xs.values().map(|message| message.0).sum())
 }
@@ -103,7 +103,11 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         ProtocolSignature::new().input("p1")
     }
 
-    fn build(my_id: &SP::Verifier, build_data: &Self::BuildData, inputs: ArgNodes<SP>) -> Result<Node<SP>, LocalError> {
+    fn build(
+        party_build_data: &PartyBuildData<SP>,
+        build_data: &Self::BuildData,
+        inputs: ArgNodes<SP>,
+    ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Protocol1Message>("x");
 
         let all_parties = build_data;
@@ -111,13 +115,13 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
 
         let my_x = compute_scalar("my_x", make_protocol1_value, &[("p1", p1)])?;
         let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x, all_parties)?;
-        let all_x = collect(&x)?.with_dependencies(&[&x_broadcasted])?;
+        let x = receive(&message_x)?;
+        let all_x = collect(&x, all_parties)?.with_dependencies(&[&x_broadcasted])?;
 
         let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", &all_x)])?;
 
         let args = ProtocolArgs::new().input("p2", &p1_sum);
-        call_protocol::<SP, Protocol2>("protocol2", my_id, build_data, args)
+        call_protocol::<SP, Protocol2>("protocol2", party_build_data, build_data, args)
     }
 }
 

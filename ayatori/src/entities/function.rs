@@ -98,12 +98,12 @@ impl<SP: SessionParameters> ThirdPartyError<SP> {
     }
 }
 
-macro_rules! define_function_type_erased {
-    ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> $error_type:ty ) => {
+macro_rules! define_function_type_common {
+    ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> Result<$return_type:ty, $error_type:ty> ) => {
         #[derive_where::derive_where(Clone)]
         pub(crate) struct $type_name<$SP: SessionParameters> {
             #[allow(clippy::type_complexity)]
-            function: Arc<dyn Fn($($arg_type),*) -> Result<Value, $error_type>>,
+            function: Arc<dyn Fn($($arg_type),*) -> Result<$return_type, $error_type>>,
             name: String,
         }
 
@@ -120,9 +120,9 @@ macro_rules! define_function_type_erased {
         }
 
         impl<$SP: SessionParameters> $type_name<$SP> {
-            pub fn new_pre_erased(
+            pub fn new_with_name(
                 name: impl Into<String>,
-                function: impl 'static + Fn($($arg_type),*) -> Result<Value, $error_type>,
+                function: impl 'static + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
             ) -> Self {
                 let wrapped = Arc::new(function);
                 Self {
@@ -131,24 +131,41 @@ macro_rules! define_function_type_erased {
                 }
             }
 
-            pub fn call(&self, $($arg_name: $arg_type),*) -> Result<Value, $error_type> {
+
+            pub fn call(&self, $($arg_name: $arg_type),*) -> Result<$return_type, $error_type> {
                 (self.function)($($arg_name),*)
             }
         }
     }
 }
 
-macro_rules! define_function_type {
-    ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> $error_type:ty ) => {
+macro_rules! define_erased_function_type {
+    ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> Result<$return_type:ty, $error_type:ty> ) => {
 
-        define_function_type_erased!($type_name<$SP>, ($($arg_name: $arg_type),*) -> $error_type);
+        define_function_type_common!($type_name<$SP>, ($($arg_name: $arg_type),*) -> Result<$return_type, $error_type>);
 
         impl<$SP: SessionParameters> $type_name<$SP> {
-            pub fn new<Ret: Erasable>(
+            pub fn new(
+                function: impl 'static + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
+            ) -> Self {
+                let name = core::any::type_name_of_val(&function).to_string();
+                Self::new_with_name(name, function)
+            }
+        }
+    }
+}
+
+macro_rules! define_typed_function_type {
+    ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> $error_type:ty ) => {
+
+        define_function_type_common!($type_name<$SP>, ($($arg_name: $arg_type),*) -> Result<Value, $error_type>);
+
+        impl<$SP: SessionParameters> $type_name<$SP> {
+            pub fn new_erased<Ret: Erasable>(
                 function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>
             ) -> Self {
                 let name = core::any::type_name_of_val(&function).to_string();
-                Self::new_pre_erased(
+                Self::new_with_name(
                     name,
                     move |$($arg_name: $arg_type),*| function($($arg_name),*).map(Value::new)
                 )
@@ -157,146 +174,50 @@ macro_rules! define_function_type {
     }
 }
 
-define_function_type!(
+define_typed_function_type!(
     InfallibleScalarFunction<SP>,
-    (args: Args<SP>) -> LocalError
+    (args: &Args<SP>) -> LocalError
 );
 
-define_function_type!(
+define_typed_function_type!(
     InfallibleScalarFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, args: Args<SP>) -> LocalError
+    (rng: &mut dyn CryptoRngCore, args: &Args<SP>) -> LocalError
 );
 
-define_function_type!(
+define_typed_function_type!(
     InfallibleMappingFunction<SP>,
-    (id: &SP::Verifier, args: Args<SP>) -> LocalError
+    (id: &SP::Verifier, args: &Args<SP>) -> LocalError
 );
 
-define_function_type!(
+define_typed_function_type!(
     InfallibleMappingFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: Args<SP>) -> LocalError
+    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: &Args<SP>) -> LocalError
 );
 
-define_function_type!(
+define_typed_function_type!(
     SenderAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: Args<SP>) -> SenderError
+    (id: &SP::Verifier, args: &Args<SP>) -> SenderError
 );
 
-define_function_type!(
+define_typed_function_type!(
     ThirdPartyAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: Args<SP>) -> ThirdPartyError<SP>
+    (id: &SP::Verifier, args: &Args<SP>) -> ThirdPartyError<SP>
 );
 
-#[derive_where::derive_where(Clone)]
-pub(crate) struct ThirdPartyAttributableVerificationFunction<SP: SessionParameters> {
-    #[allow(clippy::type_complexity)]
-    function: Arc<dyn Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>>,
-    name: String,
-}
+define_erased_function_type!(
+    ThirdPartyAttributableVerificationFunction<SP>,
+    (session_id: &SessionId<SP>, guilty_party: &SP::Verifier, associated_data: &AssociatedData<SP>) -> Result<(), EvidenceError>
+);
 
-impl<SP: SessionParameters> ThirdPartyAttributableVerificationFunction<SP> {
-    pub fn new(
-        function: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
-    ) -> Self {
-        let name = core::any::type_name_of_val(&function).to_string();
-        Self {
-            name,
-            function: Arc::new(function),
-        }
-    }
+define_erased_function_type!(
+    SerializeAndSignFunction<SP>,
+    (rng: &mut dyn CryptoRngCore, destination: &SP::Verifier, args: &SerializeArgs<SP>) -> Result<Value, LocalError>
+);
 
-    pub fn call(
-        &self,
-        session_id: &SessionId<SP>,
-        guilty_party: &SP::Verifier,
-        associated_data: &AssociatedData<SP>,
-    ) -> Result<(), EvidenceError> {
-        (self.function)(session_id, guilty_party, associated_data)
-    }
-}
-
-impl<SP: SessionParameters> Debug for ThirdPartyAttributableVerificationFunction<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "ThirdPartyAttributableVerificationFunction {{ function: {} }}",
-            self.name
-        )
-    }
-}
-
-#[derive_where::derive_where(Clone)]
-pub(crate) struct SerializeAndSignFunction<SP: SessionParameters> {
-    #[allow(clippy::type_complexity)]
-    function: Arc<dyn Fn(&mut dyn CryptoRngCore, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, LocalError>>,
-    name: String,
-}
-
-impl<SP: SessionParameters> SerializeAndSignFunction<SP> {
-    pub fn new(
-        function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, LocalError>,
-    ) -> Self {
-        let name = core::any::type_name_of_val(&function).to_string();
-        Self {
-            name,
-            function: Arc::new(function),
-        }
-    }
-
-    pub fn call(
-        &self,
-        rng: &mut dyn CryptoRngCore,
-        destination: &SP::Verifier,
-        args: &SerializeArgs<SP>,
-    ) -> Result<Value, LocalError> {
-        (self.function)(rng, destination, args)
-    }
-}
-
-impl<SP: SessionParameters> Debug for SerializeAndSignFunction<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "SerializeAndSignFunction {{ function: {} }}", self.name)
-    }
-}
-
-impl<SP: SessionParameters> Display for SerializeAndSignFunction<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{}", self.name)
-    }
-}
-
-#[derive_where::derive_where(Clone)]
-pub(crate) struct DeserializeFunction<SP: SessionParameters> {
-    #[allow(clippy::type_complexity)]
-    function: Arc<dyn Fn(&DeserializeArgs<SP>) -> Result<Value, SenderError>>,
-    name: String,
-}
-
-impl<SP: SessionParameters> DeserializeFunction<SP> {
-    pub fn new(function: impl 'static + Fn(&DeserializeArgs<SP>) -> Result<Value, SenderError>) -> Self {
-        let name = core::any::type_name_of_val(&function).to_string();
-        Self {
-            name,
-            function: Arc::new(function),
-        }
-    }
-
-    pub fn call(&self, args: &DeserializeArgs<SP>) -> Result<Value, SenderError> {
-        (self.function)(args)
-    }
-}
-
-impl<SP: SessionParameters> Debug for DeserializeFunction<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "DeserializeFunction {{ function: {} }}", self.name)
-    }
-}
-
-impl<SP: SessionParameters> Display for DeserializeFunction<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{}", self.name)
-    }
-}
+define_erased_function_type!(
+    DeserializeFunction<SP>,
+    (args: &DeserializeArgs<SP>) -> Result<Value, SenderError>
+);
 
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ScalarFunction<SP: SessionParameters> {

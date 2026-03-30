@@ -7,7 +7,7 @@ use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest}
 use crate::{
     entities::Erasable,
     errors::LocalError,
-    graph_representation::{ArgNodes, Node, PrivateInputs, ProtocolSignature, PublicInputs},
+    graph_representation::{ArgNodes, Node, PartyBuildData, PrivateInputs, ProtocolSignature, PublicInputs},
 };
 
 pub trait PartyId:
@@ -70,5 +70,9 @@ pub trait ComposableProtocol<SP: SessionParameters>: Debug {
 
     fn signature() -> ProtocolSignature;
 
-    fn build(my_id: &SP::Verifier, build_data: &Self::BuildData, inputs: ArgNodes<SP>) -> Result<Node<SP>, LocalError>;
+    fn build(
+        party_build_data: &PartyBuildData<SP>,
+        build_data: &Self::BuildData,
+        inputs: ArgNodes<SP>,
+    ) -> Result<Node<SP>, LocalError>;
 }

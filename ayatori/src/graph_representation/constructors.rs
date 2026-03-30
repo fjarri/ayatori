@@ -1,22 +1,22 @@
 use alloc::{
     collections::BTreeMap,
     string::{String, ToString},
-    vec::Vec,
 };
 
 use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
-    args::{ArgNodes, ProtocolArgs},
+    args::{ArgNodes, PartyBuildData, ProtocolArgs},
     node::{Node, NodeKind, args_to_owned},
 };
 use crate::{
     entities::{
-        Args, AssociatedData, DeserializeArgs, DeserializeFunction, Erasable, FullName, InfallibleMappingFunction,
-        InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction,
-        MappingTag, PartyGroup, ScalarFunction, ScalarTag, SenderAttributableMappingFunction, SenderError,
-        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
+        AnyTagRef, Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
+        Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
+        InfallibleScalarFunctionWithRng, LocalSignedTag, MappingFunction, PartyGroup, RemoteSignedTag,
+        ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction, SenderError, SerdeAdapter,
+        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
@@ -49,20 +49,17 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
 }
 
 pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
-    Node::new(
-        // TODO (#62): a special tag type?
-        NodeKind::ScalarArgument {
-            store_in: ScalarTag::computed(name),
-            name: name.to_string(),
-        },
-    )
+    Node::new(NodeKind::ScalarArgument {
+        store_in: ScalarArgumentTag::new(name),
+        name: name.to_string(),
+    })
 }
 
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
     let erased_value = Value::new(value);
     Node::new(NodeKind::ComputeScalar {
-        store_in: ScalarTag::computed(name),
-        function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased(name, move |_args| {
+        store_in: ComputedScalarTag::new(name),
+        function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(name, move |_args| {
             Ok(erased_value.clone())
         })),
         args: BTreeMap::new(),
@@ -71,24 +68,22 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
 
 pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
-    if let Some(group) = node.group() {
-        Node::new(NodeKind::ComputeMapping {
-            store_in: MappingTag::computed(name),
-            function: MappingFunction::Infallible(InfallibleMappingFunction::new_pre_erased(
+    match node.store_in() {
+        AnyTagRef::Mapping(_) => Node::new(NodeKind::ComputeMapping {
+            store_in: ComputedMappingTag::new(name),
+            function: MappingFunction::Infallible(InfallibleMappingFunction::new_with_name(
                 "alias",
                 move |_id, args| args.get_value(arg_name).cloned(),
             )),
             args: [(arg_name.into(), node.get_strong_ref())].into(),
-            group: group.clone(),
-        })
-    } else {
-        Node::new(NodeKind::ComputeScalar {
-            store_in: ScalarTag::computed(name),
-            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_pre_erased("alias", move |args| {
+        }),
+        AnyTagRef::Scalar(_) => Node::new(NodeKind::ComputeScalar {
+            store_in: ComputedScalarTag::new(name),
+            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name("alias", move |args| {
                 args.get_value(arg_name).cloned()
             })),
             args: [(arg_name.into(), node.get_strong_ref())].into(),
-        })
+        }),
     }
 }
 
@@ -101,7 +96,7 @@ macro_rules! define_scalar_constructor {
             function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
-            if !args.iter().all(|(_name, arg)| arg.group().is_none()) {
+            if !args.iter().all(|(_name, arg)| arg.store_in().scalar().is_some()) {
                 return Err(LocalError::new(
                     "Scalar computations may only take scalar nodes as arguments"
                 ));
@@ -109,8 +104,8 @@ macro_rules! define_scalar_constructor {
 
             Ok(Node::new(
                 NodeKind::ComputeScalar {
-                    store_in: ScalarTag::computed(name),
-                    function: $outer_type::$outer_ctr($inner_type::new(function)),
+                    store_in: ComputedScalarTag::new(name),
+                    function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
                     args: args_to_owned(args.iter().cloned())?,
                 },
             ))
@@ -125,22 +120,13 @@ macro_rules! define_mapping_constructor {
         pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
             name: &str,
             function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
-            group: &PartyGroup<$SP::Verifier>,
             args: &[(&str, &Node<$SP>)],
         ) -> Result<Node<$SP>, LocalError> {
-            let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
-            if arg_groups.iter().any(|g| g != &group) {
-                return Err(LocalError::new(
-                    "The group of all arguments must be equal to the one provided to the constructor"
-                ));
-            }
-
             Ok(Node::new(
                 NodeKind::ComputeMapping {
-                    store_in: MappingTag::computed(name),
-                    function: $outer_type::$outer_ctr($inner_type::new(function)),
+                    store_in: ComputedMappingTag::new(name),
+                    function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
                     args: args_to_owned(args.iter().cloned())?,
-                    group: group.clone(),
                 },
             ))
         }
@@ -150,55 +136,46 @@ macro_rules! define_mapping_constructor {
 define_scalar_constructor!(
     compute_scalar<SP>,
     ScalarFunction::Infallible(InfallibleScalarFunction),
-    (Args<SP>) -> LocalError
+    (&Args<SP>) -> LocalError
 );
 
 define_scalar_constructor!(
     compute_scalar_with_rng<SP>,
     ScalarFunction::InfallibleWithRng(InfallibleScalarFunctionWithRng),
-    (&mut dyn CryptoRngCore, Args<SP>) -> LocalError
+    (&mut dyn CryptoRngCore, &Args<SP>) -> LocalError
 );
 
 define_mapping_constructor!(
     compute_mapping<SP>,
     MappingFunction::Infallible(InfallibleMappingFunction),
-    (&SP::Verifier, Args<SP>) -> LocalError
+    (&SP::Verifier, &Args<SP>) -> LocalError
 );
 
 define_mapping_constructor!(
     compute_mapping_sender_fallible<SP>,
     MappingFunction::SenderAttributable(SenderAttributableMappingFunction),
-    (&SP::Verifier, Args<SP>) -> SenderError
+    (&SP::Verifier, &Args<SP>) -> SenderError
 );
 
 define_mapping_constructor!(
     compute_mapping_with_rng<SP>,
     MappingFunction::InfallibleWithRng(InfallibleMappingFunctionWithRng),
-    (&mut dyn CryptoRngCore, &SP::Verifier, Args<SP>) -> LocalError
+    (&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> LocalError
 );
 
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
-    group: &PartyGroup<SP::Verifier>,
+    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
     args: &[(&str, &Node<SP>)],
     verification: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
 ) -> Result<Node<SP>, LocalError> {
-    let arg_groups = args.iter().filter_map(|(_name, arg)| arg.group()).collect::<Vec<_>>();
-    if arg_groups.iter().any(|g| g != &group) {
-        return Err(LocalError::new(
-            "The group of all arguments must be equal to the one provided to the constructor",
-        ));
-    }
-
     Ok(Node::new(NodeKind::ComputeMapping {
-        store_in: MappingTag::computed(name),
+        store_in: ComputedMappingTag::new(name),
         function: MappingFunction::ThirdPartyAttributable {
-            function: ThirdPartyAttributableMappingFunction::new(function),
+            function: ThirdPartyAttributableMappingFunction::new_erased(function),
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
         args: args_to_owned(args.iter().cloned())?,
-        group: group.clone(),
     }))
 }
 
@@ -224,60 +201,57 @@ pub fn broadcast<SP: SessionParameters>(
     scalar: &Node<SP>,
     group: &PartyGroup<SP::Verifier>,
 ) -> Result<Node<SP>, LocalError> {
-    if scalar.group().is_some() {
+    if scalar.store_in().scalar().is_none() {
         return Err(LocalError::new(
             "`scalar` argument of `broadcast()` must be a scalar node",
         ));
     }
 
-    let tag = MappingTag::signed_local(message.name());
+    let signed_tag = LocalSignedTag::new(message.name());
+    let sent_tag = signed_tag.to_sent();
 
     let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
-        store_in: tag.clone(),
+        store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
         data: scalar.get_strong_ref(),
-        group: group.clone(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {
-        store_in: tag.to_sent()?,
+        store_in: sent_tag,
         data: serialize_and_sign,
-        group: group.clone(),
     });
 
-    collect(&send_node)
+    collect(&send_node, group)
 }
 
-pub fn send<SP: SessionParameters>(message: &ProtocolMessage<SP>, mapping: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let group = mapping
-        .group()
-        .ok_or_else(|| LocalError::new("`mapping` argument of `send()` must be an mapping node"))?
-        .clone();
-
-    let tag = MappingTag::signed_local(message.name());
+pub fn send<SP: SessionParameters>(
+    message: &ProtocolMessage<SP>,
+    mapping: &Node<SP>,
+    group: &PartyGroup<SP::Verifier>,
+) -> Result<Node<SP>, LocalError> {
+    let signed_tag = LocalSignedTag::new(message.name());
+    let sent_tag = signed_tag.to_sent();
 
     let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
-        store_in: tag.clone(),
+        store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
         data: mapping.get_strong_ref(),
-        group: group.clone(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
     });
 
     let send_node = Node::new(NodeKind::DirectMessage {
-        store_in: tag.to_sent()?,
+        store_in: sent_tag,
         data: serialize_and_sign,
-        group,
     });
 
-    collect(&send_node)
+    collect(&send_node, group)
 }
 
 fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderError> {
-    let verified_value = args.verified_value()?;
+    let verified_value = args.verified_value();
 
     let expected_senders = args.expected_senders().ok_or_else(SenderError::new)?;
 
@@ -293,54 +267,40 @@ fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Res
     Ok(value)
 }
 
-pub fn receive_signed<SP: SessionParameters>(
-    message: &ProtocolMessage<SP>,
-    group: &PartyGroup<SP::Verifier>,
-) -> Node<SP> {
-    Node::new(NodeKind::Receive {
-        store_in: MappingTag::signed_remote(message.name()),
-        group: group.clone(),
-        message_name: FullName::new(message.name()),
-        serde_adapter: message.serde_adapter().clone(),
-    })
-}
+pub fn receive_split<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Result<(Node<SP>, Node<SP>), LocalError> {
+    let receive_store_in = RemoteSignedTag::new(message.name());
+    let deserialize_store_in = receive_store_in.to_received();
+    let message_name = FullName::new(message.name());
 
-pub fn deserialize_received<SP: SessionParameters>(received: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let (store_in, group, serde_adapter, message_name) = match received.kind() {
-        NodeKind::Receive {
-            store_in,
-            group,
-            serde_adapter,
-            message_name,
-            ..
-        } => (store_in, group, serde_adapter, message_name),
-        _ => return Err(LocalError::new("The given node must be a Receive node")),
-    };
+    let receive = Node::new(NodeKind::Receive {
+        store_in: receive_store_in,
+        message_name,
+    });
 
-    Ok(Node::new(NodeKind::Deserialize {
-        store_in: store_in.to_received()?,
+    let deserialize = Node::new(NodeKind::Deserialize {
+        store_in: deserialize_store_in,
         function: DeserializeFunction::new(default_deserialize),
-        group: group.clone(),
-        data: received.get_strong_ref(),
-        message_name: message_name.clone(),
-        serde_adapter: serde_adapter.clone(),
-    }))
+        data: receive.get_strong_ref(),
+        serde_adapter: message.serde_adapter().clone(),
+    });
+
+    Ok((receive, deserialize))
 }
 
-pub fn receive<SP: SessionParameters>(
-    message: &ProtocolMessage<SP>,
+pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Result<Node<SP>, LocalError> {
+    receive_split(message).map(|(_receive, deserialize)| deserialize)
+}
+
+pub fn collect<SP: SessionParameters>(
+    values: &Node<SP>,
     group: &PartyGroup<SP::Verifier>,
 ) -> Result<Node<SP>, LocalError> {
-    let received = receive_signed(message, group);
-    deserialize_received(&received)
-}
-
-pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, LocalError> {
-    let (store_in, group) = values
-        .store_in_and_group()
-        .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be an mapping node"))?;
+    let store_in = values
+        .store_in()
+        .mapping()
+        .ok_or_else(|| LocalError::new("`values` argument of `collect()` must be a mapping node"))?;
     Ok(Node::new(NodeKind::Collect {
-        store_in: store_in.collected(),
+        store_in: store_in.to_collected(),
         values: values.get_strong_ref(),
         group: group.clone(),
     }))
@@ -348,13 +308,13 @@ pub fn collect<SP: SessionParameters>(values: &Node<SP>) -> Result<Node<SP>, Loc
 
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     prefix: &str,
-    my_id: &SP::Verifier,
+    party_build_data: &PartyBuildData<SP>,
     build_data: &P::BuildData,
     args: ProtocolArgs<SP>,
 ) -> Result<Node<SP>, LocalError> {
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
-    let output = P::build(my_id, build_data, arg_nodes)?;
+    let output = P::build(party_build_data, build_data, arg_nodes)?;
     let prefixed = output.tree_with_added_prefix(prefix);
     let bound_args = signature.bind(args)?;
     let with_args = prefixed.with_substituted_arguments(bound_args)?;
