@@ -12,15 +12,13 @@ use core::fmt::Debug;
 
 use itertools::Itertools;
 
-use super::{
-    args::BoundProtocolArgs,
-    constructors::{alias, collect},
-};
+use super::{args::BoundProtocolArgs, constructors::collect};
 use crate::{
     entities::{
-        AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedTag,
-        MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag, ScalarArgumentTag,
-        ScalarFunction, ScalarTagRef, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
+        InfallibleScalarFunction, LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag,
+        RemoteSignedTag, ScalarArgumentTag, ScalarFunction, ScalarTagRef, SentTag, SerdeAdapter,
+        SerializeAndSignFunction,
     },
     errors::LocalError,
     traits::SessionParameters,
@@ -110,10 +108,30 @@ impl<SP: SessionParameters> Node<SP> {
         let node = node.tree_without_dependencies();
 
         // The output must be a scalar node, and `node` is a mapping node.
-        // So we wrap it in a collect + alias node.
+        // So we wrap it in a collect.
         let collected = collect(&node, &PartyGroup::new(core::slice::from_ref(guilty_party)))?;
-        // TODO: this can cause a name clash.
-        let wrapped = alias("_collected", &collected);
+
+        // This is a bit of a hack.
+        // To make the node tree suitable for a ruleset generation, the root node must be a scalar computation node.
+        // But we cannot just assign a random name to it since there will always be a possiblity of a clash.
+        // So we take the original root name (which is guaranteed to not be present in the subtree),
+        // and use it for the new root.
+        let original_output_tag = match self.store_in() {
+            AnyTagRef::Scalar(ScalarTagRef::Computed(tag)) => tag,
+            _ => {
+                return Err(LocalError::new(
+                    "Assumption: we only get the reproduction subtree from a valid root node",
+                ));
+            }
+        };
+        let arg_name = "value";
+        let wrapped = Node::new(NodeKind::ComputeScalar {
+            store_in: original_output_tag.clone(),
+            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name("alias", move |args| {
+                args.get_value(arg_name).cloned()
+            })),
+            args: [(arg_name.into(), collected.get_strong_ref())].into(),
+        });
 
         Ok(wrapped)
     }
