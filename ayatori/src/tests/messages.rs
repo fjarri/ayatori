@@ -92,7 +92,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     }
 
     fn build(
-        my_id: &SP::Verifier,
+        party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
@@ -112,7 +112,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let y = receive(&message_y)?;
         let all_y = collect(&y, all_parties)?.with_dependencies(&[&y_sent])?;
 
-        let my_z_group = all_parties.except(my_id);
+        let my_z_group = all_parties.except(party_build_data.id());
         let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[])?;
         let z_sent = send(&message_z, &my_z, &my_z_group)?;
         let z = receive(&message_z)?;

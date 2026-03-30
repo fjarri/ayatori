@@ -14,7 +14,7 @@ use crate::{
         VerifiedValue,
     },
     errors::LocalError,
-    graph_representation::{ArgNodes, NodeKind},
+    graph_representation::{ArgNodes, NodeKind, PartyBuildData},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -223,7 +223,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         let build_data = P::make_build_data(shared_data);
         let signature = P::signature();
         let arg_nodes = ArgNodes::new(&signature);
-        let output = P::build(&self.reported_by, &build_data, arg_nodes)?;
+        let party_build_data = PartyBuildData::new(&self.reported_by);
+        let output = P::build(&party_build_data, &build_data, arg_nodes)?;
         let node = output
             .find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref()))
             .ok_or_else(|| EvidenceError::new(format!("Could not find subnode {}", self.failed_at)))?;

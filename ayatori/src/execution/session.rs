@@ -25,7 +25,7 @@ use crate::{
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
-    graph_representation::{ArgNodes, Node, PrivateInputs, PublicInputs},
+    graph_representation::{ArgNodes, Node, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -64,7 +64,8 @@ where
     let build_data = P::make_build_data(shared_data);
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
-    P::build(verifier, &build_data, arg_nodes)
+    let party_build_data = PartyBuildData::new(verifier);
+    P::build(&party_build_data, &build_data, arg_nodes)
 }
 
 impl<SP, P> Session<SP, P>

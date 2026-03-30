@@ -34,7 +34,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
     }
 
     fn build(
-        _my_id: &SP::Verifier,
+        _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
@@ -103,7 +103,11 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         ProtocolSignature::new().input("p1")
     }
 
-    fn build(my_id: &SP::Verifier, build_data: &Self::BuildData, inputs: ArgNodes<SP>) -> Result<Node<SP>, LocalError> {
+    fn build(
+        party_build_data: &PartyBuildData<SP>,
+        build_data: &Self::BuildData,
+        inputs: ArgNodes<SP>,
+    ) -> Result<Node<SP>, LocalError> {
         let message_x = ProtocolMessage::new::<Protocol1Message>("x");
 
         let all_parties = build_data;
@@ -117,7 +121,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", &all_x)])?;
 
         let args = ProtocolArgs::new().input("p2", &p1_sum);
-        call_protocol::<SP, Protocol2>("protocol2", my_id, build_data, args)
+        call_protocol::<SP, Protocol2>("protocol2", party_build_data, build_data, args)
     }
 }
 

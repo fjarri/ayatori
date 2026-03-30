@@ -11,6 +11,23 @@ use crate::{
     traits::SessionParameters,
 };
 
+#[derive(Debug, Clone)]
+pub struct PartyBuildData<SP: SessionParameters> {
+    id: SP::Verifier,
+}
+
+impl<SP: SessionParameters> PartyBuildData<SP> {
+    // Intentionally not creatable by the user since we use it to propagate the party ID to subprotocols,
+    // and we don't want it to be possible to build a subprotocol with a different ID.
+    pub(crate) fn new(id: &SP::Verifier) -> Self {
+        Self { id: id.clone() }
+    }
+
+    pub fn id(&self) -> &SP::Verifier {
+        &self.id
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct PrivateInputs(BTreeMap<String, Value>);
 

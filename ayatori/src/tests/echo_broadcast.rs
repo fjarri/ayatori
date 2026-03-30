@@ -137,7 +137,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
     }
 
     fn build(
-        _my_id: &SP::Verifier,
+        _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
@@ -241,7 +241,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     }
 
     fn build(
-        my_id: &SP::Verifier,
+        party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
@@ -253,7 +253,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 
         let x = call_protocol::<SP, EchoBroadcast>(
             "echo_x",
-            my_id,
+            party_build_data,
             &(message_x, all_parties.clone()),
             ProtocolArgs::new().input("value", &my_x),
         )?;

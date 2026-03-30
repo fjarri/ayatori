@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
-    args::{ArgNodes, ProtocolArgs},
+    args::{ArgNodes, PartyBuildData, ProtocolArgs},
     node::{Node, NodeKind, args_to_owned},
 };
 use crate::{
@@ -308,13 +308,13 @@ pub fn collect<SP: SessionParameters>(
 
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     prefix: &str,
-    my_id: &SP::Verifier,
+    party_build_data: &PartyBuildData<SP>,
     build_data: &P::BuildData,
     args: ProtocolArgs<SP>,
 ) -> Result<Node<SP>, LocalError> {
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
-    let output = P::build(my_id, build_data, arg_nodes)?;
+    let output = P::build(party_build_data, build_data, arg_nodes)?;
     let prefixed = output.tree_with_added_prefix(prefix);
     let bound_args = signature.bind(args)?;
     let with_args = prefixed.with_substituted_arguments(bound_args)?;

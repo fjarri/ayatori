@@ -62,7 +62,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     }
 
     fn build(
-        _my_id: &SP::Verifier,
+        _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Node<SP>, LocalError> {
