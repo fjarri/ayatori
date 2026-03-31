@@ -11,7 +11,10 @@ use itertools::Itertools;
 use signature::Keypair;
 
 use super::{
-    evidence::{ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, ThirdPartyErrorEvidence},
+    evidence::{
+        ConflictingMessagesEvidence, Evidence, EvidenceEnum, EvidenceVerdict, SenderErrorEvidence,
+        SenderErrorEvidenceWithInfo, ThirdPartyErrorEvidence,
+    },
     session_id::SessionId,
     storage::Storage,
     task::{FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
@@ -20,8 +23,9 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, DeserializeArgs, FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag,
-        ScalarFunction, ScalarTag, SerializeArgs, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, FullName, MappingFunction,
+        MappingTag, Message, MessageId, RemoteSignedTag, ScalarFunction, ScalarTag, SerializeArgs, Value,
+        VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
@@ -171,9 +175,13 @@ where
         reported_by: &SP::Verifier,
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
+        associated_data: Option<&AssociatedData<SP>>,
     ) -> Result<Self, LocalError> {
-        let output_node =
-            make_tree::<SP, P>(reported_by, shared_data)?.get_reproduction_subtree(subtree_root, guilty_party)?;
+        let output_node = make_tree::<SP, P>(reported_by, shared_data)?.get_reproduction_subtree(
+            subtree_root,
+            guilty_party,
+            associated_data,
+        )?;
         Self::new_inner(id, None, reported_by, output_node, PrivateInputs::new(), shared_data)
     }
 
@@ -229,11 +237,21 @@ where
         }
     }
 
+    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, LocalError> {
+        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
+        value.downcast::<T>()
+    }
+
+    pub(crate) fn finalize_with_evidence_verdict(
+        self,
+        task: FinalizeWithSuccessTask,
+    ) -> Result<EvidenceVerdict, LocalError> {
+        let verdict = self.get_output::<EvidenceVerdict>(task.output_tag())?;
+        Ok(verdict)
+    }
+
     pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, LocalError> {
-        let value = self
-            .storage
-            .get_scalar(&ScalarTag::Computed(task.output_tag().clone()))?;
-        let result = value.downcast::<P::Output>()?;
+        let result = self.get_output::<P::Output>(task.output_tag())?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
 
@@ -311,6 +329,11 @@ where
                         }
                         MappingFunction::SenderAttributable(function) => {
                             Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
+                        }
+                        MappingFunction::SenderAttributableWithInfo(function) => {
+                            Task::compute_mapping_elem_sender_attributable_with_info(
+                                store_in, index, function, args, on_error,
+                            )
                         }
                         MappingFunction::ThirdPartyAttributable { function, .. } => {
                             Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
@@ -393,6 +416,32 @@ where
                     }
                     let evidence =
                         EvidenceEnum::SenderError(SenderErrorEvidence::new(&self.verifier, &store_in, signed_values));
+                    self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
+                }
+            },
+            TaskResultEnum::SenderErrorWithInfo {
+                store_in,
+                id,
+                on_error,
+                associated_data,
+            } => match on_error {
+                OnError::Escalate => self.register_attributable_error(id, store_in),
+                OnError::CollectEvidence(message_names) => {
+                    let mut signed_values = Vec::new();
+                    for name in message_names {
+                        let value = self.storage.get_elem(
+                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                            &id,
+                        )?;
+                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        signed_values.push(signed_value);
+                    }
+                    let evidence = EvidenceEnum::SenderErrorWithInfo(SenderErrorEvidenceWithInfo::new(
+                        &self.verifier,
+                        &store_in,
+                        signed_values,
+                        associated_data,
+                    ));
                     self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
                 }
             },

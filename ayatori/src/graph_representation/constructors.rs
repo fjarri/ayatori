@@ -13,14 +13,15 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
-        Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
-        InfallibleScalarFunctionWithRng, LocalSignedTag, MappingFunction, PartyGroup, RemoteSignedTag,
-        ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction, SenderError, SerdeAdapter,
+        Erasable, EvidenceVerificationFunction, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
+        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, LocalSignedTag, MappingFunction, PartyGroup,
+        RemoteSignedTag, ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction,
+        SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorWithInfo, SerdeAdapter,
         SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
-    execution::{EvidenceError, SessionId},
+    execution::{EvidenceVerdict, SessionId},
     traits::{ComposableProtocol, SessionParameters},
 };
 
@@ -167,7 +168,8 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
     args: &[(&str, &Node<SP>)],
-    verification: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
+    verification: impl 'static
+    + Fn(&SP::Verifier, &SessionId<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>,
 ) -> Result<Node<SP>, LocalError> {
     Ok(Node::new(NodeKind::ComputeMapping {
         store_in: ComputedMappingTag::new(name),
@@ -176,6 +178,22 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
         args: args_to_owned(args.iter().cloned())?,
+    }))
+}
+
+pub fn compute_mapping_sender_fallible_with_info<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderErrorWithInfo<SP>>,
+    args: &[(&str, &Node<SP>)],
+    verification: impl 'static + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>,
+    verification_args: &[(&str, &Node<SP>)],
+) -> Result<Node<SP>, LocalError> {
+    Ok(Node::new(NodeKind::ComputeMappingSenderAttributableWithInfo {
+        store_in: ComputedMappingTag::new(name),
+        function: SenderAttributableWithInfoMappingFunction::new_erased(function),
+        verification: EvidenceVerificationFunction::new(verification),
+        args: args_to_owned(args.iter().cloned())?,
+        verification_args: args_to_owned(verification_args.iter().cloned())?,
     }))
 }
 

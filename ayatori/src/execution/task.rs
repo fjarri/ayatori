@@ -9,7 +9,8 @@ use crate::{
         Args, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeArgs,
         DeserializeFunction, InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
         InfallibleScalarFunctionWithRng, LocalSignedTag, MappingTag, Message, MessageId, ReceivedTag, RemoteSignedTag,
-        ScalarTag, SenderAttributableMappingFunction, SenderError, SenderErrorEnum, SentTag, SerializeAndSignFunction,
+        ScalarTag, SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderError,
+        SenderErrorEnum, SenderErrorWithInfo, SenderErrorWithInfoEnum, SentTag, SerializeAndSignFunction,
         SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
         VerificationError,
     },
@@ -34,6 +35,13 @@ enum ComputeTaskEnum<SP: SessionParameters> {
     MappingElementSenderAttributable {
         store_in: ComputedMappingTag,
         function: SenderAttributableMappingFunction<SP>,
+        id: SP::Verifier,
+        args: Args<SP>,
+        on_error: OnError,
+    },
+    MappingElementSenderAttributableWithInfo {
+        store_in: ComputedMappingTag,
+        function: SenderAttributableWithInfoMappingFunction<SP>,
         id: SP::Verifier,
         args: Args<SP>,
         on_error: OnError,
@@ -98,6 +106,32 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Err(SenderError(SenderErrorEnum::Local(error))) => return Err(error),
                     Err(SenderError(SenderErrorEnum::Error)) => {
                         return Ok(TaskResult(TaskResultEnum::SenderError { store_in, id, on_error }));
+                    }
+                };
+                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
+                    store_in,
+                    id,
+                    result,
+                }))
+            }
+            ComputeTaskEnum::MappingElementSenderAttributableWithInfo {
+                store_in,
+                function,
+                id,
+                args,
+                on_error,
+            } => {
+                let store_in = MappingTag::Computed(store_in);
+                let result = match function.call(&id, &args) {
+                    Ok(result) => result,
+                    Err(SenderErrorWithInfo(SenderErrorWithInfoEnum::Local(error))) => return Err(error),
+                    Err(SenderErrorWithInfo(SenderErrorWithInfoEnum::Error(associated_data))) => {
+                        return Ok(TaskResult(TaskResultEnum::SenderErrorWithInfo {
+                            store_in,
+                            id,
+                            on_error,
+                            associated_data,
+                        }));
                     }
                 };
                 Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
@@ -393,6 +427,22 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
+    pub(crate) fn compute_mapping_elem_sender_attributable_with_info(
+        store_in: ComputedMappingTag,
+        id: SP::Verifier,
+        function: SenderAttributableWithInfoMappingFunction<SP>,
+        args: Args<SP>,
+        on_error: OnError,
+    ) -> Self {
+        Self::Compute(ComputeTask(ComputeTaskEnum::MappingElementSenderAttributableWithInfo {
+            store_in,
+            id,
+            function,
+            args,
+            on_error,
+        }))
+    }
+
     pub(crate) fn compute_mapping_elem_third_party_attributable(
         store_in: ComputedMappingTag,
         id: SP::Verifier,
@@ -412,10 +462,6 @@ impl<SP: SessionParameters> Task<SP> {
 pub struct TaskResult<SP: SessionParameters>(TaskResultEnum<SP>);
 
 impl<SP: SessionParameters> TaskResult<SP> {
-    pub(crate) fn as_enum(&self) -> &TaskResultEnum<SP> {
-        &self.0
-    }
-
     pub(crate) fn into_enum(self) -> TaskResultEnum<SP> {
         self.0
     }
@@ -440,6 +486,12 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
         store_in: MappingTag,
         id: SP::Verifier,
         on_error: OnError,
+    },
+    SenderErrorWithInfo {
+        store_in: MappingTag,
+        id: SP::Verifier,
+        on_error: OnError,
+        associated_data: AssociatedData<SP>,
     },
     ThirdPartyError {
         store_in: MappingTag,

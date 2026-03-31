@@ -5,9 +5,10 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{
-        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, InfallibleScalarFunction,
-        LocalSignedTag, MappingFunction, MappingTag, ScalarFunction, ScalarTag, SerializeAndSignFunction,
-        SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, Value,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, InfallibleMappingFunction,
+        InfallibleScalarFunction, LocalSignedTag, MappingFunction, MappingTag, ScalarFunction, ScalarTag,
+        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError,
+        Value,
     },
     errors::LocalError,
     graph_representation::{Node, NodeKind},
@@ -33,6 +34,9 @@ enum ReplacementEnum<SP: SessionParameters> {
         function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, LocalError>>,
     },
     ComputeMapping {
+        function: Arc<dyn Fn(Value, &SP::Verifier, &Args<SP>) -> Result<Value, LocalError>>,
+    },
+    ComputeMappingThirdPartyAttributable {
         function: Arc<
             dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
         >,
@@ -62,6 +66,24 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
+    pub fn compute_mapping<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
+    where
+        Ret: Erasable,
+        F: 'static + Fn(&Ret, &SP::Verifier, &Args<SP>) -> Result<Ret, LocalError>,
+    {
+        let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
+        Ok(Self {
+            tag: AnyTag::Mapping(MappingTag::Computed(tag)),
+            kind: ReplacementEnum::ComputeMapping {
+                function: Arc::new(move |value: Value, id, args| {
+                    let typed_value = value.downcast_ref::<Ret>()?;
+                    let typed_result = function(typed_value, id, args)?;
+                    Ok(Value::new(typed_result))
+                }),
+            },
+        })
+    }
+
     pub fn compute_mapping_third_party_attributable<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
     where
         Ret: Erasable,
@@ -71,7 +93,7 @@ impl<SP: SessionParameters> Replacement<SP> {
         let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
             tag: AnyTag::Mapping(MappingTag::Computed(tag)),
-            kind: ReplacementEnum::ComputeMapping {
+            kind: ReplacementEnum::ComputeMappingThirdPartyAttributable {
                 function: Arc::new(move |maybe_value: Result<Value, ThirdPartyError<SP>>, id, args| {
                     let typed_value = maybe_value
                         .as_ref()
@@ -153,6 +175,40 @@ impl<SP: SessionParameters> Replacement<SP> {
                     args,
                 },
                 ReplacementEnum::ComputeMapping {
+                    function: replacement_function,
+                },
+            ) => {
+                let new_function = if let MappingFunction::Infallible(orig_function) = function {
+                    let orig_function = orig_function.clone();
+                    let replacement_function = replacement_function.clone();
+                    MappingFunction::Infallible(InfallibleMappingFunction::new_with_name(
+                        format!("[modified] {orig_function}"),
+                        move |id, args| {
+                            let orig_value = orig_function.call(id, args)?;
+                            replacement_function(orig_value, id, args)
+                        },
+                    ))
+                } else {
+                    return Err(LocalError::new("Invalid function type"));
+                };
+
+                Node::new(NodeKind::ComputeMapping {
+                    store_in: store_in.clone(),
+                    function: new_function,
+                    args: args
+                        .iter()
+                        .map(|(name, node)| (name.clone(), node.get_strong_ref()))
+                        .collect(),
+                })
+                .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
+            }
+            (
+                NodeKind::ComputeMapping {
+                    store_in,
+                    function,
+                    args,
+                },
+                ReplacementEnum::ComputeMappingThirdPartyAttributable {
                     function: replacement_function,
                 },
             ) => {

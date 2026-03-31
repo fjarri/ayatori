@@ -6,7 +6,7 @@ mod task;
 
 pub(crate) use session::SessionData;
 
-pub use evidence::{Evidence, EvidenceError};
+pub use evidence::{Evidence, EvidenceError, EvidenceVerdict};
 pub use session::{Session, SessionReport, TaskError};
 pub use session_id::SessionId;
 pub use task::Task;

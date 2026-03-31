@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     errors::LocalError,
-    execution::{EvidenceError, SessionId},
+    execution::{EvidenceVerdict, SessionId},
     traits::{SessionParameters, WireFormat},
 };
 
@@ -62,6 +62,28 @@ impl<SP: SessionParameters> AssociatedData<SP> {
     pub fn deserialize<T: for<'de> Deserialize<'de>>(&self) -> Result<T, LocalError> {
         SP::WireFormat::deserialize::<T>(self.serialized_value.as_ref())
             .map_err(|err| LocalError::new(format!("Failed to deserialize: {err}")))
+    }
+}
+
+#[derive(Debug)]
+pub struct SenderErrorWithInfo<SP: SessionParameters>(pub(crate) SenderErrorWithInfoEnum<SP>);
+
+#[derive(Debug)]
+pub(crate) enum SenderErrorWithInfoEnum<SP: SessionParameters> {
+    Local(LocalError),
+    Error(AssociatedData<SP>),
+}
+
+impl<SP: SessionParameters> From<LocalError> for SenderErrorWithInfo<SP> {
+    fn from(source: LocalError) -> Self {
+        Self(SenderErrorWithInfoEnum::Local(source))
+    }
+}
+
+impl<SP: SessionParameters> SenderErrorWithInfo<SP> {
+    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(associated_value: T) -> Result<Self, LocalError> {
+        let associated_data = AssociatedData::new(associated_value)?;
+        Ok(Self(SenderErrorWithInfoEnum::Error(associated_data)))
     }
 }
 
@@ -200,13 +222,23 @@ define_typed_function_type!(
 );
 
 define_typed_function_type!(
+    SenderAttributableWithInfoMappingFunction<SP>,
+    (id: &SP::Verifier, args: &Args<SP>) -> SenderErrorWithInfo<SP>
+);
+
+define_typed_function_type!(
     ThirdPartyAttributableMappingFunction<SP>,
     (id: &SP::Verifier, args: &Args<SP>) -> ThirdPartyError<SP>
 );
 
 define_erased_function_type!(
     ThirdPartyAttributableVerificationFunction<SP>,
-    (session_id: &SessionId<SP>, guilty_party: &SP::Verifier, associated_data: &AssociatedData<SP>) -> Result<(), EvidenceError>
+    (guilty_party: &SP::Verifier, session_id: &SessionId<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>
+);
+
+define_erased_function_type!(
+    EvidenceVerificationFunction<SP>,
+    (guilty_party: &SP::Verifier, args: &Args<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>
 );
 
 define_erased_function_type!(
@@ -236,6 +268,7 @@ pub(crate) enum MappingFunction<SP: SessionParameters> {
     Infallible(InfallibleMappingFunction<SP>),
     InfallibleWithRng(InfallibleMappingFunctionWithRng<SP>),
     SenderAttributable(SenderAttributableMappingFunction<SP>),
+    SenderAttributableWithInfo(SenderAttributableWithInfoMappingFunction<SP>),
     ThirdPartyAttributable {
         function: ThirdPartyAttributableMappingFunction<SP>,
         verification: ThirdPartyAttributableVerificationFunction<SP>,
@@ -263,6 +296,7 @@ impl<SP: SessionParameters> Display for MappingFunction<SP> {
             Self::InfallibleWithRng(function) => write!(f, "{function}[RNG]"),
             Self::Infallible(function) => write!(f, "{function}"),
             Self::SenderAttributable(function) => write!(f, "{function}"),
+            Self::SenderAttributableWithInfo(function) => write!(f, "{function}"),
             Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),
         }
     }
