@@ -302,10 +302,10 @@ where
                     let arg_values = self.storage.get_scalar_args(args)?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values)?;
                     return Ok(Some(match function {
-                        ScalarFunction::Infallible(function) => {
+                        ScalarFunction::Unattributable(function) => {
                             Task::compute_scalar_infallible(store_in, function, args)
                         }
-                        ScalarFunction::InfallibleWithRng(function) => {
+                        ScalarFunction::UnattributableWithRng(function) => {
                             Task::compute_scalar_infallible_with_rng(store_in, function, args)
                         }
                     }));
@@ -320,10 +320,10 @@ where
                     let arg_values = self.storage.get_scalar_or_mapping_args(&index, args)?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values)?;
                     return Ok(Some(match function {
-                        MappingFunction::Infallible(function) => {
+                        MappingFunction::Unattributable(function) => {
                             Task::compute_mapping_elem_infallible(store_in, index, function, args)
                         }
-                        MappingFunction::InfallibleWithRng(function) => {
+                        MappingFunction::UnattributableWithRng(function) => {
                             Task::compute_mapping_elem_infallible_with_rng(store_in, index, function, args)
                         }
                         MappingFunction::SenderAttributable(function) => {

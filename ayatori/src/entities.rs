@@ -7,11 +7,11 @@ mod tag;
 mod value;
 
 pub(crate) use function::{
-    DeserializeFunction, EvidenceVerificationFunction, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
-    InfallibleScalarFunction, InfallibleScalarFunctionWithRng, MappingFunction, ScalarFunction,
+    DeserializeFunction, EvidenceVerificationFunction, MappingFunction, ScalarFunction,
     SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderErrorEnum,
     SenderErrorWithInfoEnum, SerializeAndSignFunction, ThirdPartyAttributableMappingFunction,
-    ThirdPartyAttributableVerificationFunction, ThirdPartyErrorEnum,
+    ThirdPartyAttributableVerificationFunction, ThirdPartyErrorEnum, UnattributableMappingFunction,
+    UnattributableMappingFunctionWithRng, UnattributableScalarFunction, UnattributableScalarFunctionWithRng,
 };
 pub(crate) use tag::{
     AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedTag, MappingTag, MappingTagRef,

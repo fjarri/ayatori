@@ -13,12 +13,12 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
-        Erasable, EvidenceVerdict, EvidenceVerificationFunction, FullName, InfallibleMappingFunction,
-        InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, LocalSignedTag,
-        MappingFunction, PartyGroup, RemoteSignedTag, ScalarArgumentTag, ScalarFunction,
-        SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorWithInfo,
-        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
-        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
+        Erasable, EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MappingFunction, PartyGroup,
+        RemoteSignedTag, ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction,
+        SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorWithInfo, SerdeAdapter,
+        SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction, ThirdPartyError, UnattributableMappingFunction,
+        UnattributableMappingFunctionWithRng, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
     errors::LocalError,
     traits::{ComposableProtocol, SessionParameters},
@@ -59,7 +59,7 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     let erased_value = Value::new(value);
     Node::new(NodeKind::ComputeScalar {
         store_in: ComputedScalarTag::new(name),
-        function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(name, move |_args| {
+        function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(name, move |_args| {
             Ok(erased_value.clone())
         })),
         args: BTreeMap::new(),
@@ -71,7 +71,7 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     match node.store_in() {
         AnyTagRef::Mapping(_) => Node::new(NodeKind::ComputeMapping {
             store_in: ComputedMappingTag::new(name),
-            function: MappingFunction::Infallible(InfallibleMappingFunction::new_with_name(
+            function: MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
                 "alias",
                 move |_id, args| args.get_value(arg_name).cloned(),
             )),
@@ -79,9 +79,10 @@ pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
         }),
         AnyTagRef::Scalar(_) => Node::new(NodeKind::ComputeScalar {
             store_in: ComputedScalarTag::new(name),
-            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name("alias", move |args| {
-                args.get_value(arg_name).cloned()
-            })),
+            function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
+                "alias",
+                move |args| args.get_value(arg_name).cloned(),
+            )),
             args: [(arg_name.into(), node.get_strong_ref())].into(),
         }),
     }
@@ -135,19 +136,19 @@ macro_rules! define_mapping_constructor {
 
 define_scalar_constructor!(
     compute_scalar<SP>,
-    ScalarFunction::Infallible(InfallibleScalarFunction),
+    ScalarFunction::Unattributable(UnattributableScalarFunction),
     (&Args<SP>) -> LocalError
 );
 
 define_scalar_constructor!(
     compute_scalar_with_rng<SP>,
-    ScalarFunction::InfallibleWithRng(InfallibleScalarFunctionWithRng),
+    ScalarFunction::UnattributableWithRng(UnattributableScalarFunctionWithRng),
     (&mut dyn CryptoRngCore, &Args<SP>) -> LocalError
 );
 
 define_mapping_constructor!(
     compute_mapping<SP>,
-    MappingFunction::Infallible(InfallibleMappingFunction),
+    MappingFunction::Unattributable(UnattributableMappingFunction),
     (&SP::Verifier, &Args<SP>) -> LocalError
 );
 
@@ -159,7 +160,7 @@ define_mapping_constructor!(
 
 define_mapping_constructor!(
     compute_mapping_with_rng<SP>,
-    MappingFunction::InfallibleWithRng(InfallibleMappingFunctionWithRng),
+    MappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng),
     (&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> LocalError
 );
 

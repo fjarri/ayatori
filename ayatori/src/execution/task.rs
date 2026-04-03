@@ -7,11 +7,11 @@ use super::session::SessionData;
 use crate::{
     entities::{
         Args, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeArgs,
-        DeserializeFunction, InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
-        InfallibleScalarFunctionWithRng, LocalSignedTag, MappingTag, Message, MessageId, ReceivedTag, RemoteSignedTag,
-        ScalarTag, SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderError,
-        SenderErrorEnum, SenderErrorWithInfo, SenderErrorWithInfoEnum, SentTag, SerializeAndSignFunction,
-        SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, Value,
+        DeserializeFunction, LocalSignedTag, MappingTag, Message, MessageId, ReceivedTag, RemoteSignedTag, ScalarTag,
+        SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorEnum,
+        SenderErrorWithInfo, SenderErrorWithInfoEnum, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
+        ThirdPartyAttributableMappingFunction, ThirdPartyError, ThirdPartyErrorEnum, UnattributableMappingFunction,
+        UnattributableMappingFunctionWithRng, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
         VerificationError,
     },
     errors::LocalError,
@@ -21,14 +21,14 @@ use crate::{
 
 #[derive_where::derive_where(Debug)]
 enum ComputeTaskEnum<SP: SessionParameters> {
-    ScalarInfallible {
+    ScalarUnattributable {
         store_in: ComputedScalarTag,
-        function: InfallibleScalarFunction<SP>,
+        function: UnattributableScalarFunction<SP>,
         args: Args<SP>,
     },
-    MappingElementInfallible {
+    MappingElementUnattributable {
         store_in: ComputedMappingTag,
-        function: InfallibleMappingFunction<SP>,
+        function: UnattributableMappingFunction<SP>,
         id: SP::Verifier,
         args: Args<SP>,
     },
@@ -70,7 +70,7 @@ pub struct ComputeTask<SP: SessionParameters>(ComputeTaskEnum<SP>);
 impl<SP: SessionParameters> ComputeTask<SP> {
     pub fn compute(self) -> Result<TaskResult<SP>, LocalError> {
         match self.0 {
-            ComputeTaskEnum::ScalarInfallible {
+            ComputeTaskEnum::ScalarUnattributable {
                 store_in,
                 function,
                 args,
@@ -79,7 +79,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 let result = function.call(&args)?;
                 Ok(TaskResult(TaskResultEnum::ComputedScalar { store_in, result }))
             }
-            ComputeTaskEnum::MappingElementInfallible {
+            ComputeTaskEnum::MappingElementUnattributable {
                 store_in,
                 function,
                 id,
@@ -195,14 +195,14 @@ impl<SP: SessionParameters> ComputeTask<SP> {
 
 #[derive_where::derive_where(Debug)]
 enum ComputeWithRngTaskEnum<SP: SessionParameters> {
-    ScalarInfallible {
+    ScalarUnattributable {
         store_in: ComputedScalarTag,
-        function: InfallibleScalarFunctionWithRng<SP>,
+        function: UnattributableScalarFunctionWithRng<SP>,
         args: Args<SP>,
     },
-    MappingElementInfallible {
+    MappingElementUnattributable {
         store_in: ComputedMappingTag,
-        function: InfallibleMappingFunctionWithRng<SP>,
+        function: UnattributableMappingFunctionWithRng<SP>,
         id: SP::Verifier,
         args: Args<SP>,
     },
@@ -220,7 +220,7 @@ pub struct ComputeWithRngTask<SP: SessionParameters>(ComputeWithRngTaskEnum<SP>)
 impl<SP: SessionParameters> ComputeWithRngTask<SP> {
     pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP>, LocalError> {
         match self.0 {
-            ComputeWithRngTaskEnum::ScalarInfallible {
+            ComputeWithRngTaskEnum::ScalarUnattributable {
                 store_in,
                 function,
                 args,
@@ -229,7 +229,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 let result = function.call(rng, &args)?;
                 Ok(TaskResult(TaskResultEnum::ComputedScalar { store_in, result }))
             }
-            ComputeWithRngTaskEnum::MappingElementInfallible {
+            ComputeWithRngTaskEnum::MappingElementUnattributable {
                 store_in,
                 function,
                 id,
@@ -331,10 +331,10 @@ impl<SP: SessionParameters> Task<SP> {
 
     pub(crate) fn compute_scalar_infallible(
         store_in: ComputedScalarTag,
-        function: InfallibleScalarFunction<SP>,
+        function: UnattributableScalarFunction<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::ScalarInfallible {
+        Self::Compute(ComputeTask(ComputeTaskEnum::ScalarUnattributable {
             store_in,
             function,
             args,
@@ -343,10 +343,10 @@ impl<SP: SessionParameters> Task<SP> {
 
     pub(crate) fn compute_scalar_infallible_with_rng(
         store_in: ComputedScalarTag,
-        function: InfallibleScalarFunctionWithRng<SP>,
+        function: UnattributableScalarFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::ComputeWithRng(ComputeWithRngTask(ComputeWithRngTaskEnum::ScalarInfallible {
+        Self::ComputeWithRng(ComputeWithRngTask(ComputeWithRngTaskEnum::ScalarUnattributable {
             store_in,
             function,
             args,
@@ -356,10 +356,10 @@ impl<SP: SessionParameters> Task<SP> {
     pub(crate) fn compute_mapping_elem_infallible(
         store_in: ComputedMappingTag,
         id: SP::Verifier,
-        function: InfallibleMappingFunction<SP>,
+        function: UnattributableMappingFunction<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::MappingElementInfallible {
+        Self::Compute(ComputeTask(ComputeTaskEnum::MappingElementUnattributable {
             store_in,
             id,
             function,
@@ -370,15 +370,17 @@ impl<SP: SessionParameters> Task<SP> {
     pub(crate) fn compute_mapping_elem_infallible_with_rng(
         store_in: ComputedMappingTag,
         id: SP::Verifier,
-        function: InfallibleMappingFunctionWithRng<SP>,
+        function: UnattributableMappingFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::ComputeWithRng(ComputeWithRngTask(ComputeWithRngTaskEnum::MappingElementInfallible {
-            store_in,
-            id,
-            function,
-            args,
-        }))
+        Self::ComputeWithRng(ComputeWithRngTask(
+            ComputeWithRngTaskEnum::MappingElementUnattributable {
+                store_in,
+                id,
+                function,
+                args,
+            },
+        ))
     }
 
     pub(crate) fn compute_serialize_and_sign_elem(

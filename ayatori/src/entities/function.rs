@@ -215,22 +215,22 @@ macro_rules! define_typed_function_type {
 }
 
 define_typed_function_type!(
-    InfallibleScalarFunction<SP>,
+    UnattributableScalarFunction<SP>,
     (args: &Args<SP>) -> LocalError
 );
 
 define_typed_function_type!(
-    InfallibleScalarFunctionWithRng<SP>,
+    UnattributableScalarFunctionWithRng<SP>,
     (rng: &mut dyn CryptoRngCore, args: &Args<SP>) -> LocalError
 );
 
 define_typed_function_type!(
-    InfallibleMappingFunction<SP>,
+    UnattributableMappingFunction<SP>,
     (id: &SP::Verifier, args: &Args<SP>) -> LocalError
 );
 
 define_typed_function_type!(
-    InfallibleMappingFunctionWithRng<SP>,
+    UnattributableMappingFunctionWithRng<SP>,
     (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: &Args<SP>) -> LocalError
 );
 
@@ -271,20 +271,20 @@ define_erased_function_type!(
 
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ScalarFunction<SP: SessionParameters> {
-    Infallible(InfallibleScalarFunction<SP>),
-    InfallibleWithRng(InfallibleScalarFunctionWithRng<SP>),
+    Unattributable(UnattributableScalarFunction<SP>),
+    UnattributableWithRng(UnattributableScalarFunctionWithRng<SP>),
 }
 
 impl<SP: SessionParameters> ScalarFunction<SP> {
     pub fn is_reproducible(&self) -> bool {
-        !matches!(self, Self::InfallibleWithRng(_))
+        !matches!(self, Self::UnattributableWithRng(_))
     }
 }
 
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum MappingFunction<SP: SessionParameters> {
-    Infallible(InfallibleMappingFunction<SP>),
-    InfallibleWithRng(InfallibleMappingFunctionWithRng<SP>),
+    Unattributable(UnattributableMappingFunction<SP>),
+    UnattributableWithRng(UnattributableMappingFunctionWithRng<SP>),
     SenderAttributable(SenderAttributableMappingFunction<SP>),
     SenderAttributableWithInfo(SenderAttributableWithInfoMappingFunction<SP>),
     ThirdPartyAttributable {
@@ -295,15 +295,15 @@ pub(crate) enum MappingFunction<SP: SessionParameters> {
 
 impl<SP: SessionParameters> MappingFunction<SP> {
     pub fn is_reproducible(&self) -> bool {
-        !matches!(self, Self::InfallibleWithRng(_))
+        !matches!(self, Self::UnattributableWithRng(_))
     }
 }
 
 impl<SP: SessionParameters> Display for ScalarFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Self::InfallibleWithRng(function) => write!(f, "{function}[RNG]"),
-            Self::Infallible(function) => write!(f, "{function}"),
+            Self::UnattributableWithRng(function) => write!(f, "{function}[RNG]"),
+            Self::Unattributable(function) => write!(f, "{function}"),
         }
     }
 }
@@ -311,8 +311,8 @@ impl<SP: SessionParameters> Display for ScalarFunction<SP> {
 impl<SP: SessionParameters> Display for MappingFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Self::InfallibleWithRng(function) => write!(f, "{function}[RNG]"),
-            Self::Infallible(function) => write!(f, "{function}"),
+            Self::UnattributableWithRng(function) => write!(f, "{function}[RNG]"),
+            Self::Unattributable(function) => write!(f, "{function}"),
             Self::SenderAttributable(function) => write!(f, "{function}"),
             Self::SenderAttributableWithInfo(function) => write!(f, "{function}"),
             Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),

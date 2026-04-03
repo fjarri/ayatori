@@ -5,10 +5,10 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{
-        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, InfallibleMappingFunction,
-        InfallibleScalarFunction, LocalSignedTag, MappingFunction, MappingTag, ScalarFunction, ScalarTag,
-        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError,
-        Value,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingFunction,
+        MappingTag, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
+        ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableMappingFunction,
+        UnattributableScalarFunction, Value,
     },
     errors::LocalError,
     graph_representation::{Node, NodeKind},
@@ -144,10 +144,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let ScalarFunction::Infallible(orig_function) = function {
+                let new_function = if let ScalarFunction::Unattributable(orig_function) = function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(
+                    ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
                         format!("[modified] {orig_function}"),
                         move |args| {
                             let orig_value = orig_function.call(args)?;
@@ -178,10 +178,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let MappingFunction::Infallible(orig_function) = function {
+                let new_function = if let MappingFunction::Unattributable(orig_function) = function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    MappingFunction::Infallible(InfallibleMappingFunction::new_with_name(
+                    MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
                         format!("[modified] {orig_function}"),
                         move |id, args| {
                             let orig_value = orig_function.call(id, args)?;

@@ -16,10 +16,10 @@ use super::{args::BoundProtocolArgs, constructors::collect};
 use crate::{
     entities::{
         AnyTagRef, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction,
-        EvidenceVerdict, EvidenceVerificationFunction, FullName, InfallibleMappingFunction, InfallibleScalarFunction,
-        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag,
-        ScalarArgumentTag, ScalarFunction, ScalarTagRef, SenderAttributableWithInfoMappingFunction, SenderError,
-        SenderErrorEnum, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MappingFunction, MappingTag,
+        MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarFunction, ScalarTagRef,
+        SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorEnum, SentTag, SerdeAdapter,
+        SerializeAndSignFunction, UnattributableMappingFunction, UnattributableScalarFunction,
     },
     errors::LocalError,
     traits::SessionParameters,
@@ -122,9 +122,9 @@ impl<SP: SessionParameters> Node<SP> {
                 let verification = verification.clone();
                 Node::new(NodeKind::ComputeMapping {
                     store_in: store_in.clone(),
-                    function: MappingFunction::Infallible(InfallibleMappingFunction::new_erased(move |id, args| {
-                        verification.call(id, args, &associated_data)
-                    })),
+                    function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
+                        move |id, args| verification.call(id, args, &associated_data),
+                    )),
                     args: arg_map_to_owned(verification_args),
                 })
             }
@@ -140,13 +140,13 @@ impl<SP: SessionParameters> Node<SP> {
                 let function = function.clone();
                 Node::new(NodeKind::ComputeMapping {
                     store_in: store_in.clone(),
-                    function: MappingFunction::Infallible(InfallibleMappingFunction::new_erased(move |id, args| {
-                        match function.call(id, args) {
+                    function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
+                        move |id, args| match function.call(id, args) {
                             Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
                             Err(SenderError(SenderErrorEnum::Local(error))) => Err(error),
                             Err(SenderError(SenderErrorEnum::Error)) => Ok(EvidenceVerdict::valid()),
-                        }
-                    })),
+                        },
+                    )),
                     args: arg_map_to_owned(args),
                 })
             }
@@ -176,7 +176,7 @@ impl<SP: SessionParameters> Node<SP> {
         let guilty_party = guilty_party.clone();
         let wrapped = Node::new(NodeKind::ComputeScalar {
             store_in: original_output_tag.clone(),
-            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_erased(
+            function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(
                 move |args| -> Result<EvidenceVerdict, LocalError> {
                     let map = args.get_map::<EvidenceVerdict>(arg_name)?;
                     let verdict: &EvidenceVerdict = map
