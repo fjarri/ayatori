@@ -13,15 +13,15 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
-        Erasable, EvidenceVerificationFunction, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng,
-        InfallibleScalarFunction, InfallibleScalarFunctionWithRng, LocalSignedTag, MappingFunction, PartyGroup,
-        RemoteSignedTag, ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction,
-        SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorWithInfo, SerdeAdapter,
-        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
+        Erasable, EvidenceVerdict, EvidenceVerificationFunction, FullName, InfallibleMappingFunction,
+        InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, LocalSignedTag,
+        MappingFunction, PartyGroup, RemoteSignedTag, ScalarArgumentTag, ScalarFunction,
+        SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorWithInfo,
+        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
-    execution::{EvidenceVerdict, SessionId},
+    execution::SessionId,
     traits::{ComposableProtocol, SessionParameters},
 };
 

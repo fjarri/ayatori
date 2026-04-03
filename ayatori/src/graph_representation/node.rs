@@ -16,13 +16,12 @@ use super::{args::BoundProtocolArgs, constructors::collect};
 use crate::{
     entities::{
         AnyTagRef, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction,
-        EvidenceVerificationFunction, FullName, InfallibleMappingFunction, InfallibleScalarFunction, LocalSignedTag,
-        MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag, ScalarArgumentTag,
-        ScalarFunction, ScalarTagRef, SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorEnum, SentTag,
-        SerdeAdapter, SerializeAndSignFunction,
+        EvidenceVerdict, EvidenceVerificationFunction, FullName, InfallibleMappingFunction, InfallibleScalarFunction,
+        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag,
+        ScalarArgumentTag, ScalarFunction, ScalarTagRef, SenderAttributableWithInfoMappingFunction, SenderError,
+        SenderErrorEnum, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
     errors::LocalError,
-    execution::EvidenceVerdict,
     traits::SessionParameters,
 };
 

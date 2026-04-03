@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     errors::LocalError,
-    execution::{EvidenceVerdict, SessionId},
+    execution::SessionId,
     traits::{SessionParameters, WireFormat},
 };
 
@@ -40,6 +40,24 @@ impl From<LocalError> for SenderError {
 impl SenderError {
     pub fn new() -> Self {
         Self(SenderErrorEnum::Error)
+    }
+}
+
+#[derive(displaydoc::Display, Debug, Clone)]
+pub enum EvidenceVerdict {
+    #[displaydoc("Valid evidence")]
+    Valid,
+    #[displaydoc("Invalid evidence: {0}")]
+    Invalid(String),
+}
+
+impl EvidenceVerdict {
+    pub fn valid() -> Self {
+        Self::Valid
+    }
+
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid(message.into())
     }
 }
 

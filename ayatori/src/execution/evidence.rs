@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::{session::Session, session_id::SessionId, task::Task};
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, MappingFunction, MappingTag, Message, MessageId, SignedValue, VerificationError,
-        VerifiedValue,
+        AnyTagRef, AssociatedData, EvidenceVerdict, MappingFunction, MappingTag, Message, MessageId, SignedValue,
+        VerificationError, VerifiedValue,
     },
     errors::LocalError,
     graph_representation::{ArgNodes, NodeKind, PartyBuildData},
@@ -318,23 +318,5 @@ impl From<LocalError> for EvidenceError {
 impl From<VerificationError> for EvidenceError {
     fn from(source: VerificationError) -> Self {
         EvidenceError::new(format!("Verification error: {source:?}"))
-    }
-}
-
-#[derive(displaydoc::Display, Debug, Clone)]
-pub enum EvidenceVerdict {
-    #[displaydoc("Valid evidence")]
-    Valid,
-    #[displaydoc("Invalid evidence: {0}")]
-    Invalid(String),
-}
-
-impl EvidenceVerdict {
-    pub fn valid() -> Self {
-        Self::Valid
-    }
-
-    pub fn invalid(message: impl Into<String>) -> Self {
-        Self::Invalid(message.into())
     }
 }

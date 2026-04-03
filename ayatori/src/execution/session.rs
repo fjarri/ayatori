@@ -12,8 +12,8 @@ use signature::Keypair;
 
 use super::{
     evidence::{
-        ConflictingMessagesEvidence, Evidence, EvidenceEnum, EvidenceVerdict, SenderErrorEvidence,
-        SenderErrorEvidenceWithInfo, ThirdPartyErrorEvidence,
+        ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, SenderErrorEvidenceWithInfo,
+        ThirdPartyErrorEvidence,
     },
     session_id::SessionId,
     storage::Storage,
@@ -23,9 +23,9 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, FullName, MappingFunction,
-        MappingTag, Message, MessageId, RemoteSignedTag, ScalarFunction, ScalarTag, SerializeArgs, Value,
-        VerifiedValue,
+        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
+        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, ScalarFunction, ScalarTag, SerializeArgs,
+        Value, VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},

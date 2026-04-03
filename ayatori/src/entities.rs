@@ -19,7 +19,7 @@ pub(crate) use tag::{
 pub(crate) use value::Value;
 
 pub use args::{Args, DeserializeArgs, SerializeArgs};
-pub use function::{AssociatedData, SenderError, SenderErrorWithInfo, ThirdPartyError};
+pub use function::{AssociatedData, EvidenceVerdict, SenderError, SenderErrorWithInfo, ThirdPartyError};
 pub use message::{Message, MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
 pub use party::PartyGroup;
 pub use tag::FullName;
