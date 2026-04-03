@@ -2,6 +2,7 @@ mod args;
 mod function;
 mod message;
 mod party;
+mod session_id;
 mod tag;
 mod value;
 
@@ -22,5 +23,6 @@ pub use args::{Args, DeserializeArgs, SerializeArgs};
 pub use function::{AssociatedData, EvidenceVerdict, SenderError, SenderErrorWithInfo, ThirdPartyError};
 pub use message::{Message, MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
 pub use party::PartyGroup;
+pub use session_id::SessionId;
 pub use tag::FullName;
 pub use value::{Erasable, SerdeAdapter, SerializedValue};

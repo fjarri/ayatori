@@ -17,11 +17,10 @@ use crate::{
         InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, LocalSignedTag,
         MappingFunction, PartyGroup, RemoteSignedTag, ScalarArgumentTag, ScalarFunction,
         SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorWithInfo,
-        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
+        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
+        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
-    execution::SessionId,
     traits::{ComposableProtocol, SessionParameters},
 };
 

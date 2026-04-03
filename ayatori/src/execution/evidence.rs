@@ -3,11 +3,11 @@ use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use super::{session::Session, session_id::SessionId, task::Task};
+use super::{session::Session, task::Task};
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, EvidenceVerdict, MappingFunction, MappingTag, Message, MessageId, SignedValue,
-        VerificationError, VerifiedValue,
+        AnyTagRef, AssociatedData, EvidenceVerdict, MappingFunction, MappingTag, Message, MessageId, SessionId,
+        SignedValue, VerificationError, VerifiedValue,
     },
     errors::LocalError,
     graph_representation::{ArgNodes, NodeKind, PartyBuildData},

@@ -13,11 +13,11 @@ use signature::rand_core::CryptoRngCore;
 
 use super::{
     args::{Args, DeserializeArgs, SerializeArgs},
+    session_id::SessionId,
     value::{Erasable, SerializedValue, Value},
 };
 use crate::{
     errors::LocalError,
-    execution::SessionId,
     traits::{SessionParameters, WireFormat},
 };
 

@@ -9,14 +9,11 @@ use itertools::Itertools;
 
 use super::{
     message::VerifiedValue,
+    session_id::SessionId,
     tag::FullName,
     value::{Erasable, SerdeAdapter, Value},
 };
-use crate::{
-    errors::LocalError,
-    execution::{SessionData, SessionId},
-    traits::SessionParameters,
-};
+use crate::{errors::LocalError, execution::SessionData, traits::SessionParameters};
 
 #[derive_where::derive_where(Debug)]
 pub struct SerializeArgs<SP: SessionParameters> {

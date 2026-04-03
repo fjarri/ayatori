@@ -15,7 +15,6 @@ use super::{
         ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, SenderErrorEvidenceWithInfo,
         ThirdPartyErrorEvidence,
     },
-    session_id::SessionId,
     storage::Storage,
     task::{FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
@@ -25,7 +24,7 @@ use crate::{
     entities::{
         AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
         MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, ScalarFunction, ScalarTag, SerializeArgs,
-        Value, VerifiedValue,
+        SessionId, Value, VerifiedValue,
     },
     errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
