@@ -559,6 +559,7 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         function: DeserializeFunction<SP>,
         data: Node<SP>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
+        message_name: FullName,
     },
     DirectMessage {
         store_in: SentTag,
@@ -721,11 +722,13 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 store_in,
                 function,
                 data,
+                message_name,
                 serde_adapter,
             } => Self::Deserialize {
                 store_in: store_in.clone(),
                 function: function.clone(),
                 data: data.get_strong_ref(),
+                message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
             Self::DirectMessage { store_in, data } => Self::DirectMessage {
@@ -816,8 +819,11 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 *store_in = store_in.clone().with_added_prefix(prefix);
                 *message_name = message_name.clone().with_added_prefix(prefix);
             }
-            Self::Deserialize { store_in, .. } => {
+            Self::Deserialize {
+                store_in, message_name, ..
+            } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
+                *message_name = message_name.clone().with_added_prefix(prefix);
             }
             Self::Receive {
                 store_in, message_name, ..

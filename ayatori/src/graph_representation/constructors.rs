@@ -270,7 +270,7 @@ pub fn send<SP: SessionParameters>(
 fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderError> {
     let verified_value = args.verified_value();
 
-    let expected_senders = args.expected_senders().ok_or_else(SenderError::new)?;
+    let expected_senders = args.expected_senders();
 
     if !expected_senders.contains(verified_value.source()) {
         return Err(SenderError::new());
@@ -291,13 +291,14 @@ pub fn receive_split<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Re
 
     let receive = Node::new(NodeKind::Receive {
         store_in: receive_store_in,
-        message_name,
+        message_name: message_name.clone(),
     });
 
     let deserialize = Node::new(NodeKind::Deserialize {
         store_in: deserialize_store_in,
         function: DeserializeFunction::new(default_deserialize),
         data: receive.get_strong_ref(),
+        message_name,
         serde_adapter: message.serde_adapter().clone(),
     });
 

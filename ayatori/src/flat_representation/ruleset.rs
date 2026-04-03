@@ -63,6 +63,7 @@ enum MappingRuleKind<SP: SessionParameters> {
         store_in: ReceivedTag,
         function: DeserializeFunction<SP>,
         data: MappingTag,
+        message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         on_error: OnError,
     },
@@ -105,6 +106,7 @@ pub(crate) enum Action<SP: SessionParameters> {
         index: SP::Verifier,
         function: DeserializeFunction<SP>,
         data: MappingTag,
+        message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         on_error: OnError,
     },
@@ -469,6 +471,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     store_in,
                     function,
                     data,
+                    message_name,
                     serde_adapter,
                 } => {
                     let on_error = get_on_error(&node, private_inputs);
@@ -500,6 +503,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             store_in: store_in.clone(),
                             function: function.clone(),
                             data: tag.to_owned(),
+                            message_name: message_name.clone(),
                             serde_adapter: serde_adapter.clone(),
                             on_error,
                         },
@@ -721,6 +725,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 store_in,
                 function,
                 data,
+                message_name,
                 serde_adapter,
                 on_error,
             } => Some(Action::ComputeDeserializeElement {
@@ -728,6 +733,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 index: id.clone(),
                 function: function.clone(),
                 data: data.clone(),
+                message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
                 on_error: on_error.clone(),
             }),

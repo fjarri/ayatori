@@ -355,7 +355,7 @@ where
                         AnyTag::Scalar(tag) => self.storage.get_scalar(&tag)?,
                         AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index)?,
                     };
-                    let args = SerializeArgs::new(signer, &self.data, message_name, serde_adapter, value);
+                    let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
                     return Ok(Some(Task::compute_serialize_and_sign_elem(
                         store_in, index, function, args,
                     )));
@@ -365,11 +365,16 @@ where
                     function,
                     index,
                     data,
+                    message_name,
                     serde_adapter,
                     on_error,
                 } => {
                     let value = self.storage.get_elem(&data, &index)?;
-                    let args = DeserializeArgs::new(&self.data, serde_adapter, value)?;
+                    let expected_senders = self
+                        .data
+                        .expected_senders(&message_name)
+                        .ok_or_else(|| LocalError::new(format!("Assumption: {message_name} has expected senders")))?;
+                    let args = DeserializeArgs::new(&expected_senders, serde_adapter, value)?;
                     return Ok(Some(Task::compute_deserialize_elem(
                         store_in, index, function, args, on_error,
                     )));
