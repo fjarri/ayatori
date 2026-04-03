@@ -109,21 +109,21 @@ fn verify_echo_contents<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP
 }
 
 fn verify_echo_contents_error<SP: SessionParameters>(
-    session_id: &SessionId<SP>,
     _guilty_party: &SP::Verifier,
+    session_id: &SessionId<SP>,
     associated_data: &AssociatedData<SP>,
-) -> Result<(), EvidenceError> {
+) -> Result<EvidenceVerdict, LocalError> {
     let (message1, message2) = associated_data.deserialize::<(SignedValue<SP>, SignedValue<SP>)>()?;
 
     if message1.metadata().session_id() != session_id {
-        return Err(EvidenceError::new("Session ID mismatch"));
+        return Ok(EvidenceVerdict::invalid("Session ID mismatch"));
     }
 
     if message2.metadata().session_id() != session_id {
-        return Err(EvidenceError::new("Session ID mismatch"));
+        return Ok(EvidenceVerdict::invalid("Session ID mismatch"));
     }
 
-    Ok(())
+    Ok(EvidenceVerdict::valid())
 }
 
 #[derive(Debug)]

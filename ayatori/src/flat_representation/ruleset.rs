@@ -63,6 +63,7 @@ enum MappingRuleKind<SP: SessionParameters> {
         store_in: ReceivedTag,
         function: DeserializeFunction<SP>,
         data: MappingTag,
+        message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         on_error: OnError,
     },
@@ -105,6 +106,7 @@ pub(crate) enum Action<SP: SessionParameters> {
         index: SP::Verifier,
         function: DeserializeFunction<SP>,
         data: MappingTag,
+        message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         on_error: OnError,
     },
@@ -149,6 +151,33 @@ fn propagate_groups<SP: SessionParameters>(
                     .cloned()
                     .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
                 for arg in args.values() {
+                    if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                        result
+                            .entry(tag.to_owned())
+                            .or_insert(BTreeSet::new())
+                            .extend(ids.clone());
+                    }
+                }
+            }
+            NodeKind::ComputeMappingSenderAttributableWithInfo {
+                store_in,
+                args,
+                verification_args,
+                ..
+            } => {
+                let ids = result
+                    .get(&MappingTag::Computed(store_in.clone()))
+                    .cloned()
+                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                for arg in args.values() {
+                    if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                        result
+                            .entry(tag.to_owned())
+                            .or_insert(BTreeSet::new())
+                            .extend(ids.clone());
+                    }
+                }
+                for arg in verification_args.values() {
                     if let AnyTagRef::Mapping(tag) = arg.store_in() {
                         result
                             .entry(tag.to_owned())
@@ -340,6 +369,62 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         },
                     })
                 }
+                NodeKind::ComputeMappingSenderAttributableWithInfo {
+                    store_in,
+                    function,
+                    args,
+                    verification: _verification,
+                    verification_args,
+                } => {
+                    let on_error = get_on_error(&node, private_inputs);
+                    let possible_ids =
+                        propagated_ids
+                            .get(&MappingTag::Computed(store_in.clone()))
+                            .ok_or_else(|| {
+                                LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                            })?;
+
+                    let mut scalar_condition = ScalarCondition::empty();
+                    let mut element_condition = ElementCondition::empty();
+                    for arg in args.values() {
+                        match arg.store_in() {
+                            AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
+                            AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                        };
+                    }
+                    for arg in verification_args.values() {
+                        match arg.store_in() {
+                            AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
+                            AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                        };
+                    }
+
+                    let element_conditions = possible_ids
+                        .iter()
+                        .cloned()
+                        .map(|id| (id, element_condition.clone()))
+                        .collect();
+
+                    let arg_tags = args
+                        .iter()
+                        .map(|(name, arg)| {
+                            let arg = arg.store_in().to_owned();
+                            (name.clone(), arg)
+                        })
+                        .collect();
+
+                    mapping_rules.push(MappingRule {
+                        dependencies_condition,
+                        scalar_condition,
+                        element_conditions,
+                        kind: MappingRuleKind::Compute {
+                            store_in: store_in.clone(),
+                            function: MappingFunction::SenderAttributableWithInfo(function.clone()),
+                            args: arg_tags,
+                            on_error: on_error.clone(),
+                        },
+                    })
+                }
                 NodeKind::SerializeAndSign {
                     store_in,
                     function,
@@ -386,6 +471,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     store_in,
                     function,
                     data,
+                    message_name,
                     serde_adapter,
                 } => {
                     let on_error = get_on_error(&node, private_inputs);
@@ -417,6 +503,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             store_in: store_in.clone(),
                             function: function.clone(),
                             data: tag.to_owned(),
+                            message_name: message_name.clone(),
                             serde_adapter: serde_adapter.clone(),
                             on_error,
                         },
@@ -638,6 +725,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 store_in,
                 function,
                 data,
+                message_name,
                 serde_adapter,
                 on_error,
             } => Some(Action::ComputeDeserializeElement {
@@ -645,6 +733,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 index: id.clone(),
                 function: function.clone(),
                 data: data.clone(),
+                message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
                 on_error: on_error.clone(),
             }),

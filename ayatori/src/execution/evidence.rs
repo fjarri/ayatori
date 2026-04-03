@@ -3,15 +3,11 @@ use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use super::{
-    session::Session,
-    session_id::SessionId,
-    task::{Task, TaskResultEnum},
-};
+use super::{session::Session, task::Task};
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, MappingFunction, MappingTag, Message, MessageId, SignedValue, VerificationError,
-        VerifiedValue,
+        AnyTagRef, AssociatedData, EvidenceVerdict, MappingFunction, MappingTag, Message, MessageId, SessionId,
+        SignedValue, VerificationError, VerifiedValue,
     },
     errors::LocalError,
     graph_representation::{ArgNodes, NodeKind, PartyBuildData},
@@ -50,6 +46,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum EvidenceEnum<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     SenderError(SenderErrorEvidence<SP, P>),
+    SenderErrorWithInfo(SenderErrorEvidenceWithInfo<SP, P>),
     ConflictingMessages(ConflictingMessagesEvidence<SP>),
     ThirdPartyError(ThirdPartyErrorEvidence<SP, P>),
 }
@@ -63,6 +60,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
     ) -> Result<(), EvidenceError> {
         match self {
             Self::SenderError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
+            Self::SenderErrorWithInfo(evidence) => evidence.verify(session_id, guilty_party, shared_data),
             Self::ConflictingMessages(evidence) => evidence.verify(session_id, guilty_party),
             Self::ThirdPartyError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
         }
@@ -139,61 +137,114 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
     ) -> Result<(), EvidenceError> {
-        let mut session = Session::<SP, P>::new_with_reproduction_subtree(
+        let session = Session::<SP, P>::new_with_reproduction_subtree(
             session_id.clone(),
             &self.failed_at,
             &self.reported_by,
             guilty_party,
             shared_data,
+            None,
         )?;
 
-        for signed_value in self.signed_values.iter() {
-            if signed_value.source() != guilty_party {
-                return Err(EvidenceError::new("The message source is not that of the guilty party"));
-            }
-        }
-
-        let message_id = MessageId::from_usize(0);
-        session.add_message(
-            &message_id,
-            Message::new(self.reported_by.clone(), self.signed_values.clone()),
-        );
-
-        while let Some(task) = session.make_task()? {
-            let task_result = match task {
-                Task::Compute(task) => {
-                    let result = task.compute()?;
-                    if let TaskResultEnum::SenderError { store_in, .. } = result.as_enum()
-                        && store_in == &self.failed_at
-                    {
-                        return Ok(());
-                    }
-                    session.add_result(result)
-                }
-                Task::ComputeWithRng(_task) => {
-                    return Err(EvidenceError::new(
-                        "Unexpected RNG-based computation when reproducing the failure",
-                    ));
-                }
-                Task::Send(task) => {
-                    let (_message, result) = task.compute()?;
-                    session.add_result(result)
-                }
-                Task::FinalizeWithSuccess(_task) => {
-                    return Err(EvidenceError::new("Unexpected finalization with success task"));
-                }
-                Task::FinalizeWithStall(_task) => {
-                    return Err(EvidenceError::new("Unexpected finalization with stall task"));
-                }
-            };
-
-            if let Some(error) = task_result.err() {
-                return Err(EvidenceError::new(format!("Unexpected task error: {error:?}")));
-            }
-        }
-
-        Err(EvidenceError::new("The execution did not encounter the expected error"))
+        run_evidence_verification_session(session, &self.reported_by, guilty_party, &self.signed_values)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SenderErrorEvidenceWithInfo<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    reported_by: SP::Verifier,
+    failed_at: MappingTag,
+    signed_values: Vec<SignedValue<SP>>,
+    associated_data: AssociatedData<SP>,
+    phantom: PhantomData<P>,
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidenceWithInfo<SP, P> {
+    pub fn new(
+        reported_by: &SP::Verifier,
+        failed_at: &MappingTag,
+        signed_values: Vec<SignedValue<SP>>,
+        associated_data: AssociatedData<SP>,
+    ) -> Self {
+        Self {
+            reported_by: reported_by.clone(),
+            failed_at: failed_at.clone(),
+            signed_values,
+            associated_data,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn verify(
+        &self,
+        session_id: &SessionId<SP>,
+        guilty_party: &SP::Verifier,
+        shared_data: &P::SharedData,
+    ) -> Result<(), EvidenceError> {
+        let session = Session::<SP, P>::new_with_reproduction_subtree(
+            session_id.clone(),
+            &self.failed_at,
+            &self.reported_by,
+            guilty_party,
+            shared_data,
+            Some(&self.associated_data),
+        )?;
+
+        run_evidence_verification_session(session, &self.reported_by, guilty_party, &self.signed_values)
+    }
+}
+
+fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtocol<SP>>(
+    mut session: Session<SP, P>,
+    session_verifier: &SP::Verifier,
+    guilty_party: &SP::Verifier,
+    signed_values: &[SignedValue<SP>],
+) -> Result<(), EvidenceError> {
+    for signed_value in signed_values.iter() {
+        if signed_value.source() != guilty_party {
+            return Err(EvidenceError::new("The message source is not that of the guilty party"));
+        }
+    }
+
+    let message_id = MessageId::from_usize(0);
+    session.add_message(
+        &message_id,
+        Message::new(session_verifier.clone(), signed_values.to_vec()),
+    );
+
+    while let Some(task) = session.make_task()? {
+        let task_result = match task {
+            Task::Compute(task) => {
+                let result = task.compute()?;
+                session.add_result(result)
+            }
+            Task::ComputeWithRng(_task) => {
+                return Err(EvidenceError::new(
+                    "Unexpected RNG-based computation when reproducing the failure",
+                ));
+            }
+            Task::Send(task) => {
+                let (_message, result) = task.compute()?;
+                session.add_result(result)
+            }
+            Task::FinalizeWithSuccess(task) => {
+                let verdict = session.finalize_with_evidence_verdict(task)?;
+                return match verdict {
+                    EvidenceVerdict::Valid => Ok(()),
+                    EvidenceVerdict::Invalid(error) => Err(EvidenceError::new(format!("Invalid evidence: {error}"))),
+                };
+            }
+            Task::FinalizeWithStall(_task) => {
+                return Err(EvidenceError::new("Unexpected finalization with stall task"));
+            }
+        };
+
+        if let Some(error) = task_result.err() {
+            return Err(EvidenceError::new(format!("Unexpected task error: {error:?}")));
+        }
+    }
+
+    Err(EvidenceError::new("The execution did not encounter the expected error"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,12 +290,16 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
             _ => return Err(EvidenceError::new("Invalid function type")),
         };
 
-        verification.call(session_id, guilty_party, &self.associated_data)
+        let verdict = verification.call(guilty_party, session_id, &self.associated_data)?;
+        match verdict {
+            EvidenceVerdict::Valid => Ok(()),
+            EvidenceVerdict::Invalid(error) => Err(EvidenceError::new(format!("Invalid evidence: {error}"))),
+        }
     }
 }
 
 #[derive(displaydoc::Display, Debug, Clone)]
-#[displaydoc("Local error: {0}")]
+#[displaydoc("Evidence error: {0}")]
 pub struct EvidenceError(String);
 
 impl EvidenceError {

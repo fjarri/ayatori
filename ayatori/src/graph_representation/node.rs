@@ -15,10 +15,11 @@ use itertools::Itertools;
 use super::{args::BoundProtocolArgs, constructors::collect};
 use crate::{
     entities::{
-        AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
-        InfallibleScalarFunction, LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag,
-        RemoteSignedTag, ScalarArgumentTag, ScalarFunction, ScalarTagRef, SentTag, SerdeAdapter,
-        SerializeAndSignFunction,
+        AnyTagRef, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction,
+        EvidenceVerdict, EvidenceVerificationFunction, FullName, InfallibleMappingFunction, InfallibleScalarFunction,
+        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag,
+        ScalarArgumentTag, ScalarFunction, ScalarTagRef, SenderAttributableWithInfoMappingFunction, SenderError,
+        SenderErrorEnum, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
     errors::LocalError,
     traits::SessionParameters,
@@ -101,10 +102,57 @@ impl<SP: SessionParameters> Node<SP> {
         &self,
         tag: &MappingTag,
         guilty_party: &SP::Verifier,
+        associated_data: Option<&AssociatedData<SP>>,
     ) -> Result<Self, LocalError> {
         let node = self
             .find_subnode(AnyTagRef::Mapping(tag.as_ref()))
             .ok_or_else(|| LocalError::new(format!("Node {tag} was not found")))?;
+
+        let node = match (node.kind(), associated_data) {
+            (
+                NodeKind::ComputeMappingSenderAttributableWithInfo {
+                    store_in,
+                    verification,
+                    verification_args,
+                    ..
+                },
+                Some(associated_data),
+            ) => {
+                let associated_data = associated_data.clone();
+                let verification = verification.clone();
+                Node::new(NodeKind::ComputeMapping {
+                    store_in: store_in.clone(),
+                    function: MappingFunction::Infallible(InfallibleMappingFunction::new_erased(move |id, args| {
+                        verification.call(id, args, &associated_data)
+                    })),
+                    args: arg_map_to_owned(verification_args),
+                })
+            }
+            (
+                NodeKind::ComputeMapping {
+                    store_in,
+                    function: MappingFunction::SenderAttributable(function),
+                    args,
+                    ..
+                },
+                None,
+            ) => {
+                let function = function.clone();
+                Node::new(NodeKind::ComputeMapping {
+                    store_in: store_in.clone(),
+                    function: MappingFunction::Infallible(InfallibleMappingFunction::new_erased(move |id, args| {
+                        match function.call(id, args) {
+                            Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
+                            Err(SenderError(SenderErrorEnum::Local(error))) => Err(error),
+                            Err(SenderError(SenderErrorEnum::Error)) => Ok(EvidenceVerdict::valid()),
+                        }
+                    })),
+                    args: arg_map_to_owned(args),
+                })
+            }
+            _ => return Err(LocalError::new("Unexpected node type")),
+        };
+
         let node = node.tree_without_dependencies();
 
         // The output must be a scalar node, and `node` is a mapping node.
@@ -125,11 +173,18 @@ impl<SP: SessionParameters> Node<SP> {
             }
         };
         let arg_name = "value";
+        let guilty_party = guilty_party.clone();
         let wrapped = Node::new(NodeKind::ComputeScalar {
             store_in: original_output_tag.clone(),
-            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name("alias", move |args| {
-                args.get_value(arg_name).cloned()
-            })),
+            function: ScalarFunction::Infallible(InfallibleScalarFunction::new_erased(
+                move |args| -> Result<EvidenceVerdict, LocalError> {
+                    let map = args.get_map::<EvidenceVerdict>(arg_name)?;
+                    let verdict: &EvidenceVerdict = map
+                        .get(&guilty_party)
+                        .ok_or_else(|| LocalError::new("Guilty party entry not found"))?;
+                    Ok(verdict.clone())
+                },
+            )),
             args: [(arg_name.into(), collected.get_strong_ref())].into(),
         });
 
@@ -149,7 +204,20 @@ impl<SP: SessionParameters> Node<SP> {
         let mut arguments = BTreeSet::<String>::new();
         let mut messages = BTreeSet::<FullName>::new();
 
-        for node in self.flattened_args_only() {
+        let subnodes = match self.kind() {
+            NodeKind::ComputeMappingSenderAttributableWithInfo { verification_args, .. } => {
+                UnorderedIterator::new_with_nodes(
+                    &verification_args
+                        .values()
+                        .map(|node| node.get_strong_ref())
+                        .collect::<Vec<_>>(),
+                    true,
+                )
+            }
+            _ => self.flattened_args_only(),
+        };
+
+        for node in subnodes {
             match node.kind() {
                 NodeKind::ComputeScalar { function, .. } => {
                     if !function.is_reproducible() {
@@ -160,6 +228,9 @@ impl<SP: SessionParameters> Node<SP> {
                     if !function.is_reproducible() {
                         return Reproducibility::NotAvailable;
                     }
+                }
+                NodeKind::ComputeMappingSenderAttributableWithInfo { .. } => {
+                    // TODO: can we be sure that it's always reproducible?
                 }
                 // Requires RNG and secret information (signing key), so not reproducible.
                 NodeKind::SerializeAndSign { .. } => return Reproducibility::NotAvailable,
@@ -283,8 +354,12 @@ pub(crate) struct UnorderedIterator<SP: SessionParameters> {
 
 impl<SP: SessionParameters> UnorderedIterator<SP> {
     fn new(root: &Node<SP>, args_only: bool) -> Self {
+        Self::new_with_nodes(&[root.get_strong_ref()], args_only)
+    }
+
+    fn new_with_nodes(roots: &[Node<SP>], args_only: bool) -> Self {
         Self {
-            queue: vec![root.get_strong_ref()],
+            queue: nodes_to_owned(roots.iter()),
             emitted: BTreeSet::new(),
             args_only,
         }
@@ -465,6 +540,13 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         function: MappingFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
     },
+    ComputeMappingSenderAttributableWithInfo {
+        store_in: ComputedMappingTag,
+        function: SenderAttributableWithInfoMappingFunction<SP>,
+        args: BTreeMap<String, Node<SP>>,
+        verification: EvidenceVerificationFunction<SP>,
+        verification_args: BTreeMap<String, Node<SP>>,
+    },
     SerializeAndSign {
         store_in: LocalSignedTag,
         function: SerializeAndSignFunction<SP>,
@@ -477,6 +559,7 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         function: DeserializeFunction<SP>,
         data: Node<SP>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
+        message_name: FullName,
     },
     DirectMessage {
         store_in: SentTag,
@@ -526,6 +609,20 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                         .join(", ")
                 )
             }
+            Self::ComputeMappingSenderAttributableWithInfo {
+                store_in: _store_in,
+                function,
+                args,
+                ..
+            } => {
+                write!(
+                    f,
+                    "{function}[]({})",
+                    args.iter()
+                        .map(|(name, arg)| format!("{}={}", name, arg.store_in()))
+                        .join(", ")
+                )
+            }
             Self::SerializeAndSign { data, .. } => {
                 write!(f, "serialize_and_sign[]({})", data.store_in())
             }
@@ -565,6 +662,9 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::Collect { store_in, .. } => AnyTagRef::Scalar(ScalarTagRef::Collected(store_in)),
             Self::ScalarArgument { store_in, .. } => AnyTagRef::Scalar(ScalarTagRef::Argument(store_in)),
             Self::ComputeMapping { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::Computed(store_in)),
+            Self::ComputeMappingSenderAttributableWithInfo { store_in, .. } => {
+                AnyTagRef::Mapping(MappingTagRef::Computed(store_in))
+            }
             Self::SerializeAndSign { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::LocalSigned(store_in)),
             Self::Deserialize { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::Received(store_in)),
             Self::DirectMessage { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::Sent(store_in)),
@@ -592,6 +692,19 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 function: function.clone(),
                 args: arg_map_to_owned(args),
             },
+            Self::ComputeMappingSenderAttributableWithInfo {
+                store_in,
+                function,
+                args,
+                verification,
+                verification_args,
+            } => Self::ComputeMappingSenderAttributableWithInfo {
+                store_in: store_in.clone(),
+                function: function.clone(),
+                args: arg_map_to_owned(args),
+                verification: verification.clone(),
+                verification_args: arg_map_to_owned(verification_args),
+            },
             Self::SerializeAndSign {
                 store_in,
                 function,
@@ -609,11 +722,13 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 store_in,
                 function,
                 data,
+                message_name,
                 serde_adapter,
             } => Self::Deserialize {
                 store_in: store_in.clone(),
                 function: function.clone(),
                 data: data.get_strong_ref(),
+                message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
             },
             Self::DirectMessage { store_in, data } => Self::DirectMessage {
@@ -643,6 +758,11 @@ impl<SP: SessionParameters> NodeKind<SP> {
     fn args(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
         match self {
             Self::ComputeScalar { args, .. } | Self::ComputeMapping { args, .. } => Box::new(args.values()),
+            Self::ComputeMappingSenderAttributableWithInfo {
+                args,
+                verification_args,
+                ..
+            } => Box::new(args.values().chain(verification_args.values())),
             Self::SerializeAndSign { data, .. } => Box::new(core::iter::once(data)),
             Self::Deserialize { data, .. } => Box::new(core::iter::once(data)),
             Self::Collect { values, .. } => Box::new(core::iter::once(values)),
@@ -656,6 +776,14 @@ impl<SP: SessionParameters> NodeKind<SP> {
         match self {
             Self::ComputeScalar { args, .. } => maybe_replace_map(args, replacements),
             Self::ComputeMapping { args, .. } => maybe_replace_map(args, replacements),
+            Self::ComputeMappingSenderAttributableWithInfo {
+                args,
+                verification_args,
+                ..
+            } => {
+                maybe_replace_map(args, replacements);
+                maybe_replace_map(verification_args, replacements);
+            }
             Self::SerializeAndSign { data, .. } => maybe_replace(data, replacements),
             Self::Deserialize { data, .. } => maybe_replace(data, replacements),
             Self::Collect { values, .. } => maybe_replace(values, replacements),
@@ -679,6 +807,9 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeMapping { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
+            Self::ComputeMappingSenderAttributableWithInfo { store_in, .. } => {
+                *store_in = store_in.clone().with_added_prefix(prefix);
+            }
             Self::DirectMessage { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
@@ -688,8 +819,11 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 *store_in = store_in.clone().with_added_prefix(prefix);
                 *message_name = message_name.clone().with_added_prefix(prefix);
             }
-            Self::Deserialize { store_in, .. } => {
+            Self::Deserialize {
+                store_in, message_name, ..
+            } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
+                *message_name = message_name.clone().with_added_prefix(prefix);
             }
             Self::Receive {
                 store_in, message_name, ..

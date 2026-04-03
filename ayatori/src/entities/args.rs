@@ -9,14 +9,11 @@ use itertools::Itertools;
 
 use super::{
     message::VerifiedValue,
+    session_id::SessionId,
     tag::FullName,
     value::{Erasable, SerdeAdapter, Value},
 };
-use crate::{
-    errors::LocalError,
-    execution::{SessionData, SessionId},
-    traits::SessionParameters,
-};
+use crate::{errors::LocalError, traits::SessionParameters};
 
 #[derive_where::derive_where(Debug)]
 pub struct SerializeArgs<SP: SessionParameters> {
@@ -30,14 +27,14 @@ pub struct SerializeArgs<SP: SessionParameters> {
 impl<SP: SessionParameters> SerializeArgs<SP> {
     pub(crate) fn new(
         signer: &Arc<SP::Signer>,
-        session_data: &SessionData<SP>,
+        session_id: &SessionId<SP>,
         message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         value: Value,
     ) -> Self {
         Self {
             signer: signer.clone(),
-            session_id: session_data.id.clone(),
+            session_id: session_id.clone(),
             message_name,
             serde_adapter,
             value,
@@ -69,26 +66,24 @@ impl<SP: SessionParameters> SerializeArgs<SP> {
 pub struct DeserializeArgs<SP: SessionParameters> {
     serde_adapter: SerdeAdapter<SP::WireFormat>,
     value: Value,
-    expected_senders: Option<BTreeSet<SP::Verifier>>,
+    expected_senders: BTreeSet<SP::Verifier>,
 }
 
 impl<SP: SessionParameters> DeserializeArgs<SP> {
     pub(crate) fn new(
-        session_data: &SessionData<SP>,
+        expected_senders: &BTreeSet<SP::Verifier>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         value: Value,
     ) -> Result<Self, LocalError> {
-        let message_name = value.downcast_ref::<VerifiedValue<SP>>()?.metadata().full_name();
-        let expected_senders = session_data.expected_senders(message_name);
         Ok(Self {
             serde_adapter,
             value,
-            expected_senders,
+            expected_senders: expected_senders.clone(),
         })
     }
 
-    pub fn expected_senders(&self) -> Option<&BTreeSet<SP::Verifier>> {
-        self.expected_senders.as_ref()
+    pub fn expected_senders(&self) -> &BTreeSet<SP::Verifier> {
+        &self.expected_senders
     }
 
     pub fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {

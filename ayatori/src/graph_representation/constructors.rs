@@ -13,14 +13,14 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
-        Erasable, FullName, InfallibleMappingFunction, InfallibleMappingFunctionWithRng, InfallibleScalarFunction,
-        InfallibleScalarFunctionWithRng, LocalSignedTag, MappingFunction, PartyGroup, RemoteSignedTag,
-        ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction, SenderError, SerdeAdapter,
-        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
+        Erasable, EvidenceVerdict, EvidenceVerificationFunction, FullName, InfallibleMappingFunction,
+        InfallibleMappingFunctionWithRng, InfallibleScalarFunction, InfallibleScalarFunctionWithRng, LocalSignedTag,
+        MappingFunction, PartyGroup, RemoteSignedTag, ScalarArgumentTag, ScalarFunction,
+        SenderAttributableMappingFunction, SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorWithInfo,
+        SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
+        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction, ThirdPartyError, Value,
     },
     errors::LocalError,
-    execution::{EvidenceError, SessionId},
     traits::{ComposableProtocol, SessionParameters},
 };
 
@@ -167,7 +167,8 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
     args: &[(&str, &Node<SP>)],
-    verification: impl 'static + Fn(&SessionId<SP>, &SP::Verifier, &AssociatedData<SP>) -> Result<(), EvidenceError>,
+    verification: impl 'static
+    + Fn(&SP::Verifier, &SessionId<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>,
 ) -> Result<Node<SP>, LocalError> {
     Ok(Node::new(NodeKind::ComputeMapping {
         store_in: ComputedMappingTag::new(name),
@@ -176,6 +177,22 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
         args: args_to_owned(args.iter().cloned())?,
+    }))
+}
+
+pub fn compute_mapping_sender_fallible_with_info<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderErrorWithInfo<SP>>,
+    args: &[(&str, &Node<SP>)],
+    verification: impl 'static + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>,
+    verification_args: &[(&str, &Node<SP>)],
+) -> Result<Node<SP>, LocalError> {
+    Ok(Node::new(NodeKind::ComputeMappingSenderAttributableWithInfo {
+        store_in: ComputedMappingTag::new(name),
+        function: SenderAttributableWithInfoMappingFunction::new_erased(function),
+        verification: EvidenceVerificationFunction::new(verification),
+        args: args_to_owned(args.iter().cloned())?,
+        verification_args: args_to_owned(verification_args.iter().cloned())?,
     }))
 }
 
@@ -253,7 +270,7 @@ pub fn send<SP: SessionParameters>(
 fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderError> {
     let verified_value = args.verified_value();
 
-    let expected_senders = args.expected_senders().ok_or_else(SenderError::new)?;
+    let expected_senders = args.expected_senders();
 
     if !expected_senders.contains(verified_value.source()) {
         return Err(SenderError::new());
@@ -274,13 +291,14 @@ pub fn receive_split<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Re
 
     let receive = Node::new(NodeKind::Receive {
         store_in: receive_store_in,
-        message_name,
+        message_name: message_name.clone(),
     });
 
     let deserialize = Node::new(NodeKind::Deserialize {
         store_in: deserialize_store_in,
         function: DeserializeFunction::new(default_deserialize),
         data: receive.get_strong_ref(),
+        message_name,
         serde_adapter: message.serde_adapter().clone(),
     });
 

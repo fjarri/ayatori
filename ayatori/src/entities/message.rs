@@ -9,10 +9,9 @@ use signature::{
     rand_core::CryptoRngCore,
 };
 
-use super::{tag::FullName, value::SerializedValue};
+use super::{session_id::SessionId, tag::FullName, value::SerializedValue};
 use crate::{
     errors::LocalError,
-    execution::SessionId,
     traits::{SessionParameters, WireFormat},
 };
 
