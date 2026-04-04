@@ -7,7 +7,7 @@ use core::fmt::{self, Display};
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "dev"))]
-use crate::errors::LocalError;
+use super::errors::RuntimeError;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FullName {
@@ -24,11 +24,11 @@ impl FullName {
     }
 
     #[cfg(any(test, feature = "dev"))]
-    pub(crate) fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, LocalError> {
+    pub(crate) fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, RuntimeError> {
         let mut names = prefix_and_name.iter().map(|s| s.to_string()).collect::<Vec<String>>();
         let name = names
             .pop()
-            .ok_or_else(|| LocalError::new("The name must have at least one element"))?;
+            .ok_or_else(|| RuntimeError::new("The name must have at least one element"))?;
         Ok(Self { prefix: names, name })
     }
 

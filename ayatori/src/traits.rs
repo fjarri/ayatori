@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest};
 
 use crate::{
-    entities::Erasable,
-    errors::LocalError,
+    entities::{Erasable, RuntimeError},
     graph_representation::{ArgNodes, Node, PartyBuildData, PrivateInputs, ProtocolSignature, PublicInputs},
 };
 
@@ -33,7 +32,7 @@ impl<T> PartyId for T where
 /// A (de)serializer that will be used for the protocol messages.
 pub trait WireFormat: 'static + Debug {
     /// Serializes the given object into a bytestring.
-    fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, LocalError>;
+    fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, RuntimeError>;
 
     type DeError: serde::de::Error;
 
@@ -74,5 +73,5 @@ pub trait ComposableProtocol<SP: SessionParameters>: Debug {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError>;
+    ) -> Result<Node<SP>, RuntimeError>;
 }

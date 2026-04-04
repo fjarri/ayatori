@@ -1,47 +1,21 @@
 use alloc::{
-    format,
     string::{String, ToString},
     sync::Arc,
 };
-use core::{
-    fmt::{self, Debug, Display},
-    marker::PhantomData,
-};
+use core::fmt::{self, Debug, Display};
 
-use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
     args::{Args, DeserializeArgs, SerializeArgs},
+    errors::{
+        AssociatedData, RuntimeError, SenderAttributableError, SenderAttributableErrorWithReveal,
+        ThirdPartyAttributableError, UnattributableError,
+    },
     session_id::SessionId,
-    value::{Erasable, SerializedValue, Value},
+    value::{Erasable, Value},
 };
-use crate::{
-    errors::LocalError,
-    traits::{SessionParameters, WireFormat},
-};
-
-#[derive(Debug, Default)]
-pub struct SenderError(pub(crate) SenderErrorEnum);
-
-#[derive(Debug, Default)]
-pub(crate) enum SenderErrorEnum {
-    Local(LocalError),
-    #[default]
-    Error,
-}
-
-impl From<LocalError> for SenderError {
-    fn from(source: LocalError) -> Self {
-        Self(SenderErrorEnum::Local(source))
-    }
-}
-
-impl SenderError {
-    pub fn new() -> Self {
-        Self(SenderErrorEnum::Error)
-    }
-}
+use crate::traits::SessionParameters;
 
 #[derive(displaydoc::Display, Debug, Clone)]
 pub enum EvidenceVerdict {
@@ -58,83 +32,6 @@ impl EvidenceVerdict {
 
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid(message.into())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[derive_where::derive_where(Clone)]
-pub struct AssociatedData<SP: SessionParameters> {
-    serialized_value: SerializedValue,
-    phantom: PhantomData<SP>,
-}
-
-impl<SP: SessionParameters> AssociatedData<SP> {
-    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(value: T) -> Result<Self, LocalError> {
-        let serialized_value = SerializedValue::new(SP::WireFormat::serialize(value)?);
-        Ok(Self {
-            serialized_value,
-            phantom: PhantomData,
-        })
-    }
-
-    pub fn deserialize<T: for<'de> Deserialize<'de>>(&self) -> Result<T, LocalError> {
-        SP::WireFormat::deserialize::<T>(self.serialized_value.as_ref())
-            .map_err(|err| LocalError::new(format!("Failed to deserialize: {err}")))
-    }
-}
-
-#[derive(Debug)]
-pub struct SenderErrorWithInfo<SP: SessionParameters>(pub(crate) SenderErrorWithInfoEnum<SP>);
-
-#[derive(Debug)]
-pub(crate) enum SenderErrorWithInfoEnum<SP: SessionParameters> {
-    Local(LocalError),
-    Error(AssociatedData<SP>),
-}
-
-impl<SP: SessionParameters> From<LocalError> for SenderErrorWithInfo<SP> {
-    fn from(source: LocalError) -> Self {
-        Self(SenderErrorWithInfoEnum::Local(source))
-    }
-}
-
-impl<SP: SessionParameters> SenderErrorWithInfo<SP> {
-    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(associated_value: T) -> Result<Self, LocalError> {
-        let associated_data = AssociatedData::new(associated_value)?;
-        Ok(Self(SenderErrorWithInfoEnum::Error(associated_data)))
-    }
-}
-
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
-pub struct ThirdPartyError<SP: SessionParameters>(pub(crate) ThirdPartyErrorEnum<SP>);
-
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
-pub(crate) enum ThirdPartyErrorEnum<SP: SessionParameters> {
-    Local(LocalError),
-    Error {
-        guilty_party: SP::Verifier,
-        associated_data: AssociatedData<SP>,
-    },
-}
-
-impl<SP: SessionParameters> From<LocalError> for ThirdPartyError<SP> {
-    fn from(source: LocalError) -> Self {
-        Self(ThirdPartyErrorEnum::Local(source))
-    }
-}
-
-impl<SP: SessionParameters> ThirdPartyError<SP> {
-    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(
-        guilty_party: &SP::Verifier,
-        associated_value: T,
-    ) -> Result<Self, LocalError> {
-        let associated_data = AssociatedData::new(associated_value)?;
-        Ok(Self(ThirdPartyErrorEnum::Error {
-            guilty_party: guilty_party.clone(),
-            associated_data,
-        }))
     }
 }
 
@@ -216,57 +113,57 @@ macro_rules! define_typed_function_type {
 
 define_typed_function_type!(
     UnattributableScalarFunction<SP>,
-    (args: &Args<SP>) -> LocalError
+    (args: &Args<SP>) -> UnattributableError
 );
 
 define_typed_function_type!(
     UnattributableScalarFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, args: &Args<SP>) -> LocalError
+    (rng: &mut dyn CryptoRngCore, args: &Args<SP>) -> UnattributableError
 );
 
 define_typed_function_type!(
     UnattributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: &Args<SP>) -> LocalError
+    (id: &SP::Verifier, args: &Args<SP>) -> UnattributableError
 );
 
 define_typed_function_type!(
     UnattributableMappingFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: &Args<SP>) -> LocalError
+    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: &Args<SP>) -> UnattributableError
 );
 
 define_typed_function_type!(
     SenderAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: &Args<SP>) -> SenderError
+    (id: &SP::Verifier, args: &Args<SP>) -> SenderAttributableError
 );
 
 define_typed_function_type!(
-    SenderAttributableWithInfoMappingFunction<SP>,
-    (id: &SP::Verifier, args: &Args<SP>) -> SenderErrorWithInfo<SP>
+    SenderAttributableWithRevealMappingFunction<SP>,
+    (id: &SP::Verifier, args: &Args<SP>) -> SenderAttributableErrorWithReveal<SP>
 );
 
 define_typed_function_type!(
     ThirdPartyAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: &Args<SP>) -> ThirdPartyError<SP>
+    (id: &SP::Verifier, args: &Args<SP>) -> ThirdPartyAttributableError<SP>
 );
 
 define_erased_function_type!(
     ThirdPartyAttributableVerificationFunction<SP>,
-    (guilty_party: &SP::Verifier, session_id: &SessionId<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>
+    (guilty_party: &SP::Verifier, session_id: &SessionId<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>
 );
 
 define_erased_function_type!(
     EvidenceVerificationFunction<SP>,
-    (guilty_party: &SP::Verifier, args: &Args<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, LocalError>
+    (guilty_party: &SP::Verifier, args: &Args<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>
 );
 
 define_erased_function_type!(
     SerializeAndSignFunction<SP>,
-    (rng: &mut dyn CryptoRngCore, destination: &SP::Verifier, args: &SerializeArgs<SP>) -> Result<Value, LocalError>
+    (rng: &mut dyn CryptoRngCore, destination: &SP::Verifier, args: &SerializeArgs<SP>) -> Result<Value, RuntimeError>
 );
 
 define_erased_function_type!(
     DeserializeFunction<SP>,
-    (args: &DeserializeArgs<SP>) -> Result<Value, SenderError>
+    (args: &DeserializeArgs<SP>) -> Result<Value, SenderAttributableError>
 );
 
 #[derive_where::derive_where(Debug, Clone)]
@@ -286,7 +183,7 @@ pub(crate) enum MappingFunction<SP: SessionParameters> {
     Unattributable(UnattributableMappingFunction<SP>),
     UnattributableWithRng(UnattributableMappingFunctionWithRng<SP>),
     SenderAttributable(SenderAttributableMappingFunction<SP>),
-    SenderAttributableWithInfo(SenderAttributableWithInfoMappingFunction<SP>),
+    SenderAttributableWithReveal(SenderAttributableWithRevealMappingFunction<SP>),
     ThirdPartyAttributable {
         function: ThirdPartyAttributableMappingFunction<SP>,
         verification: ThirdPartyAttributableVerificationFunction<SP>,
@@ -314,7 +211,7 @@ impl<SP: SessionParameters> Display for MappingFunction<SP> {
             Self::UnattributableWithRng(function) => write!(f, "{function}[RNG]"),
             Self::Unattributable(function) => write!(f, "{function}"),
             Self::SenderAttributable(function) => write!(f, "{function}"),
-            Self::SenderAttributableWithInfo(function) => write!(f, "{function}"),
+            Self::SenderAttributableWithReveal(function) => write!(f, "{function}"),
             Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),
         }
     }

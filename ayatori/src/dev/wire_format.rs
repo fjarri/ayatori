@@ -2,17 +2,17 @@ use alloc::{boxed::Box, string::ToString};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{errors::LocalError, traits::WireFormat};
+use crate::{entities::RuntimeError, traits::WireFormat};
 
 /// A binary format to use in tests.
 #[derive(Debug, Clone, Copy)]
 pub struct BinaryFormat;
 
 impl WireFormat for BinaryFormat {
-    fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, LocalError> {
+    fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, RuntimeError> {
         postcard::to_allocvec(&value)
             .map(Into::into)
-            .map_err(|err| LocalError::new(err.to_string()))
+            .map_err(|err| RuntimeError::new(err.to_string()))
     }
 
     type DeError = postcard::Error;
@@ -27,10 +27,10 @@ impl WireFormat for BinaryFormat {
 pub struct HumanReadableFormat;
 
 impl WireFormat for HumanReadableFormat {
-    fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, LocalError> {
+    fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, RuntimeError> {
         serde_json::to_vec(&value)
             .map(Into::into)
-            .map_err(|err| LocalError::new(err.to_string()))
+            .map_err(|err| RuntimeError::new(err.to_string()))
     }
 
     type DeError = serde_json::Error;

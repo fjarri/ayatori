@@ -16,12 +16,12 @@ struct Protocol2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Protocol2Message(u64);
 
-fn make_protocol2_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Protocol2Message, LocalError> {
+fn make_protocol2_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Protocol2Message, UnattributableError> {
     let p2 = args.get::<u64>("p2")?;
     Ok(Protocol2Message(*p2))
 }
 
-fn make_protocol2_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
+fn make_protocol2_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, UnattributableError> {
     let xs = args.get_map::<Protocol2Message>("x")?;
     Ok(xs.values().map(|message| message.0).sum())
 }
@@ -37,7 +37,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    ) -> Result<Node<SP>, RuntimeError> {
         let message_x = ProtocolMessage::new::<Protocol2Message>("x");
 
         let all_parties = build_data;
@@ -64,12 +64,12 @@ struct Protocol1SharedData<SP: SessionParameters> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Protocol1Message(u64);
 
-fn make_protocol1_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Protocol1Message, LocalError> {
+fn make_protocol1_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Protocol1Message, UnattributableError> {
     let p1 = args.get::<u64>("p1")?;
     Ok(Protocol1Message(*p1))
 }
 
-fn make_protocol1_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
+fn make_protocol1_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, UnattributableError> {
     let xs = args.get_map::<Protocol1Message>("x")?;
     Ok(xs.values().map(|message| message.0).sum())
 }
@@ -107,7 +107,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    ) -> Result<Node<SP>, RuntimeError> {
         let message_x = ProtocolMessage::new::<Protocol1Message>("x");
 
         let all_parties = build_data;

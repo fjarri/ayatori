@@ -22,25 +22,25 @@ struct Message2<Id>(Id, Id);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message3<Id>(Id, Id);
 
-fn make_scalar_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
+fn make_scalar_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Message1<SP::Verifier>, UnattributableError> {
     Ok(Message1(args.my_id().clone()))
 }
 
 fn make_mapping_elem<SP: SessionParameters>(
     id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<Message2<SP::Verifier>, LocalError> {
+) -> Result<Message2<SP::Verifier>, UnattributableError> {
     Ok(Message2(args.my_id().clone(), id.clone()))
 }
 
 fn make_mapping_elem_sans_me<SP: SessionParameters>(
     id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<Message3<SP::Verifier>, LocalError> {
+) -> Result<Message3<SP::Verifier>, UnattributableError> {
     Ok(Message3(args.my_id().clone(), id.clone()))
 }
 
-fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<(), LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<(), UnattributableError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -95,7 +95,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    ) -> Result<Node<SP>, RuntimeError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
         let message_z = ProtocolMessage::new::<Message3<SP::Verifier>>("z");

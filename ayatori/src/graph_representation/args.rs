@@ -6,8 +6,7 @@ use alloc::{
 
 use super::{constructors::scalar_argument, node::Node};
 use crate::{
-    entities::{Erasable, Value},
-    errors::LocalError,
+    entities::{Erasable, RuntimeError, Value},
     traits::SessionParameters,
 };
 
@@ -84,10 +83,10 @@ impl<SP: SessionParameters> ArgNodes<SP> {
         )
     }
 
-    pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
+    pub fn get(&self, name: &str) -> Result<&Node<SP>, RuntimeError> {
         self.0
             .get(name)
-            .ok_or_else(|| LocalError::new(format!("Argument {name} was not found")))
+            .ok_or_else(|| RuntimeError::new(format!("Argument {name} was not found")))
     }
 }
 
@@ -109,10 +108,10 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
         &self.0
     }
 
-    pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
+    pub fn get(&self, name: &str) -> Result<&Node<SP>, RuntimeError> {
         self.0
             .get(name)
-            .ok_or_else(|| LocalError::new(format!("Argument {name} was not found")))
+            .ok_or_else(|| RuntimeError::new(format!("Argument {name} was not found")))
     }
 }
 
@@ -133,9 +132,9 @@ impl ProtocolSignature {
     pub(crate) fn bind<SP: SessionParameters>(
         &self,
         args: ProtocolArgs<SP>,
-    ) -> Result<BoundProtocolArgs<SP>, LocalError> {
+    ) -> Result<BoundProtocolArgs<SP>, RuntimeError> {
         if self.0 != args.0.keys().cloned().collect::<BTreeSet<_>>() {
-            return Err(LocalError::new("Argument mismatch when binding"));
+            return Err(RuntimeError::new("Argument mismatch when binding"));
         }
 
         Ok(BoundProtocolArgs(args.0))
@@ -145,9 +144,9 @@ impl ProtocolSignature {
 pub(crate) struct BoundProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
 
 impl<SP: SessionParameters> BoundProtocolArgs<SP> {
-    pub fn get(&self, name: &str) -> Result<&Node<SP>, LocalError> {
+    pub fn get(&self, name: &str) -> Result<&Node<SP>, RuntimeError> {
         self.0
             .get(name)
-            .ok_or_else(|| LocalError::new(format!("Bound argument {name} was not found")))
+            .ok_or_else(|| RuntimeError::new(format!("Bound argument {name} was not found")))
     }
 }

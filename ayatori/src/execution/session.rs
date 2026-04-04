@@ -12,7 +12,7 @@ use signature::Keypair;
 
 use super::{
     evidence::{
-        ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, SenderErrorEvidenceWithInfo,
+        ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, SenderErrorWithRevealEvidence,
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
@@ -23,10 +23,9 @@ use crate::dev::Replacement;
 use crate::{
     entities::{
         AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, ScalarFunction, ScalarTag, SerializeArgs,
-        SessionId, Value, VerifiedValue,
+        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
+        SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
-    errors::LocalError,
     flat_representation::{Action, OnError, Ruleset},
     graph_representation::{ArgNodes, Node, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
@@ -59,7 +58,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     phantom: PhantomData<P>,
 }
 
-fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<Node<SP>, LocalError>
+fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<Node<SP>, RuntimeError>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
@@ -83,7 +82,7 @@ where
         output_node: Node<SP>,
         private_inputs: PrivateInputs,
         shared_data: &P::SharedData,
-    ) -> Result<Self, LocalError> {
+    ) -> Result<Self, RuntimeError> {
         let participants = P::all_participants(shared_data);
         let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
@@ -115,7 +114,7 @@ where
         Ok(session)
     }
 
-    fn fill_inputs(&mut self, public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Result<(), LocalError> {
+    fn fill_inputs(&mut self, public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Result<(), RuntimeError> {
         let arguments = self.ruleset.arguments().clone();
 
         let public_values = public_inputs.into_inner();
@@ -126,7 +125,7 @@ where
 
         if !public_names.is_disjoint(&private_names) {
             let mut intersection = public_names.intersection(&private_names);
-            return Err(LocalError::new(format!(
+            return Err(RuntimeError::new(format!(
                 "Intersecting names in public and private arguments: {}",
                 intersection.join(", ")
             )));
@@ -134,21 +133,21 @@ where
 
         let all_names = public_names.union(&private_names).cloned().collect::<BTreeSet<_>>();
         if all_names != arguments.keys().collect() {
-            return Err(LocalError::new(
+            return Err(RuntimeError::new(
                 "Public and private argument names differ from the protocol signature",
             ));
         }
 
         for (name, value) in public_values {
             let store_in = arguments.get(&name).ok_or_else(|| {
-                LocalError::new(format!("Public argument {name} not found in the protocol signature"))
+                RuntimeError::new(format!("Public argument {name} not found in the protocol signature"))
             })?;
             self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
         }
 
         for (name, value) in private_values {
             let store_in = arguments.get(&name).ok_or_else(|| {
-                LocalError::new(format!("Private argument {name} not found in the protocol signature"))
+                RuntimeError::new(format!("Private argument {name} not found in the protocol signature"))
             })?;
             self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
         }
@@ -161,7 +160,7 @@ where
         signer: SP::Signer,
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
-    ) -> Result<Self, LocalError> {
+    ) -> Result<Self, RuntimeError> {
         let verifier = signer.verifying_key();
         let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
         let private_inputs = P::make_private_inputs(private_data);
@@ -175,7 +174,7 @@ where
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
         associated_data: Option<&AssociatedData<SP>>,
-    ) -> Result<Self, LocalError> {
+    ) -> Result<Self, RuntimeError> {
         let output_node = make_tree::<SP, P>(reported_by, shared_data)?.get_reproduction_subtree(
             subtree_root,
             guilty_party,
@@ -191,7 +190,7 @@ where
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
         replacements: &[&Replacement<SP>],
-    ) -> Result<Self, LocalError> {
+    ) -> Result<Self, RuntimeError> {
         let verifier = signer.verifying_key();
         let mut output_node = make_tree::<SP, P>(&verifier, shared_data)?;
         for replacement in replacements {
@@ -205,13 +204,13 @@ where
         &self.verifier
     }
 
-    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), LocalError> {
+    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), RuntimeError> {
         self.storage.set_scalar(store_in, value)?;
         self.ruleset.update_with_scalar_ready(store_in);
         Ok(())
     }
 
-    fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), LocalError> {
+    fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), RuntimeError> {
         self.storage.set_elem(store_in, id, value)?;
         self.ruleset.update_with_element_ready(store_in, id);
         Ok(())
@@ -236,7 +235,7 @@ where
         }
     }
 
-    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, LocalError> {
+    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
         let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
         value.downcast::<T>()
     }
@@ -244,12 +243,12 @@ where
     pub(crate) fn finalize_with_evidence_verdict(
         self,
         task: FinalizeWithSuccessTask,
-    ) -> Result<EvidenceVerdict, LocalError> {
+    ) -> Result<EvidenceVerdict, RuntimeError> {
         let verdict = self.get_output::<EvidenceVerdict>(task.output_tag())?;
         Ok(verdict)
     }
 
-    pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, LocalError> {
+    pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, RuntimeError> {
         let result = self.get_output::<P::Output>(task.output_tag())?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
@@ -273,7 +272,7 @@ where
         self.preprocessing_tasks.extend(tasks);
     }
 
-    pub fn make_task(&mut self) -> Result<Option<Task<SP>>, LocalError> {
+    pub fn make_task(&mut self) -> Result<Option<Task<SP>>, RuntimeError> {
         if let Some(task) = self.preprocessing_tasks.pop() {
             return Ok(Some(Task::preprocess_message(task)));
         }
@@ -329,7 +328,7 @@ where
                         MappingFunction::SenderAttributable(function) => {
                             Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
                         }
-                        MappingFunction::SenderAttributableWithInfo(function) => {
+                        MappingFunction::SenderAttributableWithReveal(function) => {
                             Task::compute_mapping_elem_sender_attributable_with_info(
                                 store_in, index, function, args, on_error,
                             )
@@ -350,7 +349,7 @@ where
                     let signer = self
                         .signer
                         .as_ref()
-                        .ok_or_else(|| LocalError::new("This session does not contain a signer"))?;
+                        .ok_or_else(|| RuntimeError::new("This session does not contain a signer"))?;
                     let value = match data {
                         AnyTag::Scalar(tag) => self.storage.get_scalar(&tag)?,
                         AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index)?,
@@ -373,7 +372,7 @@ where
                     let expected_senders = self
                         .data
                         .expected_senders(&message_name)
-                        .ok_or_else(|| LocalError::new(format!("Assumption: {message_name} has expected senders")))?;
+                        .ok_or_else(|| RuntimeError::expect(format!("{message_name} has expected senders")))?;
                     let args = DeserializeArgs::new(&expected_senders, serde_adapter, value)?;
                     return Ok(Some(Task::compute_deserialize_elem(
                         store_in, index, function, args, on_error,
@@ -403,66 +402,80 @@ where
             TaskResultEnum::ComputedScalar { store_in, result } => {
                 self.add_scalar(&store_in, result)?;
             }
-            TaskResultEnum::ComputedMappingElement { store_in, id, result } => {
-                self.add_element(&store_in, &id, result)?;
-            }
-            TaskResultEnum::SenderError { store_in, id, on_error } => match on_error {
-                OnError::Escalate => self.register_attributable_error(id, store_in),
-                OnError::CollectEvidence(message_names) => {
-                    let mut signed_values = Vec::new();
-                    for name in message_names {
-                        let value = self.storage.get_elem(
-                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &id,
-                        )?;
-                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
-                        signed_values.push(signed_value);
-                    }
-                    let evidence =
-                        EvidenceEnum::SenderError(SenderErrorEvidence::new(&self.verifier, &store_in, signed_values));
-                    self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
-                }
-            },
-            TaskResultEnum::SenderErrorWithInfo {
+            TaskResultEnum::ComputedMappingElement {
                 store_in,
-                id,
+                source,
+                result,
+            } => {
+                self.add_element(&store_in, &source, result)?;
+            }
+            TaskResultEnum::SenderError {
+                store_in,
+                guilty_party,
+                error,
                 on_error,
-                associated_data,
             } => match on_error {
-                OnError::Escalate => self.register_attributable_error(id, store_in),
+                OnError::Escalate => self.register_attributable_error(guilty_party, store_in),
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
                         let value = self.storage.get_elem(
                             &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &id,
+                            &guilty_party,
                         )?;
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
-                    let evidence = EvidenceEnum::SenderErrorWithInfo(SenderErrorEvidenceWithInfo::new(
+                    let evidence = EvidenceEnum::SenderError(SenderErrorEvidence::new(
                         &self.verifier,
                         &store_in,
                         signed_values,
-                        associated_data,
+                        error,
                     ));
-                    self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
+                    self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
+                }
+            },
+            TaskResultEnum::SenderErrorWithReveal {
+                store_in,
+                guilty_party,
+                error,
+                on_error,
+            } => match on_error {
+                OnError::Escalate => self.register_attributable_error(guilty_party, store_in),
+                OnError::CollectEvidence(message_names) => {
+                    let mut signed_values = Vec::new();
+                    for name in message_names {
+                        let value = self.storage.get_elem(
+                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                            &guilty_party,
+                        )?;
+                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        signed_values.push(signed_value);
+                    }
+                    let evidence = EvidenceEnum::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
+                        &self.verifier,
+                        &store_in,
+                        signed_values,
+                        error,
+                    ));
+                    self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
                 }
             },
             TaskResultEnum::ThirdPartyError {
                 store_in,
-                id,
-                associated_data,
+                guilty_party,
+                error,
             } => {
-                let evidence = EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(
-                    &self.verifier,
-                    &store_in,
-                    associated_data,
-                ));
-                self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
+                let evidence =
+                    EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
+                self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
             }
-            TaskResultEnum::Preprocessed { store_in, id, value } => {
-                if let Ok(existing_value) = self.storage.get_elem(&store_in, &id) {
+            TaskResultEnum::Preprocessed {
+                store_in,
+                source,
+                value,
+            } => {
+                if let Ok(existing_value) = self.storage.get_elem(&store_in, &source) {
                     let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
                     let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
 
@@ -478,7 +491,7 @@ where
                             typed_existing_value,
                             typed_received_value,
                         ));
-                        self.register_provable_error(Evidence::new(&self.data.id, &id, evidence));
+                        self.register_provable_error(Evidence::new(&self.data.id, &source, evidence));
                         return Ok(());
                     }
 
@@ -492,7 +505,7 @@ where
                     }));
                 }
 
-                self.add_element(&store_in, &id, value)?;
+                self.add_element(&store_in, &source, value)?;
             }
             TaskResultEnum::MessageError {
                 message_id,
@@ -510,7 +523,7 @@ where
 
 #[derive_where::derive_where(Debug)]
 pub enum TaskError<SP: SessionParameters> {
-    Local(LocalError),
+    Unattributable(UnattributableError),
     InvalidMessage(InvalidMessageError<SP>),
     DuplicateMessages(DuplicateMessagesError<SP>),
 }
@@ -521,9 +534,9 @@ pub struct InvalidMessageError<SP: SessionParameters> {
     pub description: String,
 }
 
-impl<SP: SessionParameters> From<LocalError> for TaskError<SP> {
-    fn from(source: LocalError) -> Self {
-        Self::Local(source)
+impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
+    fn from(source: RuntimeError) -> Self {
+        Self::Unattributable(source.into())
     }
 }
 

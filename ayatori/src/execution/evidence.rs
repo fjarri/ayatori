@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use super::{session::Session, task::Task};
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, EvidenceVerdict, MappingFunction, MappingTag, Message, MessageId, SessionId,
-        SignedValue, VerificationError, VerifiedValue,
+        AnyTagRef, EvidenceVerdict, MappingFunction, MappingTag, Message, MessageId, RuntimeError, SenderError,
+        SenderErrorWithReveal, SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError,
+        VerifiedValue,
     },
-    errors::LocalError,
     graph_representation::{ArgNodes, NodeKind, PartyBuildData},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -46,7 +46,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum EvidenceEnum<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     SenderError(SenderErrorEvidence<SP, P>),
-    SenderErrorWithInfo(SenderErrorEvidenceWithInfo<SP, P>),
+    SenderErrorWithReveal(SenderErrorWithRevealEvidence<SP, P>),
     ConflictingMessages(ConflictingMessagesEvidence<SP>),
     ThirdPartyError(ThirdPartyErrorEvidence<SP, P>),
 }
@@ -60,7 +60,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
     ) -> Result<(), EvidenceError> {
         match self {
             Self::SenderError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
-            Self::SenderErrorWithInfo(evidence) => evidence.verify(session_id, guilty_party, shared_data),
+            Self::SenderErrorWithReveal(evidence) => evidence.verify(session_id, guilty_party, shared_data),
             Self::ConflictingMessages(evidence) => evidence.verify(session_id, guilty_party),
             Self::ThirdPartyError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
         }
@@ -118,15 +118,22 @@ pub(crate) struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtoc
     reported_by: SP::Verifier,
     failed_at: MappingTag,
     signed_values: Vec<SignedValue<SP>>,
+    error: SenderError,
     phantom: PhantomData<P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P> {
-    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, signed_values: Vec<SignedValue<SP>>) -> Self {
+    pub fn new(
+        reported_by: &SP::Verifier,
+        failed_at: &MappingTag,
+        signed_values: Vec<SignedValue<SP>>,
+        error: SenderError,
+    ) -> Self {
         Self {
             reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
             signed_values,
+            error,
             phantom: PhantomData,
         }
     }
@@ -151,26 +158,26 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SenderErrorEvidenceWithInfo<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+pub(crate) struct SenderErrorWithRevealEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
     signed_values: Vec<SignedValue<SP>>,
-    associated_data: AssociatedData<SP>,
+    error: SenderErrorWithReveal<SP>,
     phantom: PhantomData<P>,
 }
 
-impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidenceWithInfo<SP, P> {
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvidence<SP, P> {
     pub fn new(
         reported_by: &SP::Verifier,
         failed_at: &MappingTag,
         signed_values: Vec<SignedValue<SP>>,
-        associated_data: AssociatedData<SP>,
+        error: SenderErrorWithReveal<SP>,
     ) -> Self {
         Self {
             reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
             signed_values,
-            associated_data,
+            error,
             phantom: PhantomData,
         }
     }
@@ -187,7 +194,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidenceWithIn
             &self.reported_by,
             guilty_party,
             shared_data,
-            Some(&self.associated_data),
+            Some(&self.error.associated_data),
         )?;
 
         run_evidence_verification_session(session, &self.reported_by, guilty_party, &self.signed_values)
@@ -251,16 +258,16 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
-    associated_data: AssociatedData<SP>,
+    error: ThirdPartyError<SP>,
     phantom: PhantomData<(SP, P)>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
-    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, associated_data: AssociatedData<SP>) -> Self {
+    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, error: ThirdPartyError<SP>) -> Self {
         Self {
             reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
-            associated_data,
+            error,
             phantom: PhantomData,
         }
     }
@@ -290,7 +297,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
             _ => return Err(EvidenceError::new("Invalid function type")),
         };
 
-        let verdict = verification.call(guilty_party, session_id, &self.associated_data)?;
+        let verdict = verification.call(guilty_party, session_id, &self.error.associated_data)?;
         match verdict {
             EvidenceVerdict::Valid => Ok(()),
             EvidenceVerdict::Invalid(error) => Err(EvidenceError::new(format!("Invalid evidence: {error}"))),
@@ -309,8 +316,16 @@ impl EvidenceError {
     }
 }
 
-impl From<LocalError> for EvidenceError {
-    fn from(source: LocalError) -> Self {
+// TODO: is this a valid conversion?
+impl From<UnattributableError> for EvidenceError {
+    fn from(source: UnattributableError) -> Self {
+        EvidenceError::new(format!("{source}"))
+    }
+}
+
+// TODO: is this a valid conversion?
+impl From<RuntimeError> for EvidenceError {
+    fn from(source: RuntimeError) -> Self {
         EvidenceError::new(format!("{source}"))
     }
 }

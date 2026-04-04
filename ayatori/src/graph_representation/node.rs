@@ -17,11 +17,11 @@ use crate::{
     entities::{
         AnyTagRef, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction,
         EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MappingFunction, MappingTag,
-        MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarFunction, ScalarTagRef,
-        SenderAttributableWithInfoMappingFunction, SenderError, SenderErrorEnum, SentTag, SerdeAdapter,
-        SerializeAndSignFunction, UnattributableMappingFunction, UnattributableScalarFunction,
+        MappingTagRef, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction,
+        ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum,
+        SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction,
     },
-    errors::LocalError,
     traits::SessionParameters,
 };
 
@@ -47,9 +47,9 @@ impl<SP: SessionParameters> Node<SP> {
         Self::new_typed(TypedNode::new(kind))
     }
 
-    pub fn with_dependencies(self, dependencies: &[&Self]) -> Result<Self, LocalError> {
+    pub fn with_dependencies(self, dependencies: &[&Self]) -> Result<Self, RuntimeError> {
         if !dependencies.iter().all(|node| node.store_in().scalar().is_some()) {
-            return Err(LocalError::new("Dependencies must be scalar nodes"));
+            return Err(RuntimeError::new("Dependencies must be scalar nodes"));
         }
         Ok(Self::new_typed(
             self.unwrap_or_shallow_clone().with_dependencies(dependencies),
@@ -103,14 +103,14 @@ impl<SP: SessionParameters> Node<SP> {
         tag: &MappingTag,
         guilty_party: &SP::Verifier,
         associated_data: Option<&AssociatedData<SP>>,
-    ) -> Result<Self, LocalError> {
+    ) -> Result<Self, RuntimeError> {
         let node = self
             .find_subnode(AnyTagRef::Mapping(tag.as_ref()))
-            .ok_or_else(|| LocalError::new(format!("Node {tag} was not found")))?;
+            .ok_or_else(|| RuntimeError::new(format!("Node {tag} was not found")))?;
 
         let node = match (node.kind(), associated_data) {
             (
-                NodeKind::ComputeMappingSenderAttributableWithInfo {
+                NodeKind::ComputeMappingSenderAttributableWithReveal {
                     store_in,
                     verification,
                     verification_args,
@@ -123,7 +123,7 @@ impl<SP: SessionParameters> Node<SP> {
                 Node::new(NodeKind::ComputeMapping {
                     store_in: store_in.clone(),
                     function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
-                        move |id, args| verification.call(id, args, &associated_data),
+                        move |id, args| Ok(verification.call(id, args, &associated_data)?),
                     )),
                     args: arg_map_to_owned(verification_args),
                 })
@@ -143,14 +143,18 @@ impl<SP: SessionParameters> Node<SP> {
                     function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
                         move |id, args| match function.call(id, args) {
                             Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
-                            Err(SenderError(SenderErrorEnum::Local(error))) => Err(error),
-                            Err(SenderError(SenderErrorEnum::Error)) => Ok(EvidenceVerdict::valid()),
+                            Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
+                                Err(error)
+                            }
+                            Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
+                                Ok(EvidenceVerdict::valid())
+                            }
                         },
                     )),
                     args: arg_map_to_owned(args),
                 })
             }
-            _ => return Err(LocalError::new("Unexpected node type")),
+            _ => return Err(RuntimeError::new("Unexpected node type")),
         };
 
         let node = node.tree_without_dependencies();
@@ -167,7 +171,7 @@ impl<SP: SessionParameters> Node<SP> {
         let original_output_tag = match self.store_in() {
             AnyTagRef::Scalar(ScalarTagRef::Computed(tag)) => tag,
             _ => {
-                return Err(LocalError::new(
+                return Err(RuntimeError::new(
                     "Assumption: we only get the reproduction subtree from a valid root node",
                 ));
             }
@@ -177,11 +181,11 @@ impl<SP: SessionParameters> Node<SP> {
         let wrapped = Node::new(NodeKind::ComputeScalar {
             store_in: original_output_tag.clone(),
             function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(
-                move |args| -> Result<EvidenceVerdict, LocalError> {
+                move |args| -> Result<EvidenceVerdict, UnattributableError> {
                     let map = args.get_map::<EvidenceVerdict>(arg_name)?;
                     let verdict: &EvidenceVerdict = map
                         .get(&guilty_party)
-                        .ok_or_else(|| LocalError::new("Guilty party entry not found"))?;
+                        .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))?;
                     Ok(verdict.clone())
                 },
             )),
@@ -205,7 +209,7 @@ impl<SP: SessionParameters> Node<SP> {
         let mut messages = BTreeSet::<FullName>::new();
 
         let subnodes = match self.kind() {
-            NodeKind::ComputeMappingSenderAttributableWithInfo { verification_args, .. } => {
+            NodeKind::ComputeMappingSenderAttributableWithReveal { verification_args, .. } => {
                 UnorderedIterator::new_with_nodes(
                     &verification_args
                         .values()
@@ -229,7 +233,7 @@ impl<SP: SessionParameters> Node<SP> {
                         return Reproducibility::NotAvailable;
                     }
                 }
-                NodeKind::ComputeMappingSenderAttributableWithInfo { .. } => {
+                NodeKind::ComputeMappingSenderAttributableWithReveal { .. } => {
                     // TODO: can we be sure that it's always reproducible?
                 }
                 // Requires RNG and secret information (signing key), so not reproducible.
@@ -295,7 +299,7 @@ impl<SP: SessionParameters> Node<SP> {
             .expect("the closure is infallible")
     }
 
-    pub(crate) fn with_substituted_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, LocalError> {
+    pub(crate) fn with_substituted_arguments(&self, arguments: BoundProtocolArgs<SP>) -> Result<Self, RuntimeError> {
         self.mutate_tree(|node| {
             Ok(if let NodeKind::ScalarArgument { name, .. } = node.kind() {
                 arguments.get(name)?.get_strong_ref()
@@ -322,7 +326,7 @@ impl<SP: SessionParameters> Node<SP> {
             .expect("the closure is infallible")
     }
 
-    fn mutate_tree(&self, f: impl Fn(Self) -> Result<Self, LocalError>) -> Result<Self, LocalError> {
+    fn mutate_tree(&self, f: impl Fn(Self) -> Result<Self, RuntimeError>) -> Result<Self, RuntimeError> {
         let mut replacement_nodes = BTreeMap::new();
 
         for node in self.flattened_leaves_first() {
@@ -540,9 +544,9 @@ pub(crate) enum NodeKind<SP: SessionParameters> {
         function: MappingFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
     },
-    ComputeMappingSenderAttributableWithInfo {
+    ComputeMappingSenderAttributableWithReveal {
         store_in: ComputedMappingTag,
-        function: SenderAttributableWithInfoMappingFunction<SP>,
+        function: SenderAttributableWithRevealMappingFunction<SP>,
         args: BTreeMap<String, Node<SP>>,
         verification: EvidenceVerificationFunction<SP>,
         verification_args: BTreeMap<String, Node<SP>>,
@@ -609,7 +613,7 @@ impl<SP: SessionParameters> Display for NodeKind<SP> {
                         .join(", ")
                 )
             }
-            Self::ComputeMappingSenderAttributableWithInfo {
+            Self::ComputeMappingSenderAttributableWithReveal {
                 store_in: _store_in,
                 function,
                 args,
@@ -662,7 +666,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::Collect { store_in, .. } => AnyTagRef::Scalar(ScalarTagRef::Collected(store_in)),
             Self::ScalarArgument { store_in, .. } => AnyTagRef::Scalar(ScalarTagRef::Argument(store_in)),
             Self::ComputeMapping { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::Computed(store_in)),
-            Self::ComputeMappingSenderAttributableWithInfo { store_in, .. } => {
+            Self::ComputeMappingSenderAttributableWithReveal { store_in, .. } => {
                 AnyTagRef::Mapping(MappingTagRef::Computed(store_in))
             }
             Self::SerializeAndSign { store_in, .. } => AnyTagRef::Mapping(MappingTagRef::LocalSigned(store_in)),
@@ -692,13 +696,13 @@ impl<SP: SessionParameters> NodeKind<SP> {
                 function: function.clone(),
                 args: arg_map_to_owned(args),
             },
-            Self::ComputeMappingSenderAttributableWithInfo {
+            Self::ComputeMappingSenderAttributableWithReveal {
                 store_in,
                 function,
                 args,
                 verification,
                 verification_args,
-            } => Self::ComputeMappingSenderAttributableWithInfo {
+            } => Self::ComputeMappingSenderAttributableWithReveal {
                 store_in: store_in.clone(),
                 function: function.clone(),
                 args: arg_map_to_owned(args),
@@ -758,7 +762,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
     fn args(&self) -> Box<dyn Iterator<Item = &Node<SP>> + '_> {
         match self {
             Self::ComputeScalar { args, .. } | Self::ComputeMapping { args, .. } => Box::new(args.values()),
-            Self::ComputeMappingSenderAttributableWithInfo {
+            Self::ComputeMappingSenderAttributableWithReveal {
                 args,
                 verification_args,
                 ..
@@ -776,7 +780,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
         match self {
             Self::ComputeScalar { args, .. } => maybe_replace_map(args, replacements),
             Self::ComputeMapping { args, .. } => maybe_replace_map(args, replacements),
-            Self::ComputeMappingSenderAttributableWithInfo {
+            Self::ComputeMappingSenderAttributableWithReveal {
                 args,
                 verification_args,
                 ..
@@ -807,7 +811,7 @@ impl<SP: SessionParameters> NodeKind<SP> {
             Self::ComputeMapping { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
-            Self::ComputeMappingSenderAttributableWithInfo { store_in, .. } => {
+            Self::ComputeMappingSenderAttributableWithReveal { store_in, .. } => {
                 *store_in = store_in.clone().with_added_prefix(prefix);
             }
             Self::DirectMessage { store_in, .. } => {
@@ -844,11 +848,11 @@ pub(crate) fn arg_map_to_owned<SP: SessionParameters>(args: &BTreeMap<String, No
 
 pub(crate) fn args_to_owned<'a, SP: SessionParameters>(
     nodes: impl Iterator<Item = (&'a str, &'a Node<SP>)>,
-) -> Result<BTreeMap<String, Node<SP>>, LocalError> {
+) -> Result<BTreeMap<String, Node<SP>>, RuntimeError> {
     let mut result = BTreeMap::new();
     for (name, node) in nodes {
         if result.contains_key(name) {
-            return Err(LocalError::new(format!("Repeating argument name: {name}")));
+            return Err(RuntimeError::new(format!("Repeating argument name: {name}")));
         }
         result.insert(name.into(), node.get_strong_ref());
     }

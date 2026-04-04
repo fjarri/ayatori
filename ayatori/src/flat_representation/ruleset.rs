@@ -11,10 +11,9 @@ use super::conditions::{ElementCondition, QuorumCondition, ScalarCondition};
 use crate::{
     entities::{
         AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
-        LocalSignedTag, MappingFunction, MappingTag, ReceivedTag, ScalarArgumentTag, ScalarFunction, ScalarTag,
-        ScalarTagRef, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        LocalSignedTag, MappingFunction, MappingTag, ReceivedTag, RuntimeError, ScalarArgumentTag, ScalarFunction,
+        ScalarTag, ScalarTagRef, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
-    errors::LocalError,
     graph_representation::{Node, NodeKind, Reproducibility},
     traits::SessionParameters,
 };
@@ -138,7 +137,7 @@ fn get_on_error<SP: SessionParameters>(node: &Node<SP>, private_inputs: &BTreeSe
 
 fn propagate_groups<SP: SessionParameters>(
     root: &Node<SP>,
-) -> Result<BTreeMap<MappingTag, BTreeSet<SP::Verifier>>, LocalError> {
+) -> Result<BTreeMap<MappingTag, BTreeSet<SP::Verifier>>, RuntimeError> {
     let mut result: BTreeMap<MappingTag, BTreeSet<SP::Verifier>> = BTreeMap::new();
 
     for node in root.flattened_roots_first() {
@@ -149,7 +148,7 @@ fn propagate_groups<SP: SessionParameters>(
                 let ids = result
                     .get(&MappingTag::Computed(store_in.clone()))
                     .cloned()
-                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
                 for arg in args.values() {
                     if let AnyTagRef::Mapping(tag) = arg.store_in() {
                         result
@@ -159,7 +158,7 @@ fn propagate_groups<SP: SessionParameters>(
                     }
                 }
             }
-            NodeKind::ComputeMappingSenderAttributableWithInfo {
+            NodeKind::ComputeMappingSenderAttributableWithReveal {
                 store_in,
                 args,
                 verification_args,
@@ -168,7 +167,7 @@ fn propagate_groups<SP: SessionParameters>(
                 let ids = result
                     .get(&MappingTag::Computed(store_in.clone()))
                     .cloned()
-                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
                 for arg in args.values() {
                     if let AnyTagRef::Mapping(tag) = arg.store_in() {
                         result
@@ -190,7 +189,7 @@ fn propagate_groups<SP: SessionParameters>(
                 let ids = result
                     .get(&MappingTag::LocalSigned(store_in.clone()))
                     .cloned()
-                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
                 if let AnyTagRef::Mapping(tag) = data.store_in() {
                     result.entry(tag.to_owned()).or_insert(BTreeSet::new()).extend(ids);
                 }
@@ -199,11 +198,11 @@ fn propagate_groups<SP: SessionParameters>(
                 let ids = result
                     .get(&MappingTag::Received(store_in.clone()))
                     .cloned()
-                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
                 let tag = data
                     .store_in()
                     .mapping()
-                    .ok_or_else(|| LocalError::new("Assumption: Deserialize's argument is a mapping node"))?
+                    .ok_or_else(|| RuntimeError::expect("Deserialize's argument is a mapping node"))?
                     .to_owned();
                 result.entry(tag).or_insert(BTreeSet::new()).extend(ids);
             }
@@ -211,11 +210,11 @@ fn propagate_groups<SP: SessionParameters>(
                 let ids = result
                     .get(&MappingTag::Sent(store_in.clone()))
                     .cloned()
-                    .ok_or_else(|| LocalError::new("Assumption: the node must have been already processed"))?;
+                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
                 let tag = data
                     .store_in()
                     .mapping()
-                    .ok_or_else(|| LocalError::new("Assumption: DirectMessage's argument is a mapping node"))?
+                    .ok_or_else(|| RuntimeError::expect("DirectMessage's argument is a mapping node"))?
                     .to_owned();
                 result.entry(tag).or_insert(BTreeSet::new()).extend(ids);
             }
@@ -224,7 +223,7 @@ fn propagate_groups<SP: SessionParameters>(
                 let tag = values
                     .store_in()
                     .mapping()
-                    .ok_or_else(|| LocalError::new("Assumption: Collect's argument is a mapping node"))?
+                    .ok_or_else(|| RuntimeError::expect("Collect's argument is a mapping node"))?
                     .to_owned();
                 result
                     .entry(tag)
@@ -257,16 +256,16 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
-    pub fn new(output_node: &Node<SP>, private_inputs: &BTreeSet<String>) -> Result<Self, LocalError> {
+    pub fn new(output_node: &Node<SP>, private_inputs: &BTreeSet<String>) -> Result<Self, RuntimeError> {
         let output_tag_ref = output_node
             .store_in()
             .scalar()
-            .ok_or_else(|| LocalError::new("Assumption: The output node must be a scalar node"))?;
+            .ok_or_else(|| RuntimeError::expect("The output node must be a scalar node"))?;
         let output_tag = match output_tag_ref {
             ScalarTagRef::Computed(tag) => tag.clone(),
             _ => {
-                return Err(LocalError::new(
-                    "Assumption: The output node must be a scalar computation node",
+                return Err(RuntimeError::expect(
+                    "The output node must be a scalar computation node",
                 ));
             }
         };
@@ -289,7 +288,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 let tag = dependency
                     .store_in()
                     .scalar()
-                    .ok_or_else(|| LocalError::new("Assumption: Only scalar nodes are allowed as dependencies"))?;
+                    .ok_or_else(|| RuntimeError::expect("Only scalar nodes are allowed as dependencies"))?;
                 dependencies_condition = dependencies_condition.and(tag);
             }
 
@@ -306,9 +305,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let mut scalar_condition = ScalarCondition::empty();
                     for (name, arg) in args {
                         let tag = arg.store_in().scalar().ok_or_else(|| {
-                            LocalError::new(
-                                "Assumption: Only scalar nodes are allowed as arguments to scalar functions",
-                            )
+                            RuntimeError::expect("Only scalar nodes are allowed as arguments to scalar functions")
                         })?;
                         scalar_condition = scalar_condition.and(tag);
                         arg_tags.insert(name.clone(), tag.to_owned());
@@ -331,7 +328,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         propagated_ids
                             .get(&MappingTag::Computed(store_in.clone()))
                             .ok_or_else(|| {
-                                LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                                RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                             })?;
 
                     let mut scalar_condition = ScalarCondition::empty();
@@ -369,7 +366,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         },
                     })
                 }
-                NodeKind::ComputeMappingSenderAttributableWithInfo {
+                NodeKind::ComputeMappingSenderAttributableWithReveal {
                     store_in,
                     function,
                     args,
@@ -381,7 +378,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         propagated_ids
                             .get(&MappingTag::Computed(store_in.clone()))
                             .ok_or_else(|| {
-                                LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                                RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                             })?;
 
                     let mut scalar_condition = ScalarCondition::empty();
@@ -419,7 +416,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         element_conditions,
                         kind: MappingRuleKind::Compute {
                             store_in: store_in.clone(),
-                            function: MappingFunction::SenderAttributableWithInfo(function.clone()),
+                            function: MappingFunction::SenderAttributableWithReveal(function.clone()),
                             args: arg_tags,
                             on_error: on_error.clone(),
                         },
@@ -435,7 +432,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let possible_ids = propagated_ids
                         .get(&MappingTag::LocalSigned(store_in.clone()))
                         .ok_or_else(|| {
-                            LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                         })?;
 
                     let tag = data.store_in();
@@ -480,13 +477,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         propagated_ids
                             .get(&MappingTag::Received(store_in.clone()))
                             .ok_or_else(|| {
-                                LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                                RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                             })?;
 
                     let tag = data
                         .store_in()
                         .mapping()
-                        .ok_or_else(|| LocalError::new("Assumption: Deserialize is expected to take mapping data"))?;
+                        .ok_or_else(|| RuntimeError::expect("Deserialize is expected to take mapping data"))?;
 
                     let element_condition = ElementCondition::empty().and(tag);
                     let element_conditions = possible_ids
@@ -511,12 +508,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 }
                 NodeKind::DirectMessage { store_in, data } => {
                     let possible_ids = propagated_ids.get(&MappingTag::Sent(store_in.clone())).ok_or_else(|| {
-                        LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                        RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                     })?;
 
-                    let tag = data.store_in().mapping().ok_or_else(|| {
-                        LocalError::new("Assumption: DirectMessage node is expected to send mapping data")
-                    })?;
+                    let tag = data
+                        .store_in()
+                        .mapping()
+                        .ok_or_else(|| RuntimeError::expect("DirectMessage node is expected to send mapping data"))?;
                     let element_condition = ElementCondition::empty().and(tag);
                     let element_conditions = possible_ids
                         .iter()
@@ -538,9 +536,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     values,
                     group,
                 } => {
-                    let tag = values.store_in().mapping().ok_or_else(|| {
-                        LocalError::new("Assumption: Collect node is expected to collect mapping data")
-                    })?;
+                    let tag = values
+                        .store_in()
+                        .mapping()
+                        .ok_or_else(|| RuntimeError::expect("Collect node is expected to collect mapping data"))?;
                     let quorum_condition = QuorumCondition::new(tag, group);
                     collect_rules.push(CollectRule {
                         dependencies_condition,
@@ -553,7 +552,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let possible_ids = propagated_ids
                         .get(&MappingTag::RemoteSigned(store_in.clone()))
                         .ok_or_else(|| {
-                            LocalError::new("Assumption: the required IDs were propagated to all nodes in the tree")
+                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                         })?;
                     expected_messages.insert(message_name.clone(), possible_ids.clone());
                 }
@@ -740,9 +739,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
         })
     }
 
-    pub fn pop_action(&mut self) -> Result<Option<Action<SP>>, LocalError> {
+    pub fn pop_action(&mut self) -> Result<Option<Action<SP>>, RuntimeError> {
         if matches!(self.state, State::InProgress) && self.collect_rules.is_empty() && self.scalar_rules.is_empty() {
-            return Err(LocalError::new(
+            // TODO: should change state to stalled and return None
+            return Err(RuntimeError::new(
                 "No rules to apply, and the output value has not been set",
             ));
         }

@@ -13,7 +13,8 @@ use core::{
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{Hex, SliceLike};
 
-use crate::{errors::LocalError, traits::WireFormat};
+use super::errors::RuntimeError;
+use crate::traits::WireFormat;
 
 /*
 We need a dyn trait that both supports downcast for `Arc`s (like `Any` does),
@@ -69,7 +70,7 @@ impl Value {
         Self(Arc::new(value))
     }
 
-    fn downcast_arc<T>(&self) -> Result<Arc<T>, LocalError>
+    fn downcast_arc<T>(&self) -> Result<Arc<T>, RuntimeError>
     where
         T: Erasable,
     {
@@ -77,7 +78,7 @@ impl Value {
         // we rely on `into_raw()`/`from_raw()` instead.
 
         if self.0.as_ref().my_type_id() != TypeId::of::<T>() {
-            return Err(LocalError::new(format!(
+            return Err(RuntimeError::new(format!(
                 "Attempted to downcast {} as {}",
                 self.0.as_ref().my_type_name(),
                 type_name::<T>()
@@ -100,16 +101,16 @@ impl Value {
         Ok(typed_arc)
     }
 
-    pub fn downcast<T: Erasable + Clone>(&self) -> Result<T, LocalError> {
+    pub fn downcast<T: Erasable + Clone>(&self) -> Result<T, RuntimeError> {
         self.downcast_arc::<T>().map(Arc::unwrap_or_clone)
     }
 
-    pub fn downcast_ref<T: Erasable>(&self) -> Result<&T, LocalError> {
+    pub fn downcast_ref<T: Erasable>(&self) -> Result<&T, RuntimeError> {
         // Note that `as_ref()` here is crucial, otherwise `as_any()`
         // is called on the `Arc` instead of the concrete type inside,
         // leading to `downcast_ref()` failing because of the type mismatch.
         self.0.as_ref().as_any().downcast_ref::<T>().ok_or_else(|| {
-            LocalError::new(format!(
+            RuntimeError::new(format!(
                 "Attempted to downcast {} as {}",
                 self.0.as_ref().my_type_name(),
                 type_name::<T>()
@@ -137,14 +138,14 @@ impl DeserializationError {
 }
 
 trait DynAdapter<F: WireFormat> {
-    fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError>;
+    fn serialize(&self, value: &Value) -> Result<SerializedValue, RuntimeError>;
     fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError>;
     fn clone_boxed(&self) -> Box<dyn DynAdapter<F>>;
     fn debug(&self) -> String;
 }
 
 impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdapter<F> for DynAdapterHolder<F, T> {
-    fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError> {
+    fn serialize(&self, value: &Value) -> Result<SerializedValue, RuntimeError> {
         let typed_value = value.downcast_ref::<T>()?;
         Ok(SerializedValue::new(F::serialize(typed_value)?))
     }
@@ -173,11 +174,11 @@ impl<F: WireFormat> SerdeAdapter<F> {
         Self(Box::new(DynAdapterHolder::<F, T>(PhantomData)))
     }
 
-    pub(crate) fn serialize(&self, value: &Value) -> Result<SerializedValue, LocalError> {
+    pub(crate) fn serialize(&self, value: &Value) -> Result<SerializedValue, RuntimeError> {
         self.0.serialize(value)
     }
 
-    pub fn serialize_typed<T: Erasable>(&self, value: T) -> Result<SerializedValue, LocalError> {
+    pub fn serialize_typed<T: Erasable>(&self, value: T) -> Result<SerializedValue, RuntimeError> {
         self.serialize(&Value::new(value))
     }
 

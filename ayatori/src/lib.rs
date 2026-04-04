@@ -15,7 +15,6 @@
 extern crate alloc;
 
 mod entities;
-mod errors;
 mod execution;
 mod flat_representation;
 mod graph_representation;
