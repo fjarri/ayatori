@@ -234,7 +234,7 @@ impl<SP: SessionParameters> Node<SP> {
                     }
                 }
                 NodeKind::ComputeMappingSenderAttributableWithReveal { .. } => {
-                    // TODO: can we be sure that it's always reproducible?
+                    // `function` here does not depend on RNG, so is always reproducible.
                 }
                 // Requires RNG and secret information (signing key), so not reproducible.
                 NodeKind::SerializeAndSign { .. } => return Reproducibility::NotAvailable,

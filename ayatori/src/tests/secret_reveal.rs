@@ -121,10 +121,8 @@ fn verify_evidence<SP: SessionParameters>(
 ) -> Result<EvidenceVerdict, RuntimeError> {
     let y = associated_data.deserialize::<u64>()?; // our secret
     let x_cap = args.get::<u64>("X")?;
-    let y_cap_local = args.get::<u64>("Y")?;
-
-    // TODO: need to be verified separately on reception, and the result made a dependency
     let y_cap_remote = args.get::<u64>("Y_remote")?;
+    let y_cap_local = args.get::<u64>("Y")?;
 
     let c_cap = args.get::<u64>("C")?;
 
@@ -218,9 +216,13 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             verify_evidence,
             &[
                 ("X", &x_cap),        // S_j(X_j,i)
-                ("Y", &y_echo),       // S_j(Y_i,j) (echoed back to us)
                 ("C", &c_cap),        // S_j(C_i,j)
                 ("Y_remote", &y_cap), // S_j(Y_j,[])
+                // In a real protocol this need to be verified separately on reception
+                // (that is, compared to our stored `Y`),
+                // and the result made a dependency of the node that decrypts `x`.
+                // But for this test it does not matter.
+                ("Y", &y_echo), // S_j(Y_i,j) (echoed back to us)
             ],
         )?;
 

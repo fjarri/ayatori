@@ -741,7 +741,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     pub fn pop_action(&mut self) -> Result<Option<Action<SP>>, RuntimeError> {
         if matches!(self.state, State::InProgress) && self.collect_rules.is_empty() && self.scalar_rules.is_empty() {
-            // TODO: should change state to stalled and return None
             return Err(RuntimeError::new(
                 "No rules to apply, and the output value has not been set",
             ));
