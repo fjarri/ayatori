@@ -12,22 +12,22 @@ use crate::{
 #[derive(Debug)]
 struct TestProtocol;
 
-fn gen_value<SP: SessionParameters>(_args: &Args<SP>) -> Result<u64, LocalError> {
+fn gen_value<SP: SessionParameters>(_args: &Args<SP>) -> Result<u64, UnattributableError> {
     Ok(1)
 }
 
-fn verify<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderError> {
+fn verify<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderAttributableError> {
     let x = args.get::<u64>("x")?;
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
     if id == args.my_id() || *x == 1 {
         Ok(())
     } else {
-        Err(SenderError::new())
+        Err(SenderAttributableError::new("Invalid x"))
     }
 }
 
-fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, UnattributableError> {
     let xs = args.get_map::<u64>("x")?;
     Ok(xs.values().copied().sum())
 }
@@ -65,7 +65,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    ) -> Result<Node<SP>, RuntimeError> {
         let message_x = ProtocolMessage::new::<u64>("x");
 
         let all_parties = build_data;

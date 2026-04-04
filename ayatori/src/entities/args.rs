@@ -8,12 +8,13 @@ use alloc::{
 use itertools::Itertools;
 
 use super::{
+    errors::RuntimeError,
     message::VerifiedValue,
     session_id::SessionId,
     tag::FullName,
     value::{Erasable, SerdeAdapter, Value},
 };
-use crate::{errors::LocalError, traits::SessionParameters};
+use crate::traits::SessionParameters;
 
 #[derive_where::derive_where(Debug)]
 pub struct SerializeArgs<SP: SessionParameters> {
@@ -74,12 +75,12 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
         expected_senders: &BTreeSet<SP::Verifier>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         value: Value,
-    ) -> Result<Self, LocalError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             serde_adapter,
             value,
             expected_senders: expected_senders.clone(),
-        })
+        }
     }
 
     pub fn expected_senders(&self) -> &BTreeSet<SP::Verifier> {
@@ -105,16 +106,12 @@ pub struct Args<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Args<SP> {
-    pub(crate) fn new(
-        session_id: &SessionId<SP>,
-        my_id: &SP::Verifier,
-        values: BTreeMap<String, Value>,
-    ) -> Result<Self, LocalError> {
-        Ok(Self {
+    pub(crate) fn new(session_id: &SessionId<SP>, my_id: &SP::Verifier, values: BTreeMap<String, Value>) -> Self {
+        Self {
             session_id: session_id.clone(),
             my_id: my_id.clone(),
             values,
-        })
+        }
     }
 
     pub fn my_id(&self) -> &SP::Verifier {
@@ -125,20 +122,20 @@ impl<SP: SessionParameters> Args<SP> {
         &self.session_id
     }
 
-    pub(crate) fn get_value(&self, name: &str) -> Result<&Value, LocalError> {
+    pub(crate) fn get_value(&self, name: &str) -> Result<&Value, RuntimeError> {
         self.values.get(name).ok_or_else(|| {
-            LocalError::new(format!(
+            RuntimeError::new(format!(
                 "Value {name} is not present in the Args (have: {})",
                 self.values.keys().join(", ")
             ))
         })
     }
 
-    pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, LocalError> {
+    pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, RuntimeError> {
         self.get_value(name)?.downcast_ref::<T>()
     }
 
-    pub fn get_map<T: Clone + Erasable>(&self, name: &str) -> Result<BTreeMap<&SP::Verifier, &T>, LocalError> {
+    pub fn get_map<T: Clone + Erasable>(&self, name: &str) -> Result<BTreeMap<&SP::Verifier, &T>, RuntimeError> {
         let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name)?;
         value_map
             .iter()

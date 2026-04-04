@@ -7,7 +7,7 @@ use core::fmt::{self, Display};
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "dev"))]
-use crate::errors::LocalError;
+use super::errors::RuntimeError;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FullName {
@@ -24,11 +24,11 @@ impl FullName {
     }
 
     #[cfg(any(test, feature = "dev"))]
-    pub(crate) fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, LocalError> {
-        let mut names = prefix_and_name.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+    pub(crate) fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, RuntimeError> {
+        let mut names = prefix_and_name.iter().map(ToString::to_string).collect::<Vec<String>>();
         let name = names
             .pop()
-            .ok_or_else(|| LocalError::new("The name must have at least one element"))?;
+            .ok_or_else(|| RuntimeError::new("The name must have at least one element"))?;
         Ok(Self { prefix: names, name })
     }
 
@@ -44,8 +44,8 @@ impl FullName {
 
 impl Display for FullName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        for prefix in self.prefix.iter() {
-            write!(f, "{}/", prefix)?;
+        for prefix in &self.prefix {
+            write!(f, "{prefix}/")?;
         }
         write!(f, "{}", self.name)
     }
@@ -267,7 +267,7 @@ pub(crate) enum ScalarTagRef<'a> {
     Collected(&'a CollectedTag),
 }
 
-impl<'a> ScalarTagRef<'a> {
+impl ScalarTagRef<'_> {
     pub fn to_owned(self) -> ScalarTag {
         match self {
             Self::Computed(tag) => ScalarTag::Computed((*tag).clone()),
@@ -291,7 +291,7 @@ pub(crate) enum MappingTagRef<'a> {
     RemoteSigned(&'a RemoteSignedTag),
 }
 
-impl<'a> MappingTagRef<'a> {
+impl MappingTagRef<'_> {
     pub fn to_owned(self) -> MappingTag {
         match self {
             Self::Computed(tag) => MappingTag::Computed((*tag).clone()),

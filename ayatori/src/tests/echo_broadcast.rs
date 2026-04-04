@@ -18,7 +18,7 @@ use crate::{
 
 fn prepare_echo_pack<SP: SessionParameters>(
     args: &Args<SP>,
-) -> Result<BTreeMap<SP::Verifier, SignedHash<SP>>, LocalError> {
+) -> Result<BTreeMap<SP::Verifier, SignedHash<SP>>, UnattributableError> {
     let values = args.get_map::<VerifiedValue<SP>>("values_verified_map")?;
     let cloned = values
         .iter()
@@ -29,7 +29,10 @@ fn prepare_echo_pack<SP: SessionParameters>(
     Ok(cloned)
 }
 
-fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderError> {
+fn verify_echo_pack_correct<SP: SessionParameters>(
+    id: &SP::Verifier,
+    args: &Args<SP>,
+) -> Result<(), SenderAttributableError> {
     let all_ids = args.get::<BTreeSet<SP::Verifier>>("all_ids")?;
 
     // The messages we received from all nodes
@@ -46,16 +49,16 @@ fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: &Arg
     let mut all_ids_except_for_sender = all_ids.clone();
     all_ids_except_for_sender.remove(id);
     if ids_received != all_ids_except_for_sender {
-        return Err(SenderError::new());
+        return Err(SenderAttributableError::new("Mismatched IDs"));
     }
 
     // Check that the messages are correctly signed and have correct metadata
-    for (from, message) in echoed.iter() {
+    for (from, message) in echoed {
         if from != message.source() {
-            return Err(SenderError::new());
+            return Err(SenderAttributableError::new("Mismatched source"));
         }
         if id != message.metadata().destination() {
-            return Err(SenderError::new());
+            return Err(SenderAttributableError::new("Mismatched destination"));
         }
 
         let ethalon = received
@@ -63,22 +66,25 @@ fn verify_echo_pack_correct<SP: SessionParameters>(id: &SP::Verifier, args: &Arg
             .expect("we checked that the ID is present in the message map");
 
         if ethalon.metadata().full_name() != message.metadata().full_name() {
-            return Err(SenderError::new());
+            return Err(SenderAttributableError::new("Mismatched value name"));
         }
 
         if ethalon.metadata().session_id() != message.metadata().session_id() {
-            return Err(SenderError::new());
+            return Err(SenderAttributableError::new("Mismatched session ID"));
         }
 
         if !message.is_signature_correct() {
-            return Err(SenderError::new());
+            return Err(SenderAttributableError::new("Invalid signature"));
         }
     }
 
     Ok(())
 }
 
-fn verify_echo_contents<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), ThirdPartyError<SP>> {
+fn verify_echo_contents<SP: SessionParameters>(
+    id: &SP::Verifier,
+    args: &Args<SP>,
+) -> Result<(), ThirdPartyAttributableError<SP>> {
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
     if id == args.my_id() {
@@ -94,14 +100,18 @@ fn verify_echo_contents<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP
     let echoed = args.get::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echoed")?;
 
     // Check that the payload and metadata is the same (except for the `destination` part, which will differ)
-    for (from, message) in echoed.iter() {
+    for (from, message) in echoed {
         let ethalon = received
             .get(from)
             .expect("we checked that the ID is present in the message map");
 
         if !ethalon.payload_hash_matches(message)? {
             let associated_data = ((*ethalon).clone().unverify(), message.clone());
-            return Err(ThirdPartyError::new(from, associated_data)?);
+            return Err(ThirdPartyAttributableError::new(
+                "Mismatched value contents",
+                from,
+                associated_data,
+            ));
         }
     }
 
@@ -112,7 +122,7 @@ fn verify_echo_contents_error<SP: SessionParameters>(
     _guilty_party: &SP::Verifier,
     session_id: &SessionId<SP>,
     associated_data: &AssociatedData<SP>,
-) -> Result<EvidenceVerdict, LocalError> {
+) -> Result<EvidenceVerdict, RuntimeError> {
     let (message1, message2) = associated_data.deserialize::<(SignedValue<SP>, SignedValue<SP>)>()?;
 
     if message1.metadata().session_id() != session_id {
@@ -140,7 +150,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    ) -> Result<Node<SP>, RuntimeError> {
         let (message, all_parties) = build_data;
         let my_value = inputs.get("value")?;
 
@@ -198,11 +208,11 @@ struct TestProtocol;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message1<Id>(Id);
 
-fn make_scalar_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Message1<SP::Verifier>, LocalError> {
+fn make_scalar_value<SP: SessionParameters>(args: &Args<SP>) -> Result<Message1<SP::Verifier>, UnattributableError> {
     Ok(Message1(args.my_id().clone()))
 }
 
-fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<(), LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<(), UnattributableError> {
     let xs = args.get_map::<Message1<SP::Verifier>>("x")?;
     for (id, x) in xs {
         assert_eq!(id, &x.0);
@@ -244,7 +254,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    ) -> Result<Node<SP>, RuntimeError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
 
         let all_parties = build_data;
@@ -288,7 +298,7 @@ fn serialize_replacement(
     orig_value: &SignedValue<SP>,
     destination: &<SP as SessionParameters>::Verifier,
     args: &SerializeArgs<SP>,
-) -> Result<SignedValue<SP>, LocalError> {
+) -> Result<SignedValue<SP>, RuntimeError> {
     if destination == &TestSigner::new(2).verifying_key() {
         let serialized_value = args.serde_adapter().serialize_typed(Message1(*destination))?;
         SignedValue::<SP>::new(
@@ -305,10 +315,10 @@ fn serialize_replacement(
 }
 
 fn dummy_verification(
-    _orig_value: Result<&(), ThirdPartyError<SP>>,
+    _orig_value: Result<&(), ThirdPartyAttributableError<SP>>,
     _id: &<SP as SessionParameters>::Verifier,
     _args: &Args<SP>,
-) -> Result<(), ThirdPartyError<SP>> {
+) -> Result<(), ThirdPartyAttributableError<SP>> {
     Ok(())
 }
 

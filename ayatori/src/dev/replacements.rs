@@ -5,12 +5,11 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{
-        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, InfallibleMappingFunction,
-        InfallibleScalarFunction, LocalSignedTag, MappingFunction, MappingTag, ScalarFunction, ScalarTag,
-        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableMappingFunction, ThirdPartyError,
-        Value,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingFunction,
+        MappingTag, RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
+        ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, UnattributableError,
+        UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
-    errors::LocalError,
     graph_representation::{Node, NodeKind},
     traits::SessionParameters,
 };
@@ -31,27 +30,32 @@ impl<SP: SessionParameters> Debug for Replacement<SP> {
 #[allow(clippy::type_complexity)]
 enum ReplacementEnum<SP: SessionParameters> {
     ComputeScalar {
-        function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, LocalError>>,
+        function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, UnattributableError>>,
     },
     ComputeMapping {
-        function: Arc<dyn Fn(Value, &SP::Verifier, &Args<SP>) -> Result<Value, LocalError>>,
+        function: Arc<dyn Fn(Value, &SP::Verifier, &Args<SP>) -> Result<Value, UnattributableError>>,
     },
     ComputeMappingThirdPartyAttributable {
         function: Arc<
-            dyn Fn(Result<Value, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Value, ThirdPartyError<SP>>,
+            dyn Fn(
+                Result<Value, ThirdPartyAttributableError<SP>>,
+                &SP::Verifier,
+                &Args<SP>,
+            ) -> Result<Value, ThirdPartyAttributableError<SP>>,
         >,
     },
     Message {
-        function:
-            Arc<dyn Fn(&mut dyn CryptoRngCore, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, LocalError>>,
+        function: Arc<
+            dyn Fn(&mut dyn CryptoRngCore, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, RuntimeError>,
+        >,
     },
 }
 
 impl<SP: SessionParameters> Replacement<SP> {
-    pub fn compute_scalar<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
+    pub fn compute_scalar<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
-        F: 'static + Fn(&Ret, &Args<SP>) -> Result<Ret, LocalError>,
+        F: 'static + Fn(&Ret, &Args<SP>) -> Result<Ret, UnattributableError>,
     {
         let tag = ComputedScalarTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
@@ -66,10 +70,10 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub fn compute_mapping<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
+    pub fn compute_mapping<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
-        F: 'static + Fn(&Ret, &SP::Verifier, &Args<SP>) -> Result<Ret, LocalError>,
+        F: 'static + Fn(&Ret, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     {
         let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
@@ -84,29 +88,35 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub fn compute_mapping_third_party_attributable<F, Ret>(name: &[&str], function: F) -> Result<Self, LocalError>
+    pub fn compute_mapping_third_party_attributable<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
         F: 'static
-            + Fn(Result<&Ret, ThirdPartyError<SP>>, &SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyError<SP>>,
+            + Fn(
+                Result<&Ret, ThirdPartyAttributableError<SP>>,
+                &SP::Verifier,
+                &Args<SP>,
+            ) -> Result<Ret, ThirdPartyAttributableError<SP>>,
     {
         let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
             tag: AnyTag::Mapping(MappingTag::Computed(tag)),
             kind: ReplacementEnum::ComputeMappingThirdPartyAttributable {
-                function: Arc::new(move |maybe_value: Result<Value, ThirdPartyError<SP>>, id, args| {
-                    let typed_value = maybe_value
-                        .as_ref()
-                        .map_err(|err| err.clone())
-                        .and_then(|value| value.downcast_ref::<Ret>().map_err(ThirdPartyError::from));
-                    let typed_result = function(typed_value, id, args)?;
-                    Ok(Value::new(typed_result))
-                }),
+                function: Arc::new(
+                    move |maybe_value: Result<Value, ThirdPartyAttributableError<SP>>, id, args| {
+                        let typed_value = maybe_value
+                            .as_ref()
+                            .map_err(Clone::clone)
+                            .and_then(|value| value.downcast_ref::<Ret>().map_err(ThirdPartyAttributableError::from));
+                        let typed_result = function(typed_value, id, args)?;
+                        Ok(Value::new(typed_result))
+                    },
+                ),
             },
         })
     }
 
-    pub fn message<F>(name: &[&str], function: F) -> Result<Self, LocalError>
+    pub fn message<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         F: 'static
             + Fn(
@@ -114,7 +124,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 &SignedValue<SP>,
                 &SP::Verifier,
                 &SerializeArgs<SP>,
-            ) -> Result<SignedValue<SP>, LocalError>,
+            ) -> Result<SignedValue<SP>, RuntimeError>,
     {
         let tag = LocalSignedTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
@@ -129,10 +139,10 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub(crate) fn apply(&self, node: Node<SP>) -> Result<Node<SP>, LocalError> {
+    pub(crate) fn apply(&self, node: &Node<SP>) -> Result<Node<SP>, RuntimeError> {
         let subnode = node
             .find_subnode(self.tag.as_ref())
-            .ok_or_else(|| LocalError::new("Node not found"))?;
+            .ok_or_else(|| RuntimeError::new("Node not found"))?;
         let new_subnode = match (subnode.kind(), &self.kind) {
             (
                 NodeKind::ComputeScalar {
@@ -144,10 +154,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let ScalarFunction::Infallible(orig_function) = function {
+                let new_function = if let ScalarFunction::Unattributable(orig_function) = function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    ScalarFunction::Infallible(InfallibleScalarFunction::new_with_name(
+                    ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
                         format!("[modified] {orig_function}"),
                         move |args| {
                             let orig_value = orig_function.call(args)?;
@@ -155,7 +165,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                         },
                     ))
                 } else {
-                    return Err(LocalError::new("Invalid function type"));
+                    return Err(RuntimeError::new("Invalid function type"));
                 };
 
                 Node::new(NodeKind::ComputeScalar {
@@ -178,10 +188,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let MappingFunction::Infallible(orig_function) = function {
+                let new_function = if let MappingFunction::Unattributable(orig_function) = function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    MappingFunction::Infallible(InfallibleMappingFunction::new_with_name(
+                    MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
                         format!("[modified] {orig_function}"),
                         move |id, args| {
                             let orig_value = orig_function.call(id, args)?;
@@ -189,7 +199,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                         },
                     ))
                 } else {
-                    return Err(LocalError::new("Invalid function type"));
+                    return Err(RuntimeError::new("Invalid function type"));
                 };
 
                 Node::new(NodeKind::ComputeMapping {
@@ -230,7 +240,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                         verification: verification.clone(),
                     }
                 } else {
-                    return Err(LocalError::new("Invalid function type"));
+                    return Err(RuntimeError::new("Invalid function type"));
                 };
 
                 Node::new(NodeKind::ComputeMapping {
@@ -271,7 +281,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 })
                 .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
             }
-            _ => return Err(LocalError::new("Not supported")),
+            _ => return Err(RuntimeError::new("Not supported")),
         };
         Ok(node.with_replaced_subnode(&subnode, &new_subnode))
     }

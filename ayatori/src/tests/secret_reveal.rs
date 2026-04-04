@@ -15,7 +15,7 @@ use crate::{
     protocol_user_api::*,
 };
 
-const MODULUS: u64 = 0x7fffffff;
+const MODULUS: u64 = 0x7fff_ffff;
 const GENERATOR: u64 = 7;
 
 fn modadd(x: u64, y: u64) -> u64 {
@@ -48,7 +48,7 @@ struct TestProtocol;
 fn gen_secrets<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
     args: &Args<SP>,
-) -> Result<BTreeMap<SP::Verifier, u64>, LocalError> {
+) -> Result<BTreeMap<SP::Verifier, u64>, UnattributableError> {
     let all_parties = args.get::<PartyGroup<SP::Verifier>>("all_parties")?;
     let mut secrets = all_parties
         .ids()
@@ -60,7 +60,7 @@ fn gen_secrets<SP: SessionParameters>(
     Ok(secrets)
 }
 
-fn splay_secrets<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<u64, LocalError> {
+fn splay_secrets<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<u64, UnattributableError> {
     let x_map = args.get::<BTreeMap<SP::Verifier, u64>>("x_map")?;
     Ok(x_map[id])
 }
@@ -69,56 +69,60 @@ fn gen_dh_secret<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
     _id: &SP::Verifier,
     _args: &Args<SP>,
-) -> Result<u64, LocalError> {
+) -> Result<u64, UnattributableError> {
     Ok(rng.next_u64() % MODULUS)
 }
 
-fn gen_public<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, LocalError> {
+fn gen_public<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, UnattributableError> {
     let x = args.get("x")?;
     Ok(modpow(GENERATOR, *x))
 }
 
-fn gen_dh_public<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, LocalError> {
+fn gen_dh_public<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, UnattributableError> {
     let y = args.get("y")?;
     Ok(modpow(GENERATOR, *y))
 }
 
-fn encrypt_secret<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, LocalError> {
+fn encrypt_secret<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, UnattributableError> {
     let x = args.get::<u64>("x")?;
     let y = args.get("y")?;
     let y_cap = args.get("Y")?;
     Ok(modadd(*x, modpow(*y_cap, *y)))
 }
 
-fn decrypt_secret<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, LocalError> {
+fn decrypt_secret<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, UnattributableError> {
     let c_cap = args.get::<u64>("C")?;
     let y = args.get("y")?;
     let y_cap = args.get("Y")?;
     Ok(modsub(*c_cap, modpow(*y_cap, *y)))
 }
 
-fn verify_secret<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderErrorWithInfo<SP>> {
+fn verify_secret<SP: SessionParameters>(
+    _id: &SP::Verifier,
+    args: &Args<SP>,
+) -> Result<(), SenderAttributableErrorWithReveal<SP>> {
     let y = args.get::<u64>("y")?;
     let x_dec = args.get::<u64>("x_dec")?;
     let x_cap = args.get::<u64>("X")?;
     if *x_cap != modpow(GENERATOR, *x_dec) {
-        Err(SenderErrorWithInfo::new(*y)?)
-    } else {
-        Ok(())
+        return Err(SenderAttributableErrorWithReveal::new(
+            "For the decrypted x: g^x != X",
+            *y,
+        ));
     }
+
+    Ok(())
 }
 
 fn verify_evidence<SP: SessionParameters>(
     _id: &SP::Verifier,
     args: &Args<SP>,
     associated_data: &AssociatedData<SP>,
-) -> Result<EvidenceVerdict, LocalError> {
+) -> Result<EvidenceVerdict, RuntimeError> {
     let y = associated_data.deserialize::<u64>()?; // our secret
     let x_cap = args.get::<u64>("X")?;
-    let y_cap_local = args.get::<u64>("Y")?;
-
-    // TODO: need to be verified separately on reception, and the result made a dependency
     let y_cap_remote = args.get::<u64>("Y_remote")?;
+    let y_cap_local = args.get::<u64>("Y")?;
 
     let c_cap = args.get::<u64>("C")?;
 
@@ -133,7 +137,7 @@ fn verify_evidence<SP: SessionParameters>(
     Ok(EvidenceVerdict::valid())
 }
 
-fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<BTreeMap<SP::Verifier, u64>, LocalError> {
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<BTreeMap<SP::Verifier, u64>, UnattributableError> {
     let xs = args.get_map::<u64>("x")?;
     Ok(xs.iter().map(|(k, v)| ((*k).clone(), **v)).collect())
 }
@@ -171,7 +175,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, LocalError> {
+    ) -> Result<Node<SP>, RuntimeError> {
         let message_x = ProtocolMessage::new::<u64>("X");
         let message_y = ProtocolMessage::new::<u64>("Y");
         let message_c = ProtocolMessage::new::<u64>("C");
@@ -212,9 +216,13 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             verify_evidence,
             &[
                 ("X", &x_cap),        // S_j(X_j,i)
-                ("Y", &y_echo),       // S_j(Y_i,j) (echoed back to us)
                 ("C", &c_cap),        // S_j(C_i,j)
                 ("Y_remote", &y_cap), // S_j(Y_j,[])
+                // In a real protocol this need to be verified separately on reception
+                // (that is, compared to our stored `Y`),
+                // and the result made a dependency of the node that decrypts `x`.
+                // But for this test it does not matter.
+                ("Y", &y_echo), // S_j(Y_i,j) (echoed back to us)
             ],
         )?;
 

@@ -3,8 +3,7 @@ use alloc::{collections::BTreeMap, format, vec::Vec};
 use signature::rand_core::CryptoRngCore;
 
 use crate::{
-    entities::{Message, MessageId},
-    errors::LocalError,
+    entities::{Message, MessageId, UnattributableError},
     execution::{Session, SessionReport, Task, TaskError},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -12,7 +11,7 @@ use crate::{
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
-) -> Result<ExecutionResult<SP, P>, LocalError> {
+) -> Result<ExecutionResult<SP, P>, UnattributableError> {
     let mut sessions = sessions
         .into_iter()
         .map(|session| (session.verifier().clone(), session))
@@ -31,7 +30,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         for (id, session) in &mut sessions {
             for message in messages
                 .get_mut(id)
-                .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
+                .ok_or_else(|| UnattributableError::runtime(format!("{id:?} not found in the map of message queues")))?
                 .drain(..)
             {
                 let message_id = MessageId::random(rng);
@@ -53,7 +52,9 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                         let destination = message.destination().clone();
                         messages
                             .get_mut(&destination)
-                            .ok_or_else(|| LocalError::new(format!("{id:?} not found in the map of message queues")))?
+                            .ok_or_else(|| {
+                                UnattributableError::runtime(format!("{id:?} not found in the map of message queues"))
+                            })?
                             .push(message);
                         session.add_result(result)
                     }
@@ -70,19 +71,19 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 
                 match task_result {
                     Ok(()) => {}
-                    Err(TaskError::Local(error)) => return Err(error),
+                    Err(TaskError::Unattributable(error)) => return Err(error),
                     Err(TaskError::InvalidMessage(error)) => {
-                        return Err(LocalError::new(format!("Invalid message: {error:?}")));
+                        return Err(UnattributableError::runtime(format!("Invalid message: {error:?}")));
                     }
                     Err(TaskError::DuplicateMessages(error)) => {
-                        return Err(LocalError::new(format!("Duplicate messages: {error:?}")));
+                        return Err(UnattributableError::runtime(format!("Duplicate messages: {error:?}")));
                     }
                 }
             }
         }
 
         if !task_processed {
-            return Err(LocalError::new(
+            return Err(UnattributableError::runtime(
                 "Sessions are stuck: there are still active rules, but no tasks are being created",
             ));
         }
@@ -90,7 +91,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         for (id, token) in finished_with_success {
             let session = sessions
                 .remove(&id)
-                .ok_or_else(|| LocalError::new("A session for {id:?} was not found"))?;
+                .ok_or_else(|| UnattributableError::runtime("A session for {id:?} was not found"))?;
             let report = session.finalize_with_success(token)?;
             reports.insert(id.clone(), report);
         }
@@ -98,7 +99,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         for (id, token) in finished_with_stall {
             let session = sessions
                 .remove(&id)
-                .ok_or_else(|| LocalError::new("A session for {id:?} was not found"))?;
+                .ok_or_else(|| UnattributableError::runtime("A session for {id:?} was not found"))?;
             let report = session.finalize_with_stalled(token);
             reports.insert(id.clone(), report);
         }

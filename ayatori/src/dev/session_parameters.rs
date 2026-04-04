@@ -19,11 +19,13 @@ pub struct TestSigner(u8);
 pub struct TestVerifier(u8);
 impl TestVerifier {
     /// Creates a new verifier for testing purposes.
+    #[must_use]
     pub fn new(id: u8) -> Self {
         Self(id)
     }
 
     /// Access inner `u8`
+    #[must_use]
     pub fn id(&self) -> u8 {
         self.0
     }
@@ -40,6 +42,7 @@ pub struct TestSignature<D: digest::Digest> {
 
 impl TestSigner {
     /// Creates a new signer for testing purposes.
+    #[must_use]
     pub fn new(id: u8) -> Self {
         Self(id)
     }

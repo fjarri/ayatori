@@ -21,10 +21,12 @@ impl<Id: PartyId> PartyGroup<Id> {
         self.ids.iter()
     }
 
+    #[must_use]
     pub fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool {
         &self.ids == ids
     }
 
+    #[must_use]
     pub fn is_quorum_possible(&self, banned_ids: &BTreeSet<Id>) -> bool {
         self.has_quorum(&self.ids.difference(banned_ids).cloned().collect::<BTreeSet<_>>())
     }

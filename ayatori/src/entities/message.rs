@@ -9,11 +9,8 @@ use signature::{
     rand_core::CryptoRngCore,
 };
 
-use super::{session_id::SessionId, tag::FullName, value::SerializedValue};
-use crate::{
-    errors::LocalError,
-    traits::{SessionParameters, WireFormat},
-};
+use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
+use crate::traits::{SessionParameters, WireFormat};
 
 #[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValueMetadata<SP: SessionParameters> {
@@ -36,21 +33,23 @@ impl<SP: SessionParameters> ValueMetadata<SP> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(displaydoc::Display, Debug, Clone)]
 pub enum VerificationError {
-    Local(LocalError),
+    #[displaydoc("{0}")]
+    Runtime(RuntimeError),
+    #[displaydoc("Signature mismatch")]
     SignatureMismatch,
 }
 
-impl From<LocalError> for VerificationError {
-    fn from(source: LocalError) -> Self {
-        Self::Local(source)
+impl From<RuntimeError> for VerificationError {
+    fn from(source: RuntimeError) -> Self {
+        Self::Runtime(source)
     }
 }
 
-fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::Output<D>, LocalError> {
+fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::Output<D>, RuntimeError> {
     let value_len =
-        u64::try_from(value.as_ref().len()).map_err(|_| LocalError::new("Message size exceeds 2^64 bytes"))?;
+        u64::try_from(value.as_ref().len()).map_err(|_| RuntimeError::new("Message size exceeds 2^64 bytes"))?;
     Ok(D::new_with_prefix(b"SerializedValueDigest")
         .chain_update(value_len.to_be_bytes())
         .chain_update(value.as_ref())
@@ -60,7 +59,7 @@ fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::O
 fn hash_value_hash_and_metadata<SP: SessionParameters>(
     value_hash: &digest::Output<SP::Digest>,
     metadata: &ValueMetadata<SP>,
-) -> Result<SP::Digest, LocalError> {
+) -> Result<SP::Digest, RuntimeError> {
     Ok(SP::Digest::new_with_prefix(b"SignedValueDigest")
         .chain_update(<SP::WireFormat as WireFormat>::serialize(metadata)?)
         .chain_update(value_hash.as_ref()))
@@ -69,13 +68,13 @@ fn hash_value_hash_and_metadata<SP: SessionParameters>(
 fn hash_value_and_metadata<SP: SessionParameters>(
     value: &SerializedValue,
     metadata: &ValueMetadata<SP>,
-) -> Result<SP::Digest, LocalError> {
+) -> Result<SP::Digest, RuntimeError> {
     let value_hash = hash_serialized_value::<SP::Digest>(value)?;
     hash_value_hash_and_metadata::<SP>(&value_hash, metadata)
 }
 
 /// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
-/// since some RustCrypto libraries don't accept a `?Sized` RNG.
+/// since some libraries don't accept a `?Sized` RNG.
 struct Rng<'a>(&'a mut dyn CryptoRngCore);
 
 impl signature::rand_core::RngCore for Rng<'_> {
@@ -111,7 +110,7 @@ impl<SP: SessionParameters> SignedValue<SP> {
         name: &FullName,
         destination: &SP::Verifier,
         value: SerializedValue,
-    ) -> Result<Self, LocalError> {
+    ) -> Result<Self, RuntimeError> {
         let metadata = ValueMetadata {
             name: name.clone(),
             destination: destination.clone(),
@@ -121,7 +120,7 @@ impl<SP: SessionParameters> SignedValue<SP> {
         let mut typed_rng = Rng(rng);
         let signature = signer
             .try_sign_digest_with_rng(&mut typed_rng, digest)
-            .map_err(|err| LocalError::new(format!("Signing failed: {err}")))?;
+            .map_err(|err| RuntimeError::new(format!("Signing failed: {err}")))?;
         Ok(Self {
             signature,
             source: signer.verifying_key(),
@@ -222,7 +221,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         &self.value
     }
 
-    pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> Result<bool, LocalError> {
+    pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> Result<bool, RuntimeError> {
         let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
         Ok(value_hash.as_ref() == other.hash.as_ref())
     }
@@ -236,7 +235,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         }
     }
 
-    pub fn to_signed_hash(&self) -> Result<SignedHash<SP>, LocalError> {
+    pub fn to_signed_hash(&self) -> Result<SignedHash<SP>, RuntimeError> {
         let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
         Ok(SignedHash {
             signature: self.signature.clone(),
