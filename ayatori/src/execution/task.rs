@@ -306,8 +306,8 @@ impl<SP: SessionParameters> SendTask<SP> {
 pub struct FinalizeWithSuccessTask(ComputedScalarTag);
 
 impl FinalizeWithSuccessTask {
-    pub(crate) fn output_tag(&self) -> &ComputedScalarTag {
-        &self.0
+    pub(crate) fn output_tag(self) -> ComputedScalarTag {
+        self.0
     }
 }
 
@@ -315,8 +315,8 @@ impl FinalizeWithSuccessTask {
 pub struct FinalizeWithStallTask(CollectedTag);
 
 impl FinalizeWithStallTask {
-    pub(crate) fn stalled_tag(&self) -> &CollectedTag {
-        &self.0
+    pub(crate) fn stalled_tag(self) -> CollectedTag {
+        self.0
     }
 }
 

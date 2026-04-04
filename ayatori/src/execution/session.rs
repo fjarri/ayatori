@@ -79,7 +79,7 @@ where
         id: SessionId<SP>,
         signer: Option<SP::Signer>,
         verifier: &SP::Verifier,
-        output_node: Node<SP>,
+        output_node: &Node<SP>,
         private_inputs: PrivateInputs,
         shared_data: &P::SharedData,
     ) -> Result<Self, RuntimeError> {
@@ -87,7 +87,7 @@ where
         let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
 
-        let ruleset = Ruleset::new(&output_node, &private_inputs.names())?;
+        let ruleset = Ruleset::new(output_node, &private_inputs.names())?;
         let storage = Storage::new();
 
         let expected_messages = ruleset.expected_messages().clone();
@@ -131,7 +131,7 @@ where
             )));
         }
 
-        let all_names = public_names.union(&private_names).cloned().collect::<BTreeSet<_>>();
+        let all_names = public_names.union(&private_names).copied().collect::<BTreeSet<_>>();
         if all_names != arguments.keys().collect() {
             return Err(RuntimeError::new(
                 "Public and private argument names differ from the protocol signature",
@@ -164,7 +164,7 @@ where
         let verifier = signer.verifying_key();
         let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
         let private_inputs = P::make_private_inputs(private_data);
-        Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
+        Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
     }
 
     pub(crate) fn new_with_reproduction_subtree(
@@ -180,7 +180,7 @@ where
             guilty_party,
             associated_data,
         )?;
-        Self::new_inner(id, None, reported_by, output_node, PrivateInputs::new(), shared_data)
+        Self::new_inner(id, None, reported_by, &output_node, PrivateInputs::new(), shared_data)
     }
 
     #[cfg(any(test, feature = "dev"))]
@@ -194,10 +194,10 @@ where
         let verifier = signer.verifying_key();
         let mut output_node = make_tree::<SP, P>(&verifier, shared_data)?;
         for replacement in replacements {
-            output_node = replacement.apply(output_node)?;
+            output_node = replacement.apply(&output_node)?;
         }
         let private_inputs = P::make_private_inputs(private_data);
-        Self::new_inner(id, Some(signer), &verifier, output_node, private_inputs, shared_data)
+        Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
     }
 
     pub fn verifier(&self) -> &SP::Verifier {
@@ -221,7 +221,7 @@ where
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
     }
 
-    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: MappingTag) {
+    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
@@ -235,8 +235,8 @@ where
         }
     }
 
-    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
-        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
+    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: ComputedScalarTag) -> Result<T, RuntimeError> {
+        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag))?;
         value.downcast::<T>()
     }
 
@@ -299,7 +299,7 @@ where
                     args,
                 } => {
                     let arg_values = self.storage.get_scalar_args(args)?;
-                    let args = Args::new(&self.data.id, self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         ScalarFunction::Unattributable(function) => {
                             Task::compute_scalar_infallible(store_in, function, args)
@@ -317,7 +317,7 @@ where
                     on_error,
                 } => {
                     let arg_values = self.storage.get_scalar_or_mapping_args(&index, args)?;
-                    let args = Args::new(&self.data.id, self.verifier(), arg_values)?;
+                    let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         MappingFunction::Unattributable(function) => {
                             Task::compute_mapping_elem_infallible(store_in, index, function, args)
@@ -373,7 +373,7 @@ where
                         .data
                         .expected_senders(&message_name)
                         .ok_or_else(|| RuntimeError::expect(format!("{message_name} has expected senders")))?;
-                    let args = DeserializeArgs::new(&expected_senders, serde_adapter, value)?;
+                    let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
                     return Ok(Some(Task::compute_deserialize_elem(
                         store_in, index, function, args, on_error,
                     )));
@@ -415,7 +415,7 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => self.register_attributable_error(guilty_party, store_in),
+                OnError::Escalate => self.register_attributable_error(guilty_party, &store_in),
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
@@ -441,7 +441,7 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => self.register_attributable_error(guilty_party, store_in),
+                OnError::Escalate => self.register_attributable_error(guilty_party, &store_in),
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {

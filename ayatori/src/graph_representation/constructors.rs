@@ -33,6 +33,7 @@ pub struct ProtocolMessage<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ProtocolMessage<SP> {
+    #[must_use]
     pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
         Self {
             name: name.into(),
@@ -67,6 +68,7 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     })
 }
 
+#[must_use]
 pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
     let arg_name = "value";
     match node.store_in() {
@@ -178,7 +180,7 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
             function: ThirdPartyAttributableMappingFunction::new_erased(function),
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
-        args: args_to_owned(args.iter().cloned())?,
+        args: args_to_owned(args.iter().copied())?,
     }))
 }
 
@@ -193,8 +195,8 @@ pub fn compute_mapping_sender_fallible_with_info<SP: SessionParameters, Ret: Era
         store_in: ComputedMappingTag::new(name),
         function: SenderAttributableWithRevealMappingFunction::new_erased(function),
         verification: EvidenceVerificationFunction::new(verification),
-        args: args_to_owned(args.iter().cloned())?,
-        verification_args: args_to_owned(verification_args.iter().cloned())?,
+        args: args_to_owned(args.iter().copied())?,
+        verification_args: args_to_owned(verification_args.iter().copied())?,
     }))
 }
 
@@ -342,6 +344,6 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     let output = P::build(party_build_data, build_data, arg_nodes)?;
     let prefixed = output.tree_with_added_prefix(prefix);
     let bound_args = signature.bind(args)?;
-    let with_args = prefixed.with_substituted_arguments(bound_args)?;
+    let with_args = prefixed.with_substituted_arguments(&bound_args)?;
     Ok(with_args)
 }

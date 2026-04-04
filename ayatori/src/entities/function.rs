@@ -26,6 +26,7 @@ pub enum EvidenceVerdict {
 }
 
 impl EvidenceVerdict {
+    #[must_use]
     pub fn valid() -> Self {
         Self::Valid
     }

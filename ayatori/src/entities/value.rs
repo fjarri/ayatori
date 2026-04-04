@@ -170,6 +170,7 @@ struct DynAdapterHolder<F, T>(PhantomData<(F, T)>);
 pub struct SerdeAdapter<F: WireFormat>(Box<dyn DynAdapter<F>>);
 
 impl<F: WireFormat> SerdeAdapter<F> {
+    #[must_use]
     pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>() -> Self {
         Self(Box::new(DynAdapterHolder::<F, T>(PhantomData)))
     }

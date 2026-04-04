@@ -106,7 +106,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                     move |maybe_value: Result<Value, ThirdPartyAttributableError<SP>>, id, args| {
                         let typed_value = maybe_value
                             .as_ref()
-                            .map_err(|err| err.clone())
+                            .map_err(Clone::clone)
                             .and_then(|value| value.downcast_ref::<Ret>().map_err(ThirdPartyAttributableError::from));
                         let typed_result = function(typed_value, id, args)?;
                         Ok(Value::new(typed_result))
@@ -139,7 +139,7 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub(crate) fn apply(&self, node: Node<SP>) -> Result<Node<SP>, RuntimeError> {
+    pub(crate) fn apply(&self, node: &Node<SP>) -> Result<Node<SP>, RuntimeError> {
         let subnode = node
             .find_subnode(self.tag.as_ref())
             .ok_or_else(|| RuntimeError::new("Node not found"))?;

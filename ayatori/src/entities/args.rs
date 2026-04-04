@@ -75,12 +75,12 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
         expected_senders: &BTreeSet<SP::Verifier>,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         value: Value,
-    ) -> Result<Self, RuntimeError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             serde_adapter,
             value,
             expected_senders: expected_senders.clone(),
-        })
+        }
     }
 
     pub fn expected_senders(&self) -> &BTreeSet<SP::Verifier> {
@@ -106,16 +106,12 @@ pub struct Args<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Args<SP> {
-    pub(crate) fn new(
-        session_id: &SessionId<SP>,
-        my_id: &SP::Verifier,
-        values: BTreeMap<String, Value>,
-    ) -> Result<Self, RuntimeError> {
-        Ok(Self {
+    pub(crate) fn new(session_id: &SessionId<SP>, my_id: &SP::Verifier, values: BTreeMap<String, Value>) -> Self {
+        Self {
             session_id: session_id.clone(),
             my_id: my_id.clone(),
             values,
-        })
+        }
     }
 
     pub fn my_id(&self) -> &SP::Verifier {

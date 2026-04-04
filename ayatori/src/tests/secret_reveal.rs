@@ -15,7 +15,7 @@ use crate::{
     protocol_user_api::*,
 };
 
-const MODULUS: u64 = 0x7fffffff;
+const MODULUS: u64 = 0x7fff_ffff;
 const GENERATOR: u64 = 7;
 
 fn modadd(x: u64, y: u64) -> u64 {
@@ -105,13 +105,13 @@ fn verify_secret<SP: SessionParameters>(
     let x_dec = args.get::<u64>("x_dec")?;
     let x_cap = args.get::<u64>("X")?;
     if *x_cap != modpow(GENERATOR, *x_dec) {
-        Err(SenderAttributableErrorWithReveal::new(
+        return Err(SenderAttributableErrorWithReveal::new(
             "For the decrypted x: g^x != X",
             *y,
-        ))
-    } else {
-        Ok(())
+        ));
     }
+
+    Ok(())
 }
 
 fn verify_evidence<SP: SessionParameters>(

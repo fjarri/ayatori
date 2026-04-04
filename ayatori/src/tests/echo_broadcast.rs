@@ -53,7 +53,7 @@ fn verify_echo_pack_correct<SP: SessionParameters>(
     }
 
     // Check that the messages are correctly signed and have correct metadata
-    for (from, message) in echoed.iter() {
+    for (from, message) in echoed {
         if from != message.source() {
             return Err(SenderAttributableError::new("Mismatched source"));
         }
@@ -100,7 +100,7 @@ fn verify_echo_contents<SP: SessionParameters>(
     let echoed = args.get::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echoed")?;
 
     // Check that the payload and metadata is the same (except for the `destination` part, which will differ)
-    for (from, message) in echoed.iter() {
+    for (from, message) in echoed {
         let ethalon = received
             .get(from)
             .expect("we checked that the ID is present in the message map");

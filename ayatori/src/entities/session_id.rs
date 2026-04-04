@@ -24,6 +24,7 @@ impl<SP: SessionParameters> SessionId<SP> {
     /// **Warning:** this should generally be used for testing; creating a random session ID in a centralized way
     /// usually defeats the purpose of having a distributed protocol.
     #[cfg(any(test, feature = "dev"))]
+    #[must_use]
     pub fn random(rng: &mut impl CryptoRngCore) -> Self {
         let mut buffer = digest::Output::<SP::Digest>::default();
         rng.fill_bytes(&mut buffer);
@@ -40,6 +41,7 @@ impl<SP: SessionParameters> SessionId<SP> {
     ///
     /// In a blockchain setting, it may be some combination of the current block hash with the public parameters
     /// (identities of the parties, hash of the inputs).
+    #[must_use]
     pub fn from_seed(bytes: &[u8]) -> Self {
         Self(SP::Digest::new_with_prefix(b"SessionId").chain_update(bytes).finalize())
     }

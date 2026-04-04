@@ -74,7 +74,7 @@ fn hash_value_and_metadata<SP: SessionParameters>(
 }
 
 /// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
-/// since some RustCrypto libraries don't accept a `?Sized` RNG.
+/// since some libraries don't accept a `?Sized` RNG.
 struct Rng<'a>(&'a mut dyn CryptoRngCore);
 
 impl signature::rand_core::RngCore for Rng<'_> {

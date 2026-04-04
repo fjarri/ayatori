@@ -225,7 +225,7 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
     guilty_party: &SP::Verifier,
     signed_values: &[SignedValue<SP>],
 ) -> Result<EvidenceVerdict, RuntimeError> {
-    for signed_value in signed_values.iter() {
+    for signed_value in signed_values {
         if signed_value.source() != guilty_party {
             return Ok(EvidenceVerdict::invalid(
                 "The message source is not that of the guilty party",
@@ -317,24 +317,19 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         let arg_nodes = ArgNodes::new(&signature);
         let party_build_data = PartyBuildData::new(&self.reported_by);
         let output = P::build(&party_build_data, &build_data, arg_nodes)?;
-        let node = match output.find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref())) {
-            Some(node) => node,
-            None => {
-                return Ok(EvidenceVerdict::invalid(format!(
-                    "Could not find subnode {}",
-                    self.failed_at
-                )));
-            }
+        let Some(node) = output.find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref())) else {
+            return Ok(EvidenceVerdict::invalid(format!(
+                "Could not find subnode {}",
+                self.failed_at
+            )));
         };
 
-        let function = match node.kind() {
-            NodeKind::ComputeMapping { function, .. } => function,
-            _ => return Ok(EvidenceVerdict::invalid("Invalid node type")),
+        let NodeKind::ComputeMapping { function, .. } = node.kind() else {
+            return Ok(EvidenceVerdict::invalid("Invalid node type"));
         };
 
-        let verification = match function {
-            MappingFunction::ThirdPartyAttributable { verification, .. } => verification,
-            _ => return Ok(EvidenceVerdict::invalid("Invalid function type")),
+        let MappingFunction::ThirdPartyAttributable { verification, .. } = function else {
+            return Ok(EvidenceVerdict::invalid("Invalid function type"));
         };
 
         verification.call(guilty_party, session_id, &self.error.associated_data)

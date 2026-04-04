@@ -142,8 +142,7 @@ fn propagate_groups<SP: SessionParameters>(
 
     for node in root.flattened_roots_first() {
         match node.kind() {
-            NodeKind::ScalarArgument { .. } => {}
-            NodeKind::ComputeScalar { .. } => {}
+            NodeKind::ScalarArgument { .. } | NodeKind::ComputeScalar { .. } | NodeKind::Receive { .. } => {}
             NodeKind::ComputeMapping { store_in, args, .. } => {
                 let ids = result
                     .get(&MappingTag::Computed(store_in.clone()))
@@ -230,7 +229,6 @@ fn propagate_groups<SP: SessionParameters>(
                     .or_insert(BTreeSet::new())
                     .extend(group.ids().cloned());
             }
-            NodeKind::Receive { .. } => {}
         }
     }
 
@@ -337,7 +335,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         match arg.store_in() {
                             AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
                             AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
-                        };
+                        }
                     }
 
                     let element_conditions = possible_ids
@@ -364,7 +362,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             args: arg_tags,
                             on_error: on_error.clone(),
                         },
-                    })
+                    });
                 }
                 NodeKind::ComputeMappingSenderAttributableWithReveal {
                     store_in,
@@ -387,13 +385,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         match arg.store_in() {
                             AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
                             AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
-                        };
+                        }
                     }
                     for arg in verification_args.values() {
                         match arg.store_in() {
                             AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
                             AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
-                        };
+                        }
                     }
 
                     let element_conditions = possible_ids
@@ -420,7 +418,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             args: arg_tags,
                             on_error: on_error.clone(),
                         },
-                    })
+                    });
                 }
                 NodeKind::SerializeAndSign {
                     store_in,
@@ -462,7 +460,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             message_name: message_name.clone(),
                             serde_adapter: serde_adapter.clone(),
                         },
-                    })
+                    });
                 }
                 NodeKind::Deserialize {
                     store_in,
@@ -504,7 +502,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             serde_adapter: serde_adapter.clone(),
                             on_error,
                         },
-                    })
+                    });
                 }
                 NodeKind::DirectMessage { store_in, data } => {
                     let possible_ids = propagated_ids.get(&MappingTag::Sent(store_in.clone())).ok_or_else(|| {
@@ -556,7 +554,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         })?;
                     expected_messages.insert(message_name.clone(), possible_ids.clone());
                 }
-            };
+            }
         }
 
         Ok(Self {
@@ -813,8 +811,8 @@ impl<SP: SessionParameters> Display for MappingRule<SP> {
         if !self.scalar_condition.is_satisfied() {
             writeln!(f, "if {}", self.scalar_condition)?;
         }
-        for (id, condition) in self.element_conditions.iter() {
-            writeln!(f, "if element-ready({:?}, {})", id, condition)?;
+        for (id, condition) in &self.element_conditions {
+            writeln!(f, "if element-ready({id:?}, {condition})")?;
         }
         writeln!(f, "  {}", self.kind)
     }

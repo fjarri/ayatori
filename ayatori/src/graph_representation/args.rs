@@ -31,16 +31,19 @@ impl<SP: SessionParameters> PartyBuildData<SP> {
 pub struct PrivateInputs(BTreeMap<String, Value>);
 
 impl PrivateInputs {
+    #[must_use]
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
+    #[must_use]
     pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
         let mut args = self.0;
         args.insert(name.to_string(), Value::new(value));
         Self(args)
     }
 
+    #[must_use]
     pub fn names(&self) -> BTreeSet<String> {
         self.0.keys().cloned().collect()
     }
@@ -54,10 +57,12 @@ impl PrivateInputs {
 pub struct PublicInputs(BTreeMap<String, Value>);
 
 impl PublicInputs {
+    #[must_use]
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
+    #[must_use]
     pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
         let mut args = self.0;
         args.insert(name.to_string(), Value::new(value));
@@ -94,16 +99,19 @@ impl<SP: SessionParameters> ArgNodes<SP> {
 pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
 
 impl<SP: SessionParameters> ProtocolArgs<SP> {
+    #[must_use]
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
+    #[must_use]
     pub fn input(self, name: &str, value: &Node<SP>) -> Self {
         let mut args = self.0;
         args.insert(name.to_string(), value.get_strong_ref());
         Self(args)
     }
 
+    #[must_use]
     pub fn nodes(&self) -> &BTreeMap<String, Node<SP>> {
         &self.0
     }
@@ -119,10 +127,12 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
 pub struct ProtocolSignature(BTreeSet<String>);
 
 impl ProtocolSignature {
+    #[must_use]
     pub fn new() -> Self {
         Self(BTreeSet::new())
     }
 
+    #[must_use]
     pub fn input(self, name: &str) -> Self {
         let mut args = self.0;
         args.insert(name.to_string());
