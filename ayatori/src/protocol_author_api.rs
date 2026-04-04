@@ -4,7 +4,6 @@ pub use crate::{
         SenderAttributableErrorWithReveal, SerdeAdapter, SerializeArgs, SerializedValue, SignedHash, SignedValue,
         SpuriousError, ThirdPartyAttributableError, UnattributableError, VerificationError, VerifiedValue,
     },
-    execution::EvidenceError,
     graph_representation::{
         ArgNodes, Node, PartyBuildData, PrivateInputs, ProtocolArgs, ProtocolMessage, ProtocolSignature, PublicInputs,
         alias, broadcast, call_protocol, collect, compute_mapping, compute_mapping_sender_fallible,

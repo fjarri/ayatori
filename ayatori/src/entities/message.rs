@@ -33,9 +33,11 @@ impl<SP: SessionParameters> ValueMetadata<SP> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(displaydoc::Display, Debug, Clone)]
 pub enum VerificationError {
+    #[displaydoc("{0}")]
     Runtime(RuntimeError),
+    #[displaydoc("Signature mismatch")]
     SignatureMismatch,
 }
 

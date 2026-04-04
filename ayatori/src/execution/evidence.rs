@@ -1,4 +1,4 @@
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, vec::Vec};
 use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
         &self.guilty_party
     }
 
-    pub fn verify(&self, shared_data: &P::SharedData) -> Result<(), EvidenceError> {
+    pub fn verify(&self, shared_data: &P::SharedData) -> Result<EvidenceVerdict, RuntimeError> {
         self.evidence.verify(&self.session_id, &self.guilty_party, shared_data)
     }
 }
@@ -57,7 +57,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
         session_id: &SessionId<SP>,
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
-    ) -> Result<(), EvidenceError> {
+    ) -> Result<EvidenceVerdict, RuntimeError> {
         match self {
             Self::SenderError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
             Self::SenderErrorWithReveal(evidence) => evidence.verify(session_id, guilty_party, shared_data),
@@ -81,35 +81,53 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
         }
     }
 
-    pub fn verify(&self, session_id: &SessionId<SP>, guilty_party: &SP::Verifier) -> Result<(), EvidenceError> {
+    pub fn verify(
+        &self,
+        session_id: &SessionId<SP>,
+        guilty_party: &SP::Verifier,
+    ) -> Result<EvidenceVerdict, RuntimeError> {
         if guilty_party != self.first.source() {
-            return Err(EvidenceError::new(
+            return Ok(EvidenceVerdict::invalid(
                 "First message's source does not match `guilty_party`",
             ));
         }
 
         if guilty_party != self.second.source() {
-            return Err(EvidenceError::new(
+            return Ok(EvidenceVerdict::invalid(
                 "Second message's source does not match `guilty_party`",
             ));
         }
 
         if self.first.metadata() != self.second.metadata() {
-            return Err(EvidenceError::new("Message metadatas differ"));
+            return Ok(EvidenceVerdict::invalid("Message metadatas differ"));
         }
 
         if self.first.metadata().session_id() != session_id {
-            return Err(EvidenceError::new("Message's session ID does not match the one stored"));
+            return Ok(EvidenceVerdict::invalid(
+                "Message's session ID does not match the one stored",
+            ));
         }
 
-        let first_value = self.first.clone().verify_and_unpack()?;
-        let second_value = self.second.clone().verify_and_unpack()?;
+        let first_value = match self.first.clone().verify_and_unpack() {
+            Ok(value) => value,
+            Err(VerificationError::SignatureMismatch) => {
+                return Ok(EvidenceVerdict::invalid("Failed to verify the first value"));
+            }
+            Err(VerificationError::Runtime(error)) => return Err(error),
+        };
+        let second_value = match self.second.clone().verify_and_unpack() {
+            Ok(value) => value,
+            Err(VerificationError::SignatureMismatch) => {
+                return Ok(EvidenceVerdict::invalid("Failed to verify the second value"));
+            }
+            Err(VerificationError::Runtime(error)) => return Err(error),
+        };
 
         if first_value == second_value {
-            return Err(EvidenceError::new("Serialized values of both messages are equal"));
+            return Ok(EvidenceVerdict::invalid("Serialized values of both messages are equal"));
         }
 
-        Ok(())
+        Ok(EvidenceVerdict::valid())
     }
 }
 
@@ -143,7 +161,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
         session_id: &SessionId<SP>,
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
-    ) -> Result<(), EvidenceError> {
+    ) -> Result<EvidenceVerdict, RuntimeError> {
         let session = Session::<SP, P>::new_with_reproduction_subtree(
             session_id.clone(),
             &self.failed_at,
@@ -187,7 +205,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvid
         session_id: &SessionId<SP>,
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
-    ) -> Result<(), EvidenceError> {
+    ) -> Result<EvidenceVerdict, RuntimeError> {
         let session = Session::<SP, P>::new_with_reproduction_subtree(
             session_id.clone(),
             &self.failed_at,
@@ -206,10 +224,12 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
     session_verifier: &SP::Verifier,
     guilty_party: &SP::Verifier,
     signed_values: &[SignedValue<SP>],
-) -> Result<(), EvidenceError> {
+) -> Result<EvidenceVerdict, RuntimeError> {
     for signed_value in signed_values.iter() {
         if signed_value.source() != guilty_party {
-            return Err(EvidenceError::new("The message source is not that of the guilty party"));
+            return Ok(EvidenceVerdict::invalid(
+                "The message source is not that of the guilty party",
+            ));
         }
     }
 
@@ -222,36 +242,50 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
     while let Some(task) = session.make_task()? {
         let task_result = match task {
             Task::Compute(task) => {
-                let result = task.compute()?;
+                let result = match task.compute() {
+                    Ok(result) => result,
+                    Err(UnattributableError::Spurious(error)) => {
+                        return Ok(EvidenceVerdict::invalid(format!(
+                            "Unexpected spurious error when reproducing the failure: {error}"
+                        )));
+                    }
+                    Err(UnattributableError::Runtime(error)) => return Err(error),
+                };
                 session.add_result(result)
             }
             Task::ComputeWithRng(_task) => {
-                return Err(EvidenceError::new(
+                return Ok(EvidenceVerdict::invalid(
                     "Unexpected RNG-based computation when reproducing the failure",
                 ));
             }
             Task::Send(task) => {
-                let (_message, result) = task.compute()?;
+                let (_message, result) = match task.compute() {
+                    Ok(result) => result,
+                    Err(UnattributableError::Spurious(error)) => {
+                        return Ok(EvidenceVerdict::invalid(format!(
+                            "Unexpected spurious error when reproducing the failure: {error}"
+                        )));
+                    }
+                    Err(UnattributableError::Runtime(error)) => return Err(error),
+                };
                 session.add_result(result)
             }
             Task::FinalizeWithSuccess(task) => {
-                let verdict = session.finalize_with_evidence_verdict(task)?;
-                return match verdict {
-                    EvidenceVerdict::Valid => Ok(()),
-                    EvidenceVerdict::Invalid(error) => Err(EvidenceError::new(format!("Invalid evidence: {error}"))),
-                };
+                return session.finalize_with_evidence_verdict(task);
             }
             Task::FinalizeWithStall(_task) => {
-                return Err(EvidenceError::new("Unexpected finalization with stall task"));
+                return Ok(EvidenceVerdict::invalid("Unexpected finalization with stall task"));
             }
         };
 
         if let Some(error) = task_result.err() {
-            return Err(EvidenceError::new(format!("Unexpected task error: {error:?}")));
+            return Ok(EvidenceVerdict::invalid(format!("Unexpected task error: {error:?}")));
         }
     }
 
-    Err(EvidenceError::new("The execution did not encounter the expected error"))
+    Ok(EvidenceVerdict::invalid(
+        "The execution did not encounter the expected error",
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,61 +311,32 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         session_id: &SessionId<SP>,
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
-    ) -> Result<(), EvidenceError> {
+    ) -> Result<EvidenceVerdict, RuntimeError> {
         let build_data = P::make_build_data(shared_data);
         let signature = P::signature();
         let arg_nodes = ArgNodes::new(&signature);
         let party_build_data = PartyBuildData::new(&self.reported_by);
         let output = P::build(&party_build_data, &build_data, arg_nodes)?;
-        let node = output
-            .find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref()))
-            .ok_or_else(|| EvidenceError::new(format!("Could not find subnode {}", self.failed_at)))?;
+        let node = match output.find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref())) {
+            Some(node) => node,
+            None => {
+                return Ok(EvidenceVerdict::invalid(format!(
+                    "Could not find subnode {}",
+                    self.failed_at
+                )));
+            }
+        };
 
         let function = match node.kind() {
             NodeKind::ComputeMapping { function, .. } => function,
-            _ => return Err(EvidenceError::new("Invalid node type")),
+            _ => return Ok(EvidenceVerdict::invalid("Invalid node type")),
         };
 
         let verification = match function {
             MappingFunction::ThirdPartyAttributable { verification, .. } => verification,
-            _ => return Err(EvidenceError::new("Invalid function type")),
+            _ => return Ok(EvidenceVerdict::invalid("Invalid function type")),
         };
 
-        let verdict = verification.call(guilty_party, session_id, &self.error.associated_data)?;
-        match verdict {
-            EvidenceVerdict::Valid => Ok(()),
-            EvidenceVerdict::Invalid(error) => Err(EvidenceError::new(format!("Invalid evidence: {error}"))),
-        }
-    }
-}
-
-#[derive(displaydoc::Display, Debug, Clone)]
-#[displaydoc("Evidence error: {0}")]
-pub struct EvidenceError(String);
-
-impl EvidenceError {
-    /// Creates a new error from anything castable to string.
-    pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-}
-
-// TODO: is this a valid conversion?
-impl From<UnattributableError> for EvidenceError {
-    fn from(source: UnattributableError) -> Self {
-        EvidenceError::new(format!("{source}"))
-    }
-}
-
-// TODO: is this a valid conversion?
-impl From<RuntimeError> for EvidenceError {
-    fn from(source: RuntimeError) -> Self {
-        EvidenceError::new(format!("{source}"))
-    }
-}
-
-impl From<VerificationError> for EvidenceError {
-    fn from(source: VerificationError) -> Self {
-        EvidenceError::new(format!("Verification error: {source:?}"))
+        verification.call(guilty_party, session_id, &self.error.associated_data)
     }
 }
