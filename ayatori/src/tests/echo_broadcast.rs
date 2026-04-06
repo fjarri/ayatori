@@ -140,6 +140,7 @@ fn verify_echo_contents_error<SP: SessionParameters>(
 struct EchoBroadcast;
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
+    type OutputNode = ComputeMappingNode<SP>;
     type BuildData = (ProtocolMessage<SP>, PartyGroup<SP::Verifier>);
 
     fn signature() -> ProtocolSignature {
@@ -149,54 +150,56 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
     fn build(
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+        inputs: ArgNodes,
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let (message, all_parties) = build_data;
         let my_value = inputs.get("value")?;
 
-        let value_broadcasted = broadcast(message, my_value, all_parties)?;
-        let (values_verified, values) = receive_split(message)?;
+        let value_broadcasted = broadcast(message, my_value, all_parties);
+        let (values_verified, values) = receive_split(message);
 
         let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echo");
-        let all_values_verified = collect(&values_verified, all_parties)?;
-        let all_values_deserialized = collect(&values, all_parties)?;
+        let all_values_verified = collect(&values_verified, all_parties);
+        let all_values_deserialized = collect(&values, all_parties);
 
         let my_echo_pack_sendable = compute_scalar(
             "my_echo_pack_signed",
             prepare_echo_pack,
-            &[("values_verified_map", &all_values_verified)],
-        )?
+            &[("values_verified_map", (&all_values_verified).into())],
+        )
         // We don't want to send out values that proved to be incorrect during deserialization checks.
-        .with_dependencies(&[&all_values_deserialized])?;
+        .with_dependency(&all_values_deserialized);
 
-        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties)?;
-        let echo_pack = receive(&message_echo)?;
+        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties);
+        let echo_pack = receive(&message_echo);
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
         let echo_packs_correct = compute_mapping_sender_fallible(
             "echo_packs_correct",
             verify_echo_pack_correct,
             &[
-                ("all_ids", &all_ids),
-                ("received", &all_values_verified),
-                ("echoed", &echo_pack),
+                ("all_ids", (&all_ids).into()),
+                ("received", (&all_values_verified).into()),
+                ("echoed", (&echo_pack).into()),
             ],
-        )?;
+        );
         let echo_contents_correct = compute_mapping_third_party_fallible(
             "echo_contents_correct",
             verify_echo_contents,
-            &[("received", &all_values_verified), ("echoed", &echo_pack)],
+            &[
+                ("received", (&all_values_verified).into()),
+                ("echoed", (&echo_pack).into()),
+            ],
             verify_echo_contents_error,
-        )?;
+        );
 
-        let all_echo_packs_correct = collect(&echo_packs_correct, all_parties)?;
-        let all_echo_contents_correct = collect(&echo_contents_correct, all_parties)?;
-        let output = alias("output", &values).with_dependencies(&[
-            &value_broadcasted,
-            &all_echo_packs_correct,
-            &all_echo_contents_correct,
-            &echo_pack_broadcasted,
-        ])?;
+        let all_echo_packs_correct = collect(&echo_packs_correct, all_parties);
+        let all_echo_contents_correct = collect(&echo_contents_correct, all_parties);
+        let output = mapping_alias("output", &values)
+            .with_dependency(&value_broadcasted)
+            .with_dependency(&all_echo_packs_correct)
+            .with_dependency(&all_echo_contents_correct)
+            .with_dependency(&echo_pack_broadcasted);
 
         Ok(output)
     }
@@ -244,6 +247,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
+    type OutputNode = ComputeScalarNode<SP>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -253,13 +257,13 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     fn build(
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+        _inputs: ArgNodes,
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
 
         let all_parties = build_data;
 
-        let my_x = compute_scalar("my_x", make_scalar_value, &[])?;
+        let my_x = compute_scalar("my_x", make_scalar_value, &[]);
 
         let x = call_protocol::<SP, EchoBroadcast>(
             "echo_x",
@@ -268,9 +272,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             ProtocolArgs::new().input("value", &my_x),
         )?;
 
-        let all_x = collect(&x, all_parties)?;
+        let all_x = collect(&x, all_parties);
 
-        compute_scalar("output", gen_output, &[("x", &all_x)])
+        Ok(compute_scalar("output", gen_output, &[("x", (&all_x).into())]))
     }
 }
 

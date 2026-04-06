@@ -10,7 +10,7 @@ use crate::{
         SenderErrorWithReveal, SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError,
         VerifiedValue,
     },
-    graph_representation::{ArgNodes, NodeKind, PartyBuildData},
+    graph_representation::{AnyNode, ArgNodes, PartyBuildData, SpecificNode},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -317,18 +317,19 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         let arg_nodes = ArgNodes::new(&signature);
         let party_build_data = PartyBuildData::new(&self.reported_by);
         let output = P::build(&party_build_data, &build_data, arg_nodes)?;
-        let Some(node) = output.find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref())) else {
+        let any_node = Into::<AnyNode<SP>>::into(output);
+        let Some(node) = any_node.find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref())) else {
             return Ok(EvidenceVerdict::invalid(format!(
                 "Could not find subnode {}",
                 self.failed_at
             )));
         };
 
-        let NodeKind::ComputeMapping { function, .. } = node.kind() else {
+        let AnyNode::ComputeMapping(node) = node else {
             return Ok(EvidenceVerdict::invalid("Invalid node type"));
         };
 
-        let MappingFunction::ThirdPartyAttributable { verification, .. } = function else {
+        let MappingFunction::ThirdPartyAttributable { verification, .. } = &node.as_ref().function else {
             return Ok(EvidenceVerdict::invalid("Invalid function type"));
         };
 

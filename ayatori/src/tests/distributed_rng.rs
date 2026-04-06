@@ -78,6 +78,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
     type BuildData = PartyGroup<SP::Verifier>;
+    type OutputNode = ComputeScalarNode<SP>;
 
     fn signature() -> ProtocolSignature {
         ProtocolSignature::new()
@@ -86,29 +87,33 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
     fn build(
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+        _inputs: ArgNodes,
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let message_b = ProtocolMessage::new::<u64>("b");
         let message_r = ProtocolMessage::new::<u64>("r");
         let message_c = ProtocolMessage::new::<u64>("c");
 
         let all_parties = build_data;
-        let my_b = compute_scalar_with_rng("my_b", sample_value, &[])?;
-        let my_r = compute_scalar_with_rng("my_r", sample_nonce, &[])?;
-        let my_c = compute_scalar("my_c", commit_to_value, &[("b", &my_b), ("r", &my_r)])?;
-        let c_broadcasted = broadcast(&message_c, &my_c, all_parties)?;
-        let c = receive(&message_c)?;
-        let all_c = collect(&c, all_parties)?.with_dependencies(&[&c_broadcasted])?;
-        let b_broadcasted = broadcast(&message_b, &my_b, all_parties)?.with_dependencies(&[&all_c])?;
-        let r_broadcasted = broadcast(&message_r, &my_r, all_parties)?.with_dependencies(&[&all_c])?;
-        let b = receive(&message_b)?;
-        let r = receive(&message_r)?;
-        let hash_correct =
-            compute_mapping_sender_fallible("hash_correct", verify_commitment, &[("c", &c), ("b", &b), ("r", &r)])?;
-        let all_hash_correct =
-            collect(&hash_correct, all_parties)?.with_dependencies(&[&b_broadcasted, &r_broadcasted])?;
-        let all_b = collect(&b, all_parties)?.with_dependencies(&[&b_broadcasted])?;
-        compute_scalar("output", gen_output, &[("b", &all_b)])?.with_dependencies(&[&all_hash_correct])
+        let my_b = compute_scalar_with_rng("my_b", sample_value, &[]);
+        let my_r = compute_scalar_with_rng("my_r", sample_nonce, &[]);
+        let my_c = compute_scalar("my_c", commit_to_value, &[("b", (&my_b).into()), ("r", (&my_r).into())]);
+        let c_broadcasted = broadcast(&message_c, &my_c, all_parties);
+        let c = receive(&message_c);
+        let all_c = collect(&c, all_parties).with_dependency(&c_broadcasted);
+        let b_broadcasted = broadcast(&message_b, &my_b, all_parties).with_dependency(&all_c);
+        let r_broadcasted = broadcast(&message_r, &my_r, all_parties).with_dependency(&all_c);
+        let b = receive(&message_b);
+        let r = receive(&message_r);
+        let hash_correct = compute_mapping_sender_fallible(
+            "hash_correct",
+            verify_commitment,
+            &[("c", (&c).into()), ("b", (&b).into()), ("r", (&r).into())],
+        );
+        let all_hash_correct = collect(&hash_correct, all_parties)
+            .with_dependency(&b_broadcasted)
+            .with_dependency(&r_broadcasted);
+        let all_b = collect(&b, all_parties).with_dependency(&b_broadcasted);
+        Ok(compute_scalar("output", gen_output, &[("b", (&all_b).into())]).with_dependency(&all_hash_correct))
     }
 }
 

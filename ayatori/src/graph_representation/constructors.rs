@@ -2,19 +2,27 @@ use alloc::{
     collections::BTreeMap,
     format,
     string::{String, ToString},
+    vec::Vec,
 };
 
 use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
 
 use super::{
+    any_node::AnyNode,
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
-    node::{Node, NodeKind, args_to_owned},
+    typed_nodes::{
+        Collect, CollectNode, ComputeMapping, ComputeMappingNode, ComputeMappingSenderAttributableWithReveal,
+        ComputeMappingSenderAttributableWithRevealNode, ComputeScalar, ComputeScalarNode, DeserializeAndCheck,
+        DeserializeAndCheckNode, DirectMessage, DirectMessageNode, GeneralizedNode, Receive, ReceiveNode,
+        ScalarArgument, ScalarArgumentNode, SerializeAndSign, SerializeAndSignNode, SpecificNode,
+    },
+    unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, SerializeAndSignArg},
 };
 use crate::{
     entities::{
-        AnyTagRef, Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
-        Erasable, EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MappingFunction, PartyGroup,
+        Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
+        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MappingFunction, PartyGroup,
         RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError,
         SenderAttributableErrorWithReveal, SenderAttributableMappingFunction,
         SenderAttributableWithRevealMappingFunction, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId,
@@ -50,47 +58,57 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
     }
 }
 
-pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<SP> {
-    Node::new(NodeKind::ScalarArgument {
+pub(crate) fn scalar_argument(name: &str) -> ScalarArgumentNode {
+    ScalarArgumentNode::new(ScalarArgument {
         store_in: ScalarArgumentTag::new(name),
-        name: name.to_string(),
+        name: name.into(),
     })
 }
 
-pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<SP> {
+pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> ComputeScalarNode<SP> {
     let erased_value = Value::new(value);
-    Node::new(NodeKind::ComputeScalar {
+    ComputeScalarNode::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(name, move |_args| {
             Ok(erased_value.clone())
         })),
         args: BTreeMap::new(),
+        dependencies: Vec::new(),
     })
 }
 
 #[must_use]
-pub fn alias<SP: SessionParameters>(name: &str, node: &Node<SP>) -> Node<SP> {
+pub fn scalar_alias<SP: SessionParameters>(name: &str, node: impl Into<ComputeScalarArg<SP>>) -> ComputeScalarNode<SP> {
     let arg_name = "value";
-    match node.store_in() {
-        AnyTagRef::Mapping(_) => Node::new(NodeKind::ComputeMapping {
-            store_in: ComputedMappingTag::new(name),
-            function: MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
-                "alias",
-                move |_id, args| Ok(args.get_value(arg_name)?.clone()),
-            )),
-            args: [(arg_name.into(), node.get_strong_ref())].into(),
-        }),
-        AnyTagRef::Scalar(_) => Node::new(NodeKind::ComputeScalar {
-            store_in: ComputedScalarTag::new(name),
-            function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
-                "alias",
-                move |args| Ok(args.get_value(arg_name)?.clone()),
-            )),
-            args: [(arg_name.into(), node.get_strong_ref())].into(),
-        }),
-    }
+    ComputeScalarNode::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(name),
+        function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name("alias", move |args| {
+            Ok(args.get_value(arg_name)?.clone())
+        })),
+        args: [(arg_name.into(), node.into())].into(),
+        dependencies: Vec::new(),
+    })
 }
 
+#[must_use]
+pub fn mapping_alias<SP: SessionParameters>(
+    name: &str,
+    node: impl Into<ComputeMappingArg<SP>>,
+) -> ComputeMappingNode<SP> {
+    let arg_name = "value";
+    ComputeMappingNode::new(ComputeMapping {
+        store_in: ComputedMappingTag::new(name),
+        function: MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
+            "alias",
+            move |_id, args| Ok(args.get_value(arg_name)?.clone()),
+        )),
+        args: [(arg_name.into(), node.into())].into(),
+        dependencies: Vec::new(),
+    })
+}
+
+// TODO: do we still need these?
+/*
 macro_rules! define_scalar_constructor {
     ($func_name:ident<$SP:ident>, $outer_type:ident::$outer_ctr:ident($inner_type:ident),
         ($($arg_type:ty),+) -> $error_type:ty ) =>
@@ -136,68 +154,137 @@ macro_rules! define_mapping_constructor {
         }
     }
 }
+*/
 
-define_scalar_constructor!(
-    compute_scalar<SP>,
-    ScalarFunction::Unattributable(UnattributableScalarFunction),
-    (&Args<SP>) -> UnattributableError
-);
+// TODO: we do double Arc clone here: first when creating the arg, then when creating the node. Can this be avoided?
+pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&Args<SP>) -> Result<Ret, UnattributableError>,
+    args: &[(&str, ComputeScalarArg<SP>)],
+) -> ComputeScalarNode<SP> {
+    ComputeScalarNode::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(name),
+        function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(function)),
+        // TODO: ensure there are no duplicates
+        args: args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        dependencies: Vec::new(),
+    })
+}
 
-define_scalar_constructor!(
-    compute_scalar_with_rng<SP>,
-    ScalarFunction::UnattributableWithRng(UnattributableScalarFunctionWithRng),
-    (&mut dyn CryptoRngCore, &Args<SP>) -> UnattributableError
-);
+pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
+    args: &[(&str, ComputeScalarArg<SP>)],
+) -> ComputeScalarNode<SP> {
+    ComputeScalarNode::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(name),
+        function: ScalarFunction::UnattributableWithRng(UnattributableScalarFunctionWithRng::new_erased(function)),
+        // TODO: ensure there are no duplicates
+        args: args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        dependencies: Vec::new(),
+    })
+}
 
-define_mapping_constructor!(
-    compute_mapping<SP>,
-    MappingFunction::Unattributable(UnattributableMappingFunction),
-    (&SP::Verifier, &Args<SP>) -> UnattributableError
-);
+pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
+    args: &[(&str, ComputeMappingArg<SP>)],
+) -> ComputeMappingNode<SP> {
+    ComputeMappingNode::new(ComputeMapping {
+        store_in: ComputedMappingTag::new(name),
+        function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(function)),
+        // TODO: ensure there are no duplicates
+        args: args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        dependencies: Vec::new(),
+    })
+}
 
-define_mapping_constructor!(
-    compute_mapping_sender_fallible<SP>,
-    MappingFunction::SenderAttributable(SenderAttributableMappingFunction),
-    (&SP::Verifier, &Args<SP>) -> SenderAttributableError
-);
+pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
+    args: &[(&str, ComputeMappingArg<SP>)],
+) -> ComputeMappingNode<SP> {
+    ComputeMappingNode::new(ComputeMapping {
+        store_in: ComputedMappingTag::new(name),
+        function: MappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_erased(function)),
+        // TODO: ensure there are no duplicates
+        args: args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        dependencies: Vec::new(),
+    })
+}
 
-define_mapping_constructor!(
-    compute_mapping_with_rng<SP>,
-    MappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng),
-    (&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> UnattributableError
-);
+pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
+    args: &[(&str, ComputeMappingArg<SP>)],
+) -> ComputeMappingNode<SP> {
+    ComputeMappingNode::new(ComputeMapping {
+        store_in: ComputedMappingTag::new(name),
+        function: MappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng::new_erased(function)),
+        // TODO: ensure there are no duplicates
+        args: args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        dependencies: Vec::new(),
+    })
+}
 
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyAttributableError<SP>>,
-    args: &[(&str, &Node<SP>)],
+    args: &[(&str, ComputeMappingArg<SP>)],
     verification: impl 'static
     + Fn(&SP::Verifier, &SessionId<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
-) -> Result<Node<SP>, RuntimeError> {
-    Ok(Node::new(NodeKind::ComputeMapping {
+) -> ComputeMappingNode<SP> {
+    ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         function: MappingFunction::ThirdPartyAttributable {
             function: ThirdPartyAttributableMappingFunction::new_erased(function),
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
-        args: args_to_owned(args.iter().copied())?,
-    }))
+        // TODO: ensure there are no duplicates
+        args: args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        dependencies: Vec::new(),
+    })
 }
 
 pub fn compute_mapping_sender_fallible_with_info<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
-    args: &[(&str, &Node<SP>)],
+    args: &[(&str, ComputeMappingArg<SP>)],
     verification: impl 'static + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
-    verification_args: &[(&str, &Node<SP>)],
-) -> Result<Node<SP>, RuntimeError> {
-    Ok(Node::new(NodeKind::ComputeMappingSenderAttributableWithReveal {
+    verification_args: &[(&str, ComputeMappingArg<SP>)],
+) -> ComputeMappingSenderAttributableWithRevealNode<SP> {
+    ComputeMappingSenderAttributableWithRevealNode::new(ComputeMappingSenderAttributableWithReveal {
         store_in: ComputedMappingTag::new(name),
         function: SenderAttributableWithRevealMappingFunction::new_erased(function),
         verification: EvidenceVerificationFunction::new(verification),
-        args: args_to_owned(args.iter().copied())?,
-        verification_args: args_to_owned(verification_args.iter().copied())?,
-    }))
+        args: args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        verification_args: verification_args
+            .iter()
+            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+            .collect(),
+        dependencies: Vec::new(),
+    })
 }
 
 fn default_serialize_and_sign<SP: SessionParameters>(
@@ -219,56 +306,56 @@ fn default_serialize_and_sign<SP: SessionParameters>(
 
 pub fn broadcast<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
-    scalar: &Node<SP>,
+    scalar: impl Into<BroadcastArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
-) -> Result<Node<SP>, RuntimeError> {
-    if scalar.store_in().scalar().is_none() {
-        return Err(RuntimeError::new(
-            "`scalar` argument of `broadcast()` must be a scalar node",
-        ));
-    }
-
+) -> CollectNode<SP> {
+    let scalar: BroadcastArg<SP> = scalar.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
 
-    let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
+    let serialize_and_sign = SerializeAndSignNode::new(SerializeAndSign {
         store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
-        data: scalar.get_strong_ref(),
+        data: scalar.into(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
+        dependencies: Vec::new(),
     });
 
-    let send_node = Node::new(NodeKind::DirectMessage {
+    let send_node = DirectMessageNode::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
+        dependencies: Vec::new(),
     });
 
-    collect(&send_node, group)
+    collect(CollectArg::DirectMessage(send_node), group)
 }
 
 pub fn send<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
-    mapping: &Node<SP>,
+    data: impl Into<SerializeAndSignArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
-) -> Result<Node<SP>, RuntimeError> {
+) -> CollectNode<SP> {
+    let data: SerializeAndSignArg<SP> = data.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
 
-    let serialize_and_sign = Node::new(NodeKind::SerializeAndSign {
+    let serialize_and_sign = SerializeAndSignNode::new(SerializeAndSign {
         store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
-        data: mapping.get_strong_ref(),
+        data: data.get_strong_ref(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
+        dependencies: Vec::new(),
     });
 
-    let send_node = Node::new(NodeKind::DirectMessage {
+    let send_node = DirectMessageNode::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
+        dependencies: Vec::new(),
     });
 
-    collect(&send_node, group)
+    collect(CollectArg::DirectMessage(send_node), group)
 }
 
 fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderAttributableError> {
@@ -293,44 +380,46 @@ fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Res
 
 pub fn receive_split<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
-) -> Result<(Node<SP>, Node<SP>), RuntimeError> {
+) -> (ReceiveNode<SP>, DeserializeAndCheckNode<SP>) {
     let receive_store_in = RemoteSignedTag::new(message.name());
     let deserialize_store_in = receive_store_in.to_received();
     let message_name = FullName::new(message.name());
 
-    let receive = Node::new(NodeKind::Receive {
+    let receive = ReceiveNode::new(Receive {
         store_in: receive_store_in,
         message_name: message_name.clone(),
+        dependencies: Vec::new(),
     });
 
-    let deserialize = Node::new(NodeKind::Deserialize {
+    let deserialize = DeserializeAndCheckNode::new(DeserializeAndCheck {
         store_in: deserialize_store_in,
         function: DeserializeFunction::new(default_deserialize),
         data: receive.get_strong_ref(),
         message_name,
         serde_adapter: message.serde_adapter().clone(),
+        dependencies: Vec::new(),
     });
 
-    Ok((receive, deserialize))
+    (receive, deserialize)
 }
 
-pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Result<Node<SP>, RuntimeError> {
-    receive_split(message).map(|(_receive, deserialize)| deserialize)
+pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> DeserializeAndCheckNode<SP> {
+    let (_receive, deserialize) = receive_split(message);
+    deserialize
 }
 
 pub fn collect<SP: SessionParameters>(
-    values: &Node<SP>,
+    values: impl Into<CollectArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
-) -> Result<Node<SP>, RuntimeError> {
-    let store_in = values
-        .store_in()
-        .mapping()
-        .ok_or_else(|| RuntimeError::new("`values` argument of `collect()` must be a mapping node"))?;
-    Ok(Node::new(NodeKind::Collect {
-        store_in: store_in.to_collected(),
-        values: values.get_strong_ref(),
+) -> CollectNode<SP> {
+    let values = values.into();
+    let store_in = values.store_in();
+    CollectNode::new(Collect {
+        store_in: store_in.as_ref().to_collected(),
+        values,
         group: group.clone(),
-    }))
+        dependencies: Vec::new(),
+    })
 }
 
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
@@ -338,12 +427,15 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     party_build_data: &PartyBuildData<SP>,
     build_data: &P::BuildData,
     args: ProtocolArgs<SP>,
-) -> Result<Node<SP>, RuntimeError> {
+) -> Result<P::OutputNode, RuntimeError> {
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
     let output = P::build(party_build_data, build_data, arg_nodes)?;
-    let prefixed = output.tree_with_added_prefix(prefix);
+    let any_node = Into::<AnyNode<SP>>::into(output).get_strong_ref();
+    let prefixed = any_node.tree_with_added_prefix(prefix);
     let bound_args = signature.bind(args)?;
     let with_args = prefixed.with_substituted_arguments(&bound_args)?;
-    Ok(with_args)
+    let downcasted = P::OutputNode::try_from(with_args)
+        .map_err(|_err| RuntimeError::new("Adding a prefix changed the root node type"))?;
+    Ok(downcasted)
 }

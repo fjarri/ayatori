@@ -36,6 +36,7 @@ impl EvidenceVerdict {
     }
 }
 
+// TODO: do they need to be <SP>? Would <Id> be enough?
 macro_rules! define_function_type_common {
     ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> Result<$return_type:ty, $error_type:ty> ) => {
         #[derive_where::derive_where(Clone)]

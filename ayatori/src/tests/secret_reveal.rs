@@ -165,6 +165,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
+    type OutputNode = ComputeScalarNode<SP>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -174,65 +175,76 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     fn build(
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+        _inputs: ArgNodes,
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<u64>("X");
         let message_y = ProtocolMessage::new::<u64>("Y");
         let message_c = ProtocolMessage::new::<u64>("C");
         let all_parties = build_data;
 
         let all_parties_const = constant("all_parties", all_parties.clone());
-        let my_x_map = compute_scalar_with_rng("x_map", gen_secrets, &[("all_parties", &all_parties_const)])?; // {x_i,[]}
-        let my_x = compute_mapping("x", splay_secrets, &[("x_map", &my_x_map)])?; // x_i,[]
-        let my_y = compute_mapping_with_rng("y", gen_dh_secret, &[])?; // y_i,[]
+        let my_x_map = compute_scalar_with_rng("x_map", gen_secrets, &[("all_parties", (&all_parties_const).into())]); // {x_i,[]}
+        let my_x = compute_mapping("x", splay_secrets, &[("x_map", (&my_x_map).into())]); // x_i,[]
+        let my_y = compute_mapping_with_rng("y", gen_dh_secret, &[]); // y_i,[]
 
-        let my_x_cap = compute_mapping("X", gen_public, &[("x", &my_x)])?; // X_i,[]
-        let my_y_cap = compute_mapping("Y", gen_dh_public, &[("y", &my_y)])?; // Y_i,[]
+        let my_x_cap = compute_mapping("X", gen_public, &[("x", (&my_x).into())]); // X_i,[]
+        let my_y_cap = compute_mapping("Y", gen_dh_public, &[("y", (&my_y).into())]); // Y_i,[]
 
-        let x_cap_sent = send(&message_x, &my_x_cap, all_parties)?;
-        let y_cap_sent = send(&message_y, &my_y_cap, all_parties)?;
+        let x_cap_sent = send(&message_x, &my_x_cap, all_parties);
+        let y_cap_sent = send(&message_y, &my_y_cap, all_parties);
 
-        let x_cap = receive(&message_x)?; // X_j,[]
-        let y_cap = receive(&message_y)?; // Y_j,[]
+        let x_cap = receive(&message_x); // X_j,[]
+        let y_cap = receive(&message_y); // Y_j,[]
 
         let message_y_echo = ProtocolMessage::new::<u64>("Y_echo");
-        let y_echo_sent = send(&message_y_echo, &y_cap, all_parties)?;
-        let y_echo = receive(&message_y_echo)?; // Y_i,[]
+        let y_echo_sent = send(&message_y_echo, &y_cap, all_parties);
+        let y_echo = receive(&message_y_echo); // Y_i,[]
 
         // for j: C_j,i = x_i,j + Y_j,i^(y_i,j)
-        let my_c_cap = compute_mapping("C", encrypt_secret, &[("x", &my_x), ("y", &my_y), ("Y", &y_cap)])?;
-        let c_cap_sent = send(&message_c, &my_c_cap, all_parties)?;
+        let my_c_cap = compute_mapping(
+            "C",
+            encrypt_secret,
+            &[("x", (&my_x).into()), ("y", (&my_y).into()), ("Y", (&y_cap).into())],
+        );
+        let c_cap_sent = send(&message_c, &my_c_cap, all_parties);
 
-        let c_cap = receive(&message_c)?; // C_i,[]
-        let x_decrypted = compute_mapping("x_dec", decrypt_secret, &[("C", &c_cap), ("y", &my_y), ("Y", &y_cap)])?;
+        let c_cap = receive(&message_c); // C_i,[]
+        let x_decrypted = compute_mapping(
+            "x_dec",
+            decrypt_secret,
+            &[("C", (&c_cap).into()), ("y", (&my_y).into()), ("Y", (&y_cap).into())],
+        );
         let x_verified = compute_mapping_sender_fallible_with_info(
             "x_dec_correct",
             verify_secret,
             &[
-                ("y", &my_y),            // y_i,j
-                ("x_dec", &x_decrypted), // x_j,i
-                ("X", &x_cap),           // X_j,[] (we only need X_j,i)
+                ("y", (&my_y).into()),            // y_i,j
+                ("x_dec", (&x_decrypted).into()), // x_j,i
+                ("X", (&x_cap).into()),           // X_j,[] (we only need X_j,i)
             ],
             verify_evidence,
             &[
-                ("X", &x_cap),        // S_j(X_j,i)
-                ("C", &c_cap),        // S_j(C_i,j)
-                ("Y_remote", &y_cap), // S_j(Y_j,[])
+                ("X", (&x_cap).into()),        // S_j(X_j,i)
+                ("C", (&c_cap).into()),        // S_j(C_i,j)
+                ("Y_remote", (&y_cap).into()), // S_j(Y_j,[])
                 // In a real protocol this need to be verified separately on reception
                 // (that is, compared to our stored `Y`),
                 // and the result made a dependency of the node that decrypts `x`.
                 // But for this test it does not matter.
-                ("Y", &y_echo), // S_j(Y_i,j) (echoed back to us)
+                ("Y", (&y_echo).into()), // S_j(Y_i,j) (echoed back to us)
             ],
-        )?;
+        );
 
-        compute_scalar("output", gen_output, &[("x", &collect(&x_decrypted, all_parties)?)])?.with_dependencies(&[
-            &collect(&x_verified, all_parties)?,
-            &x_cap_sent,
-            &y_cap_sent,
-            &y_echo_sent,
-            &c_cap_sent,
-        ])
+        Ok(compute_scalar(
+            "output",
+            gen_output,
+            &[("x", (&collect(&x_decrypted, all_parties)).into())],
+        )
+        .with_dependency(&collect(&x_verified, all_parties))
+        .with_dependency(&x_cap_sent)
+        .with_dependency(&y_cap_sent)
+        .with_dependency(&y_echo_sent)
+        .with_dependency(&c_cap_sent))
     }
 }
 

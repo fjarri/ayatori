@@ -1,4 +1,4 @@
-use alloc::{format, sync::Arc, vec::Vec};
+use alloc::{format, sync::Arc};
 use core::fmt::{self, Debug};
 
 use signature::rand_core::CryptoRngCore;
@@ -10,7 +10,9 @@ use crate::{
         ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
-    graph_representation::{Node, NodeKind},
+    graph_representation::{
+        AnyNode, ComputeMappingNode, ComputeScalarNode, GeneralizedNode, OutputNode, SerializeAndSignNode, SpecificNode,
+    },
     traits::SessionParameters,
 };
 
@@ -139,22 +141,18 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub(crate) fn apply(&self, node: &Node<SP>) -> Result<Node<SP>, RuntimeError> {
-        let subnode = node
+    pub(crate) fn apply(&self, node: &OutputNode<SP>) -> Result<OutputNode<SP>, RuntimeError> {
+        let subnode = AnyNode::from(node.get_strong_ref())
             .find_subnode(self.tag.as_ref())
             .ok_or_else(|| RuntimeError::new("Node not found"))?;
-        let new_subnode = match (subnode.kind(), &self.kind) {
+        let new_subnode = match (&subnode, &self.kind) {
             (
-                NodeKind::ComputeScalar {
-                    store_in,
-                    function,
-                    args,
-                },
+                AnyNode::ComputeScalar(node),
                 ReplacementEnum::ComputeScalar {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let ScalarFunction::Unattributable(orig_function) = function {
+                let new_function = if let ScalarFunction::Unattributable(orig_function) = &node.as_ref().function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
                     ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
@@ -168,27 +166,17 @@ impl<SP: SessionParameters> Replacement<SP> {
                     return Err(RuntimeError::new("Invalid function type"));
                 };
 
-                Node::new(NodeKind::ComputeScalar {
-                    store_in: store_in.clone(),
-                    function: new_function,
-                    args: args
-                        .iter()
-                        .map(|(name, node)| (name.clone(), node.get_strong_ref()))
-                        .collect(),
-                })
-                .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
+                let mut node = node.shallow_clone();
+                node.function = new_function;
+                AnyNode::ComputeScalar(ComputeScalarNode::new(node))
             }
             (
-                NodeKind::ComputeMapping {
-                    store_in,
-                    function,
-                    args,
-                },
+                AnyNode::ComputeMapping(node),
                 ReplacementEnum::ComputeMapping {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let MappingFunction::Unattributable(orig_function) = function {
+                let new_function = if let MappingFunction::Unattributable(orig_function) = &node.as_ref().function {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
                     MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
@@ -202,22 +190,12 @@ impl<SP: SessionParameters> Replacement<SP> {
                     return Err(RuntimeError::new("Invalid function type"));
                 };
 
-                Node::new(NodeKind::ComputeMapping {
-                    store_in: store_in.clone(),
-                    function: new_function,
-                    args: args
-                        .iter()
-                        .map(|(name, node)| (name.clone(), node.get_strong_ref()))
-                        .collect(),
-                })
-                .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
+                let mut node = node.shallow_clone();
+                node.function = new_function;
+                AnyNode::from(ComputeMappingNode::new(node))
             }
             (
-                NodeKind::ComputeMapping {
-                    store_in,
-                    function,
-                    args,
-                },
+                AnyNode::ComputeMapping(node),
                 ReplacementEnum::ComputeMappingThirdPartyAttributable {
                     function: replacement_function,
                 },
@@ -225,7 +203,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 let new_function = if let MappingFunction::ThirdPartyAttributable {
                     function: orig_function,
                     verification,
-                } = function
+                } = &node.as_ref().function
                 {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
@@ -243,46 +221,32 @@ impl<SP: SessionParameters> Replacement<SP> {
                     return Err(RuntimeError::new("Invalid function type"));
                 };
 
-                Node::new(NodeKind::ComputeMapping {
-                    store_in: store_in.clone(),
-                    function: new_function,
-                    args: args
-                        .iter()
-                        .map(|(name, node)| (name.clone(), node.get_strong_ref()))
-                        .collect(),
-                })
-                .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
+                let mut node = node.shallow_clone();
+                node.function = new_function;
+                AnyNode::ComputeMapping(ComputeMappingNode::new(node))
             }
             (
-                NodeKind::SerializeAndSign {
-                    store_in,
-                    function,
-                    data,
-                    serde_adapter,
-                    message_name,
-                },
+                AnyNode::SerializeAndSign(node),
                 ReplacementEnum::Message {
                     function: replacement_function,
                 },
             ) => {
-                let function = function.clone();
+                let function = node.as_ref().function.clone();
                 let replacement_function = replacement_function.clone();
                 let new_function = SerializeAndSignFunction::new(move |rng, destination, args| {
                     let orig_value = function.call(rng, destination, args)?;
                     replacement_function(rng, orig_value, destination, args)
                 });
 
-                Node::new(NodeKind::SerializeAndSign {
-                    store_in: store_in.clone(),
-                    function: new_function,
-                    data: data.get_strong_ref(),
-                    serde_adapter: serde_adapter.clone(),
-                    message_name: message_name.clone(),
-                })
-                .with_dependencies(&subnode.dependencies().iter().collect::<Vec<_>>())?
+                let mut node = node.shallow_clone();
+                node.function = new_function;
+                AnyNode::SerializeAndSign(SerializeAndSignNode::new(node))
             }
             _ => return Err(RuntimeError::new("Not supported")),
         };
-        Ok(node.with_replaced_subnode(&subnode, &new_subnode))
+        Ok(AnyNode::from(node.get_strong_ref())
+            .with_replaced_subnode(&subnode, &new_subnode)
+            .try_into()
+            .expect("the root node type did not change"))
     }
 }

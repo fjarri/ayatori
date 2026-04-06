@@ -27,7 +27,7 @@ use crate::{
         SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset},
-    graph_representation::{ArgNodes, Node, PartyBuildData, PrivateInputs, PublicInputs},
+    graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -58,7 +58,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     phantom: PhantomData<P>,
 }
 
-fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<Node<SP>, RuntimeError>
+fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<OutputNode<SP>, RuntimeError>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
@@ -67,7 +67,7 @@ where
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
     let party_build_data = PartyBuildData::new(verifier);
-    P::build(&party_build_data, &build_data, arg_nodes)
+    P::build(&party_build_data, &build_data, arg_nodes).map(|node| node.into())
 }
 
 impl<SP, P> Session<SP, P>
@@ -79,7 +79,7 @@ where
         id: SessionId<SP>,
         signer: Option<SP::Signer>,
         verifier: &SP::Verifier,
-        output_node: &Node<SP>,
+        output_node: &OutputNode<SP>,
         private_inputs: PrivateInputs,
         shared_data: &P::SharedData,
     ) -> Result<Self, RuntimeError> {
@@ -133,9 +133,11 @@ where
 
         let all_names = public_names.union(&private_names).copied().collect::<BTreeSet<_>>();
         if all_names != arguments.keys().collect() {
-            return Err(RuntimeError::new(
-                "Public and private argument names differ from the protocol signature",
-            ));
+            return Err(RuntimeError::new(format!(
+                "Public and private argument names ({}) differ from the protocol signature ({})",
+                all_names.iter().join(", "),
+                arguments.keys().join(", "),
+            )));
         }
 
         for (name, value) in public_values {
@@ -175,7 +177,7 @@ where
         shared_data: &P::SharedData,
         associated_data: Option<&AssociatedData<SP>>,
     ) -> Result<Self, RuntimeError> {
-        let output_node = make_tree::<SP, P>(reported_by, shared_data)?.get_reproduction_subtree(
+        let output_node = AnyNode::from(make_tree::<SP, P>(reported_by, shared_data)?).get_reproduction_subtree(
             subtree_root,
             guilty_party,
             associated_data,
@@ -290,7 +292,7 @@ where
                     to_send,
                     destination,
                 } => {
-                    let signed_value = self.storage.get_elem(&to_send, &destination)?;
+                    let signed_value = self.storage.get_elem(&MappingTag::LocalSigned(to_send), &destination)?;
                     return Ok(Some(Task::send(store_in, destination, signed_value)));
                 }
                 Action::ComputeScalar {
@@ -368,7 +370,7 @@ where
                     serde_adapter,
                     on_error,
                 } => {
-                    let value = self.storage.get_elem(&data, &index)?;
+                    let value = self.storage.get_elem(&MappingTag::RemoteSigned(data), &index)?;
                     let expected_senders = self
                         .data
                         .expected_senders(&message_name)
