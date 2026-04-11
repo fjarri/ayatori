@@ -416,6 +416,7 @@ pub fn receive_split<SP: SessionParameters>(
     (receive, deserialize)
 }
 
+#[must_use]
 pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> DeserializeAndCheckNode<SP> {
     let (_receive, deserialize) = receive_split(message);
     deserialize

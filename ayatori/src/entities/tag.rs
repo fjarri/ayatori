@@ -315,7 +315,7 @@ pub(crate) enum AnyTagRef<'a> {
     Mapping(MappingTagRef<'a>),
 }
 
-impl<'a> AnyTagRef<'a> {
+impl AnyTagRef<'_> {
     pub fn to_owned(self) -> AnyTag {
         match self {
             Self::Scalar(tag) => AnyTag::Scalar(tag.to_owned()),

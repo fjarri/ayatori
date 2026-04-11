@@ -197,10 +197,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
                                 return Reproducibility::NotAvailable;
                             }
                         }
-                        ComputeMappingKind::WithReveal { .. } => {
-                            // `function` here does not depend on RNG, so is always reproducible.
-                        }
-                        ComputeMappingKind::ThirdPartyAttributable { .. } => {
+                        ComputeMappingKind::WithReveal { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
                             // `function` here does not depend on RNG, so is always reproducible.
                         }
                     }
@@ -587,7 +584,7 @@ impl<SP: SessionParameters> UnorderedIterator<SP> {
 
     fn new_with_nodes(roots: &[AnyNode<SP>], args_only: bool) -> Self {
         Self {
-            queue: roots.iter().map(|node| node.get_strong_ref()).collect(),
+            queue: roots.iter().map(GeneralizedNode::get_strong_ref).collect(),
             emitted: BTreeSet::new(),
             args_only,
         }
@@ -672,14 +669,14 @@ impl<SP: SessionParameters> Iterator for LeavesFirstIterator<SP> {
 impl<SP: SessionParameters> Display for AnyNode<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            Self::ComputeScalar(node) => write!(f, "{}", node),
-            Self::Collect(node) => write!(f, "{}", node),
-            Self::ComputeMapping(node) => write!(f, "{}", node),
-            Self::SerializeAndSign(node) => write!(f, "{}", node),
-            Self::DeserializeAndCheck(node) => write!(f, "{}", node),
-            Self::DirectMessage(node) => write!(f, "{}", node),
-            Self::Receive(node) => write!(f, "{}", node),
-            Self::ScalarArgument(node) => write!(f, "{}", node),
+            Self::ComputeScalar(node) => write!(f, "{node}"),
+            Self::Collect(node) => write!(f, "{node}"),
+            Self::ComputeMapping(node) => write!(f, "{node}"),
+            Self::SerializeAndSign(node) => write!(f, "{node}"),
+            Self::DeserializeAndCheck(node) => write!(f, "{node}"),
+            Self::DirectMessage(node) => write!(f, "{node}"),
+            Self::Receive(node) => write!(f, "{node}"),
+            Self::ScalarArgument(node) => write!(f, "{node}"),
         }
     }
 }

@@ -103,6 +103,7 @@ impl<SP: SessionParameters> ComputeScalarNode<SP> {
         Self::new(node)
     }
 
+    #[must_use]
     pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
         let dependency = dependency.into();
         let mut node = self.shallow_clone();
@@ -173,6 +174,7 @@ impl<SP: SessionParameters> CollectNode<SP> {
         Self::new(node)
     }
 
+    #[must_use]
     pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
         let dependency = dependency.into();
         let mut node = self.shallow_clone();
@@ -228,11 +230,10 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut kind = self.shallow_clone();
         match &mut kind {
-            Self::Simple { .. } => {}
+            Self::Simple { .. } | Self::ThirdPartyAttributable { .. } => {}
             Self::WithReveal { verification_args, .. } => {
                 *verification_args = args_with_replacements(verification_args, replacements)?;
             }
-            Self::ThirdPartyAttributable { .. } => {}
         }
         Ok(kind)
     }
@@ -283,6 +284,7 @@ impl<SP: SessionParameters> ComputeMappingNode<SP> {
         Self::new(node)
     }
 
+    #[must_use]
     pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
         let dependency = dependency.into();
         let mut node = self.shallow_clone();
@@ -357,6 +359,7 @@ impl<SP: SessionParameters> SerializeAndSignNode<SP> {
         Self::new(node)
     }
 
+    #[must_use]
     pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
         let dependency = dependency.into();
         let mut node = self.shallow_clone();
@@ -431,6 +434,7 @@ impl<SP: SessionParameters> DeserializeAndCheckNode<SP> {
         Self::new(node)
     }
 
+    #[must_use]
     pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
         let dependency = dependency.into();
         let mut node = self.shallow_clone();
@@ -498,6 +502,7 @@ impl<SP: SessionParameters> DirectMessageNode<SP> {
         Self::new(node)
     }
 
+    #[must_use]
     pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
         let dependency = dependency.into();
         let mut node = self.shallow_clone();
@@ -554,6 +559,7 @@ impl<SP: SessionParameters> ReceiveNode<SP> {
         Self::new(node)
     }
 
+    #[must_use]
     pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
         let dependency = dependency.into();
         let mut node = self.shallow_clone();
@@ -772,7 +778,7 @@ fn node_slice_to_owned<T>(nodes: &[T]) -> Vec<T>
 where
     T: GeneralizedNode,
 {
-    nodes.iter().map(|node| node.get_strong_ref()).collect()
+    nodes.iter().map(GeneralizedNode::get_strong_ref).collect()
 }
 
 fn node_with_replacements<SP, T>(node: &T, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<T, RuntimeError>

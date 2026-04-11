@@ -67,7 +67,7 @@ where
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
     let party_build_data = PartyBuildData::new(verifier);
-    P::build(&party_build_data, &build_data, arg_nodes).map(|node| node.into())
+    P::build(&party_build_data, &build_data, arg_nodes).map(Into::into)
 }
 
 impl<SP, P> Session<SP, P>

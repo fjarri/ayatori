@@ -159,7 +159,7 @@ fn propagate_groups<SP: SessionParameters>(
                 }
 
                 match &node.as_ref().kind {
-                    ComputeMappingKind::Simple { .. } => {}
+                    ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
                     ComputeMappingKind::WithReveal { verification_args, .. } => {
                         for arg in verification_args.values() {
                             if let AnyTagRef::Mapping(tag) = arg.store_in() {
@@ -170,7 +170,6 @@ fn propagate_groups<SP: SessionParameters>(
                             }
                         }
                     }
-                    ComputeMappingKind::ThirdPartyAttributable { .. } => {}
                 }
             }
             AnyNode::SerializeAndSign(node) => {
@@ -295,7 +294,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     }
 
                     match &node.as_ref().kind {
-                        ComputeMappingKind::Simple { .. } => {}
+                        ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
                         ComputeMappingKind::WithReveal { verification_args, .. } => {
                             for arg in verification_args.values() {
                                 match arg.store_in() {
@@ -304,7 +303,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                                 }
                             }
                         }
-                        ComputeMappingKind::ThirdPartyAttributable { .. } => {}
                     }
 
                     let function = match &node.as_ref().kind {
