@@ -380,7 +380,7 @@ pub fn collect<SP: SessionParameters>(
     let values = values.into();
     let store_in = values.store_in();
     CollectNode::new(Collect {
-        store_in: store_in.as_ref().to_collected(),
+        store_in: store_in.to_collected(),
         values,
         group: group.clone(),
         dependencies: Vec::new(),

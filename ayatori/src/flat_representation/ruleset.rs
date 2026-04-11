@@ -204,7 +204,7 @@ fn propagate_groups<SP: SessionParameters>(
                     .extend(ids);
             }
             AnyNode::Collect(node) => {
-                let tag = node.as_ref().values.store_in().clone();
+                let tag = node.as_ref().values.store_in().to_owned();
                 result
                     .entry(tag)
                     .or_insert(BTreeSet::new())
@@ -436,13 +436,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     });
                 }
                 AnyNode::Collect(node) => {
-                    let tag = &node.as_ref().values.store_in();
-                    let quorum_condition = QuorumCondition::new(tag.as_ref(), &node.as_ref().group);
+                    let tag = node.as_ref().values.store_in();
+                    let quorum_condition = QuorumCondition::new(tag, &node.as_ref().group);
                     collect_rules.push(CollectRule {
                         dependencies_condition,
                         quorum_condition,
                         store_in: node.as_ref().store_in.clone(),
-                        values: tag.clone(),
+                        values: tag.to_owned(),
                     });
                 }
                 AnyNode::Receive(node) => {

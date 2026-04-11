@@ -6,7 +6,7 @@ use super::{
     },
 };
 use crate::{
-    entities::{AnyTagRef, ComputedScalarTag, MappingTag, MappingTagRef, ScalarTagRef},
+    entities::{AnyTagRef, ComputedScalarTag, MappingTagRef, ScalarTagRef},
     traits::SessionParameters,
 };
 
@@ -177,14 +177,13 @@ pub enum CollectArg<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> CollectArg<SP> {
-    // TODO: return a MappingTagRef?
-    pub(crate) fn store_in(&self) -> MappingTag {
+    pub(crate) fn store_in(&self) -> MappingTagRef<'_> {
         match self {
-            Self::ComputeMapping(node) => MappingTag::Computed(node.as_ref().store_in.clone()),
-            Self::SerializeAndSign(node) => MappingTag::LocalSigned(node.as_ref().store_in.clone()),
-            Self::DeserializeAndCheck(node) => MappingTag::Received(node.as_ref().store_in.clone()),
-            Self::DirectMessage(node) => MappingTag::Sent(node.as_ref().store_in.clone()),
-            Self::Receive(node) => MappingTag::RemoteSigned(node.as_ref().store_in.clone()),
+            Self::ComputeMapping(node) => MappingTagRef::Computed(&node.as_ref().store_in),
+            Self::SerializeAndSign(node) => MappingTagRef::LocalSigned(&node.as_ref().store_in),
+            Self::DeserializeAndCheck(node) => MappingTagRef::Received(&node.as_ref().store_in),
+            Self::DirectMessage(node) => MappingTagRef::Sent(&node.as_ref().store_in),
+            Self::Receive(node) => MappingTagRef::RemoteSigned(&node.as_ref().store_in),
         }
     }
 }
