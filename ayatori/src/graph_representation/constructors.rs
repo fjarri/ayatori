@@ -108,55 +108,6 @@ pub fn mapping_alias<SP: SessionParameters>(
     })
 }
 
-// TODO: do we still need these?
-/*
-macro_rules! define_scalar_constructor {
-    ($func_name:ident<$SP:ident>, $outer_type:ident::$outer_ctr:ident($inner_type:ident),
-        ($($arg_type:ty),+) -> $error_type:ty ) =>
-    {
-        pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
-            name: &str,
-            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
-            args: &[(&str, &Node<$SP>)],
-        ) -> Result<Node<$SP>, RuntimeError> {
-            if !args.iter().all(|(_name, arg)| arg.store_in().scalar().is_some()) {
-                return Err(RuntimeError::new(
-                    "Scalar computations may only take scalar nodes as arguments"
-                ));
-            }
-
-            Ok(Node::new(
-                NodeKind::ComputeScalar {
-                    store_in: ComputedScalarTag::new(name),
-                    function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
-                    args: args_to_owned(args.iter().cloned())?,
-                },
-            ))
-        }
-    }
-}
-
-macro_rules! define_mapping_constructor {
-    ($func_name:ident<$SP:ident>, $outer_type:ident::$outer_ctr:ident($inner_type:ident),
-        ($($arg_type:ty),+) -> $error_type:ty ) =>
-    {
-        pub fn $func_name<$SP: SessionParameters, Ret: Erasable>(
-            name: &str,
-            function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>,
-            args: &[(&str, &Node<$SP>)],
-        ) -> Result<Node<$SP>, RuntimeError> {
-            Ok(Node::new(
-                NodeKind::ComputeMapping {
-                    store_in: ComputedMappingTag::new(name),
-                    function: $outer_type::$outer_ctr($inner_type::new_erased(function)),
-                    args: args_to_owned(args.iter().cloned())?,
-                },
-            ))
-        }
-    }
-}
-*/
-
 // TODO: we do double Arc clone here: first when creating the arg, then when creating the node. Can this be avoided?
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
