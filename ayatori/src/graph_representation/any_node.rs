@@ -12,9 +12,9 @@ use super::{
     args::BoundProtocolArgs,
     constructors::collect,
     typed_nodes::{
-        CollectNode, ComputeMapping, ComputeMappingNode, ComputeMappingSenderAttributableWithRevealNode, ComputeScalar,
-        ComputeScalarNode, DeserializeAndCheckNode, DirectMessageNode, GeneralizedNode, NodeId, ReceiveNode,
-        ScalarArgumentNode, SerializeAndSignNode, SpecificNode, args_to_owned,
+        CollectNode, ComputeMapping, ComputeMappingKind, ComputeMappingNode, ComputeScalar, ComputeScalarNode,
+        DeserializeAndCheckNode, DirectMessageNode, GeneralizedNode, NodeId, ReceiveNode, ScalarArgumentNode,
+        SerializeAndSignNode, SpecificNode, args_to_owned,
     },
     unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, OutputNode, SerializeAndSignArg},
 };
@@ -41,7 +41,6 @@ pub enum AnyNode<SP: SessionParameters> {
     ComputeScalar(ComputeScalarNode<SP>),
     Collect(CollectNode<SP>),
     ComputeMapping(ComputeMappingNode<SP>),
-    ComputeMappingWithReveal(ComputeMappingSenderAttributableWithRevealNode<SP>),
     SerializeAndSign(SerializeAndSignNode<SP>),
     DeserializeAndCheck(DeserializeAndCheckNode<SP>),
     DirectMessage(DirectMessageNode<SP>),
@@ -54,11 +53,15 @@ impl<SP: SessionParameters> AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
             Self::Collect(node) => Box::new(one_arg_to_any_iter(&node.as_ref().values)),
-            Self::ComputeMapping(node) => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
-            // TODO: is this really the behavior we want?
-            Self::ComputeMappingWithReveal(node) => Box::new(
-                arg_map_to_any_iter(&node.as_ref().args).chain(arg_map_to_any_iter(&node.as_ref().verification_args)),
-            ),
+            Self::ComputeMapping(node) => {
+                match &node.as_ref().kind {
+                    ComputeMappingKind::Simple { .. } => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
+                    // TODO: is this really the behavior we want?
+                    ComputeMappingKind::WithReveal { verification_args, .. } => {
+                        Box::new(arg_map_to_any_iter(&node.as_ref().args).chain(arg_map_to_any_iter(verification_args)))
+                    }
+                }
+            }
             Self::SerializeAndSign(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
             Self::DeserializeAndCheck(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
             Self::DirectMessage(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
@@ -82,9 +85,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
             Self::Collect(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
             Self::ComputeMapping(node) => AnyTagRef::Mapping(MappingTagRef::Computed(&node.as_ref().store_in)),
-            Self::ComputeMappingWithReveal(node) => {
-                AnyTagRef::Mapping(MappingTagRef::Computed(&node.as_ref().store_in))
-            }
             Self::SerializeAndSign(node) => AnyTagRef::Mapping(MappingTagRef::LocalSigned(&node.as_ref().store_in)),
             Self::DeserializeAndCheck(node) => AnyTagRef::Mapping(MappingTagRef::Received(&node.as_ref().store_in)),
             Self::DirectMessage(node) => AnyTagRef::Mapping(MappingTagRef::Sent(&node.as_ref().store_in)),
@@ -98,7 +98,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::ComputeScalar(node) => &node.as_ref().dependencies,
             Self::Collect(node) => &node.as_ref().dependencies,
             Self::ComputeMapping(node) => &node.as_ref().dependencies,
-            Self::ComputeMappingWithReveal(node) => &node.as_ref().dependencies,
             Self::SerializeAndSign(node) => &node.as_ref().dependencies,
             Self::DeserializeAndCheck(node) => &node.as_ref().dependencies,
             Self::DirectMessage(node) => &node.as_ref().dependencies,
@@ -112,9 +111,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.with_replacements(replacements)?),
             Self::Collect(node) => Self::Collect(node.with_replacements(replacements)?),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.with_replacements(replacements)?),
-            Self::ComputeMappingWithReveal(node) => {
-                Self::ComputeMappingWithReveal(node.with_replacements(replacements)?)
-            }
             Self::SerializeAndSign(node) => Self::SerializeAndSign(node.with_replacements(replacements)?),
             Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.with_replacements(replacements)?),
             Self::DirectMessage(node) => Self::DirectMessage(node.with_replacements(replacements)?),
@@ -128,7 +124,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.with_added_prefix(prefix)),
             Self::Collect(node) => Self::Collect(node.with_added_prefix(prefix)),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.with_added_prefix(prefix)),
-            Self::ComputeMappingWithReveal(node) => Self::ComputeMappingWithReveal(node.with_added_prefix(prefix)),
             Self::SerializeAndSign(node) => Self::SerializeAndSign(node.with_added_prefix(prefix)),
             Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.with_added_prefix(prefix)),
             Self::DirectMessage(node) => Self::DirectMessage(node.with_added_prefix(prefix)),
@@ -142,7 +137,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.without_dependencies()),
             Self::Collect(node) => Self::Collect(node.without_dependencies()),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.without_dependencies()),
-            Self::ComputeMappingWithReveal(node) => Self::ComputeMappingWithReveal(node.without_dependencies()),
             Self::SerializeAndSign(node) => Self::SerializeAndSign(node.without_dependencies()),
             Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.without_dependencies()),
             Self::DirectMessage(node) => Self::DirectMessage(node.without_dependencies()),
@@ -173,18 +167,17 @@ impl<SP: SessionParameters> AnyNode<SP> {
         let mut arguments = BTreeSet::<String>::new();
         let mut messages = BTreeSet::<FullName>::new();
 
-        let subnodes = match self {
-            Self::ComputeMappingWithReveal(node) => {
-                let args = node
-                    .as_ref()
-                    .verification_args
-                    .values()
-                    .map(GeneralizedNode::get_strong_ref)
-                    .map(AnyNode::from)
-                    .collect::<Vec<_>>();
-                UnorderedIterator::new_with_nodes(&args, true)
-            }
-            _ => self.flattened_args_only(),
+        let subnodes = if let Self::ComputeMapping(node) = self
+            && let ComputeMappingKind::WithReveal { verification_args, .. } = &node.as_ref().kind
+        {
+            let args = verification_args
+                .values()
+                .map(GeneralizedNode::get_strong_ref)
+                .map(AnyNode::from)
+                .collect::<Vec<_>>();
+            UnorderedIterator::new_with_nodes(&args, true)
+        } else {
+            self.flattened_args_only()
         };
 
         for node in subnodes {
@@ -195,12 +188,17 @@ impl<SP: SessionParameters> AnyNode<SP> {
                     }
                 }
                 Self::ComputeMapping(node) => {
-                    if !node.as_ref().function.is_reproducible() {
-                        return Reproducibility::NotAvailable;
+                    match &node.as_ref().kind {
+                        ComputeMappingKind::Simple { function } => {
+                            if !function.is_reproducible() {
+                                return Reproducibility::NotAvailable;
+                            }
+                        }
+                        ComputeMappingKind::WithReveal { .. } => {
+                            // `function` here does not depend on RNG, so is always reproducible.
+                        }
                     }
                 }
-                // `function` here does not depend on RNG, so is always reproducible.
-                Self::ComputeMappingWithReveal(_) |
                 // This is essentially a subtype of compute-mapping with a reproducible function.
                 Self::DeserializeAndCheck(_) |
                 // We can always reproduce the result of this, since it is an infallible `()`.
@@ -270,43 +268,52 @@ impl<SP: SessionParameters> AnyNode<SP> {
             .find_subnode(AnyTagRef::Mapping(tag.as_ref()))
             .ok_or_else(|| RuntimeError::new(format!("Node {tag} was not found")))?;
 
-        let node = match (node, associated_data) {
-            (Self::ComputeMappingWithReveal(node), Some(associated_data)) => {
-                let associated_data = associated_data.clone();
-                let verification = node.as_ref().verification.clone();
-                Self::from(ComputeMappingNode::new(ComputeMapping {
-                    store_in: node.as_ref().store_in.clone(),
+        let node = if let Some(associated_data) = associated_data
+            && let Self::ComputeMapping(node) = &node
+            && let ComputeMappingKind::WithReveal {
+                verification,
+                verification_args,
+                ..
+            } = &node.as_ref().kind
+        {
+            let associated_data = associated_data.clone();
+            let verification = verification.clone();
+            Self::from(ComputeMappingNode::new(ComputeMapping {
+                store_in: node.as_ref().store_in.clone(),
+                kind: ComputeMappingKind::Simple {
                     function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
                         move |id, args| Ok(verification.call(id, args, &associated_data)?),
                     )),
-                    args: args_to_owned(&node.as_ref().verification_args),
-                    dependencies: Vec::new(),
-                }))
-            }
-            (Self::ComputeMapping(node), None) => {
-                if let MappingFunction::SenderAttributable(function) = &node.as_ref().function {
-                    let function = function.clone();
-                    Self::from(ComputeMappingNode::new(ComputeMapping {
-                        store_in: node.as_ref().store_in.clone(),
-                        function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
-                            move |id, args| match function.call(id, args) {
-                                Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
-                                    Err(error)
-                                }
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
-                                    Ok(EvidenceVerdict::valid())
-                                }
-                            },
-                        )),
-                        args: args_to_owned(&node.as_ref().args),
-                        dependencies: Vec::new(),
-                    }))
-                } else {
-                    return Err(RuntimeError::new("Unexpected function type in the ComputeMapping node"));
-                }
-            }
-            _ => return Err(RuntimeError::new("Unexpected node type")),
+                },
+                args: args_to_owned(verification_args),
+                dependencies: Vec::new(),
+            }))
+        } else if associated_data.is_none()
+            && let Self::ComputeMapping(node) = node
+            && let ComputeMappingKind::Simple { function } = &node.as_ref().kind
+            && let MappingFunction::SenderAttributable(function) = function
+        {
+            let function = function.clone();
+            Self::from(ComputeMappingNode::new(ComputeMapping {
+                store_in: node.as_ref().store_in.clone(),
+                kind: ComputeMappingKind::Simple {
+                    function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
+                        move |id, args| match function.call(id, args) {
+                            Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
+                            Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
+                                Err(error)
+                            }
+                            Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
+                                Ok(EvidenceVerdict::valid())
+                            }
+                        },
+                    )),
+                },
+                args: args_to_owned(&node.as_ref().args),
+                dependencies: Vec::new(),
+            }))
+        } else {
+            return Err(RuntimeError::new("Unexpected node type"));
         };
 
         let node =
@@ -402,7 +409,6 @@ impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.get_strong_ref()),
             Self::Collect(node) => Self::Collect(node.get_strong_ref()),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.get_strong_ref()),
-            Self::ComputeMappingWithReveal(node) => Self::ComputeMappingWithReveal(node.get_strong_ref()),
             Self::SerializeAndSign(node) => Self::SerializeAndSign(node.get_strong_ref()),
             Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.get_strong_ref()),
             Self::DirectMessage(node) => Self::DirectMessage(node.get_strong_ref()),
@@ -416,7 +422,6 @@ impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
             Self::ComputeScalar(node) => node.id(),
             Self::Collect(node) => node.id(),
             Self::ComputeMapping(node) => node.id(),
-            Self::ComputeMappingWithReveal(node) => node.id(),
             Self::SerializeAndSign(node) => node.id(),
             Self::DeserializeAndCheck(node) => node.id(),
             Self::DirectMessage(node) => node.id(),
@@ -447,12 +452,6 @@ impl<SP: SessionParameters> From<CollectNode<SP>> for AnyNode<SP> {
 impl<SP: SessionParameters> From<ComputeMappingNode<SP>> for AnyNode<SP> {
     fn from(source: ComputeMappingNode<SP>) -> Self {
         Self::ComputeMapping(source)
-    }
-}
-
-impl<SP: SessionParameters> From<ComputeMappingSenderAttributableWithRevealNode<SP>> for AnyNode<SP> {
-    fn from(source: ComputeMappingSenderAttributableWithRevealNode<SP>) -> Self {
-        Self::ComputeMappingWithReveal(source)
     }
 }
 
@@ -500,7 +499,6 @@ impl<SP: SessionParameters> From<CollectArg<SP>> for AnyNode<SP> {
     fn from(source: CollectArg<SP>) -> Self {
         match source {
             CollectArg::ComputeMapping(node) => Self::ComputeMapping(node),
-            CollectArg::ComputeMappingWithReveal(node) => Self::ComputeMappingWithReveal(node),
             CollectArg::SerializeAndSign(node) => Self::SerializeAndSign(node),
             CollectArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
             CollectArg::DirectMessage(node) => Self::DirectMessage(node),
@@ -515,7 +513,6 @@ impl<SP: SessionParameters> From<ComputeMappingArg<SP>> for AnyNode<SP> {
             ComputeMappingArg::ComputeScalar(node) => Self::ComputeScalar(node),
             ComputeMappingArg::Collect(node) => Self::Collect(node),
             ComputeMappingArg::ComputeMapping(node) => Self::ComputeMapping(node),
-            ComputeMappingArg::ComputeMappingWithReveal(node) => Self::ComputeMappingWithReveal(node),
             ComputeMappingArg::SerializeAndSign(node) => Self::SerializeAndSign(node),
             ComputeMappingArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
         }
@@ -528,7 +525,6 @@ impl<SP: SessionParameters> From<SerializeAndSignArg<SP>> for AnyNode<SP> {
             SerializeAndSignArg::ComputeScalar(node) => Self::ComputeScalar(node),
             SerializeAndSignArg::ScalarArgument(node) => Self::ScalarArgument(node),
             SerializeAndSignArg::ComputeMapping(node) => Self::ComputeMapping(node),
-            SerializeAndSignArg::ComputeMappingWithReveal(node) => Self::ComputeMappingWithReveal(node),
             SerializeAndSignArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
         }
     }
@@ -673,7 +669,6 @@ impl<SP: SessionParameters> Display for AnyNode<SP> {
             Self::ComputeScalar(node) => write!(f, "{}", node),
             Self::Collect(node) => write!(f, "{}", node),
             Self::ComputeMapping(node) => write!(f, "{}", node),
-            Self::ComputeMappingWithReveal(node) => write!(f, "{}", node),
             Self::SerializeAndSign(node) => write!(f, "{}", node),
             Self::DeserializeAndCheck(node) => write!(f, "{}", node),
             Self::DirectMessage(node) => write!(f, "{}", node),

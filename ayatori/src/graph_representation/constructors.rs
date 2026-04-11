@@ -12,10 +12,9 @@ use super::{
     any_node::AnyNode,
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
     typed_nodes::{
-        Collect, CollectNode, ComputeMapping, ComputeMappingNode, ComputeMappingSenderAttributableWithReveal,
-        ComputeMappingSenderAttributableWithRevealNode, ComputeScalar, ComputeScalarNode, DeserializeAndCheck,
-        DeserializeAndCheckNode, DirectMessage, DirectMessageNode, GeneralizedNode, Receive, ReceiveNode,
-        ScalarArgument, ScalarArgumentNode, SerializeAndSign, SerializeAndSignNode, SpecificNode,
+        Collect, CollectNode, ComputeMapping, ComputeMappingKind, ComputeMappingNode, ComputeScalar, ComputeScalarNode,
+        DeserializeAndCheck, DeserializeAndCheckNode, DirectMessage, DirectMessageNode, GeneralizedNode, Receive,
+        ReceiveNode, ScalarArgument, ScalarArgumentNode, SerializeAndSign, SerializeAndSignNode, SpecificNode,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, SerializeAndSignArg},
 };
@@ -98,10 +97,12 @@ pub fn mapping_alias<SP: SessionParameters>(
     let arg_name = "value";
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
-        function: MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
-            "alias",
-            move |_id, args| Ok(args.get_value(arg_name)?.clone()),
-        )),
+        kind: ComputeMappingKind::Simple {
+            function: MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
+                "alias",
+                move |_id, args| Ok(args.get_value(arg_name)?.clone()),
+            )),
+        },
         args: [(arg_name.into(), node.into())].into(),
         dependencies: Vec::new(),
     })
@@ -198,7 +199,9 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
 ) -> ComputeMappingNode<SP> {
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
-        function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(function)),
+        kind: ComputeMappingKind::Simple {
+            function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(function)),
+        },
         // TODO: ensure there are no duplicates
         args: args
             .iter()
@@ -215,7 +218,9 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
 ) -> ComputeMappingNode<SP> {
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
-        function: MappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_erased(function)),
+        kind: ComputeMappingKind::Simple {
+            function: MappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_erased(function)),
+        },
         // TODO: ensure there are no duplicates
         args: args
             .iter()
@@ -232,7 +237,11 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
 ) -> ComputeMappingNode<SP> {
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
-        function: MappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng::new_erased(function)),
+        kind: ComputeMappingKind::Simple {
+            function: MappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng::new_erased(
+                function,
+            )),
+        },
         // TODO: ensure there are no duplicates
         args: args
             .iter()
@@ -251,9 +260,11 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
 ) -> ComputeMappingNode<SP> {
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
-        function: MappingFunction::ThirdPartyAttributable {
-            function: ThirdPartyAttributableMappingFunction::new_erased(function),
-            verification: ThirdPartyAttributableVerificationFunction::new(verification),
+        kind: ComputeMappingKind::Simple {
+            function: MappingFunction::ThirdPartyAttributable {
+                function: ThirdPartyAttributableMappingFunction::new_erased(function),
+                verification: ThirdPartyAttributableVerificationFunction::new(verification),
+            },
         },
         // TODO: ensure there are no duplicates
         args: args
@@ -270,16 +281,18 @@ pub fn compute_mapping_sender_fallible_with_info<SP: SessionParameters, Ret: Era
     args: &[(&str, ComputeMappingArg<SP>)],
     verification: impl 'static + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
     verification_args: &[(&str, ComputeMappingArg<SP>)],
-) -> ComputeMappingSenderAttributableWithRevealNode<SP> {
-    ComputeMappingSenderAttributableWithRevealNode::new(ComputeMappingSenderAttributableWithReveal {
+) -> ComputeMappingNode<SP> {
+    ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
-        function: SenderAttributableWithRevealMappingFunction::new_erased(function),
-        verification: EvidenceVerificationFunction::new(verification),
+        kind: ComputeMappingKind::WithReveal {
+            function: SenderAttributableWithRevealMappingFunction::new_erased(function),
+            verification: EvidenceVerificationFunction::new(verification),
+            verification_args: verification_args
+                .iter()
+                .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
+                .collect(),
+        },
         args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
-        verification_args: verification_args
             .iter()
             .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
             .collect(),

@@ -10,7 +10,7 @@ use crate::{
         SenderErrorWithReveal, SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError,
         VerifiedValue,
     },
-    graph_representation::{AnyNode, ArgNodes, PartyBuildData, SpecificNode},
+    graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData, SpecificNode},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -329,7 +329,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
             return Ok(EvidenceVerdict::invalid("Invalid node type"));
         };
 
-        let MappingFunction::ThirdPartyAttributable { verification, .. } = &node.as_ref().function else {
+        let ComputeMappingKind::Simple {
+            function: MappingFunction::ThirdPartyAttributable { verification, .. },
+        } = &node.as_ref().kind
+        else {
             return Ok(EvidenceVerdict::invalid("Invalid function type"));
         };
 

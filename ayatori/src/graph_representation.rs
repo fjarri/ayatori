@@ -4,10 +4,8 @@ mod constructors;
 mod typed_nodes;
 mod unions;
 
-//pub(crate) use node::{NodeKind, Reproducibility};
-//pub(crate) use args::BoundProtocolArgs;
 pub(crate) use any_node::Reproducibility;
-pub(crate) use typed_nodes::{GeneralizedNode, SpecificNode};
+pub(crate) use typed_nodes::{ComputeMappingKind, GeneralizedNode, SpecificNode};
 
 pub use any_node::AnyNode;
 pub use args::{ArgNodes, PartyBuildData, PrivateInputs, ProtocolArgs, ProtocolSignature, PublicInputs};
@@ -17,8 +15,8 @@ pub use constructors::{
     compute_scalar, compute_scalar_with_rng, constant, mapping_alias, receive, receive_split, scalar_alias, send,
 };
 pub use typed_nodes::{
-    CollectNode, ComputeMappingNode, ComputeMappingSenderAttributableWithRevealNode, ComputeScalarNode,
-    DeserializeAndCheckNode, DirectMessageNode, ReceiveNode, ScalarArgumentNode, SerializeAndSignNode,
+    CollectNode, ComputeMappingNode, ComputeScalarNode, DeserializeAndCheckNode, DirectMessageNode, ReceiveNode,
+    ScalarArgumentNode, SerializeAndSignNode,
 };
 pub use unions::{
     BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, OutputNode, SerializeAndSignArg,

@@ -188,13 +188,55 @@ impl<SP: SessionParameters> CollectNode<SP> {
 }
 
 #[derive_where::derive_where(Debug)]
+pub(crate) enum ComputeMappingKind<SP: SessionParameters> {
+    Simple {
+        function: MappingFunction<SP>,
+    },
+    WithReveal {
+        function: SenderAttributableWithRevealMappingFunction<SP>,
+        verification: EvidenceVerificationFunction<SP>,
+        verification_args: BTreeMap<String, ComputeMappingArg<SP>>,
+    },
+}
+
+impl<SP: SessionParameters> ComputeMappingKind<SP> {
+    pub(crate) fn shallow_clone(&self) -> Self {
+        match self {
+            Self::Simple { function } => Self::Simple {
+                function: function.clone(),
+            },
+            Self::WithReveal {
+                function,
+                verification,
+                verification_args,
+            } => Self::WithReveal {
+                function: function.clone(),
+                verification: verification.clone(),
+                verification_args: args_to_owned(verification_args),
+            },
+        }
+    }
+
+    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut kind = self.shallow_clone();
+        match &mut kind {
+            Self::Simple { .. } => {}
+            Self::WithReveal { verification_args, .. } => {
+                *verification_args = args_with_replacements(verification_args, replacements)?;
+            }
+        }
+        Ok(kind)
+    }
+}
+
+#[derive_where::derive_where(Debug)]
 pub struct ComputeMappingNode<SP: SessionParameters>(Arc<ComputeMapping<SP>>);
 
 #[derive_where::derive_where(Debug)]
 pub(crate) struct ComputeMapping<SP: SessionParameters> {
     pub(crate) store_in: ComputedMappingTag,
-    pub(crate) function: MappingFunction<SP>,
     pub(crate) args: BTreeMap<String, ComputeMappingArg<SP>>,
+    pub(crate) kind: ComputeMappingKind<SP>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
@@ -212,8 +254,8 @@ impl<SP: SessionParameters> ComputeMappingNode<SP> {
     pub(crate) fn shallow_clone(&self) -> ComputeMapping<SP> {
         ComputeMapping {
             store_in: self.0.store_in.clone(),
-            function: self.0.function.clone(),
             args: args_to_owned(&self.0.args),
+            kind: self.0.kind.shallow_clone(),
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
@@ -221,6 +263,7 @@ impl<SP: SessionParameters> ComputeMappingNode<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self.shallow_clone();
         node.args = args_with_replacements(&node.args, replacements)?;
+        node.kind = node.kind.with_replacements(replacements)?;
         node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
         Ok(Self::new(node))
     }
@@ -253,72 +296,6 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeMappingNode<SP> {
             AnyNode::ComputeMapping(node) => Ok(node),
             _ => Err(UnionCastError),
         }
-    }
-}
-
-// TODO: should it be a separate node? Does the user really care?
-#[derive_where::derive_where(Debug)]
-pub struct ComputeMappingSenderAttributableWithRevealNode<SP: SessionParameters>(
-    Arc<ComputeMappingSenderAttributableWithReveal<SP>>,
-);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct ComputeMappingSenderAttributableWithReveal<SP: SessionParameters> {
-    pub(crate) store_in: ComputedMappingTag,
-    pub(crate) function: SenderAttributableWithRevealMappingFunction<SP>,
-    pub(crate) args: BTreeMap<String, ComputeMappingArg<SP>>,
-    pub(crate) verification: EvidenceVerificationFunction<SP>,
-    pub(crate) verification_args: BTreeMap<String, ComputeMappingArg<SP>>,
-    pub(crate) dependencies: Vec<Dependency<SP>>,
-}
-
-impl<SP: SessionParameters> SpecificNode for ComputeMappingSenderAttributableWithRevealNode<SP> {
-    type Inner = ComputeMappingSenderAttributableWithReveal<SP>;
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-}
-
-impl<SP: SessionParameters> ComputeMappingSenderAttributableWithRevealNode<SP> {
-    pub(crate) fn shallow_clone(&self) -> ComputeMappingSenderAttributableWithReveal<SP> {
-        ComputeMappingSenderAttributableWithReveal {
-            store_in: self.0.store_in.clone(),
-            function: self.0.function.clone(),
-            args: args_to_owned(&self.0.args),
-            verification: self.0.verification.clone(),
-            verification_args: args_to_owned(&self.0.verification_args),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
-        }
-    }
-
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
-        node.args = args_with_replacements(&node.args, replacements)?;
-        node.verification_args = args_with_replacements(&node.verification_args, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
-        node.store_in = node.store_in.with_added_prefix(prefix);
-        Self::new(node)
-    }
-
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let dependency = dependency.into();
-        let mut node = self.shallow_clone();
-        node.dependencies.push(dependency);
-        Self::new(node)
-    }
-
-    pub(crate) fn without_dependencies(&self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
-        Self::new(node)
     }
 }
 
@@ -689,23 +666,19 @@ impl<SP: SessionParameters> Display for ComputeMappingNode<SP> {
             f,
             "{}[*] = {}(*, {}){}",
             self.0.store_in,
-            self.0.function,
+            self.0.kind,
             display_args(&self.0.args),
             display_dependencies(&self.0.dependencies)
         )
     }
 }
 
-impl<SP: SessionParameters> Display for ComputeMappingSenderAttributableWithRevealNode<SP> {
+impl<SP: SessionParameters> Display for ComputeMappingKind<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "{}[*] = {}(*, {}){}",
-            self.0.store_in,
-            self.0.function,
-            display_args(&self.0.args),
-            display_dependencies(&self.0.dependencies)
-        )
+        match self {
+            Self::Simple { function } => write!(f, "{function}"),
+            Self::WithReveal { function, .. } => write!(f, "{function}"),
+        }
     }
 }
 

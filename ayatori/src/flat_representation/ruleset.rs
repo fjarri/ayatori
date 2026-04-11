@@ -14,7 +14,7 @@ use crate::{
         LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, ReceivedTag, RemoteSignedTag, RuntimeError,
         ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
-    graph_representation::{AnyNode, GeneralizedNode, OutputNode, Reproducibility, SpecificNode},
+    graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, Reproducibility, SpecificNode},
     traits::SessionParameters,
 };
 
@@ -157,26 +157,18 @@ fn propagate_groups<SP: SessionParameters>(
                             .extend(ids.clone());
                     }
                 }
-            }
-            AnyNode::ComputeMappingWithReveal(node) => {
-                let ids = result
-                    .get(&MappingTag::Computed(node.as_ref().store_in.clone()))
-                    .cloned()
-                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
-                for arg in node.as_ref().args.values() {
-                    if let AnyTagRef::Mapping(tag) = arg.store_in() {
-                        result
-                            .entry(tag.to_owned())
-                            .or_insert(BTreeSet::new())
-                            .extend(ids.clone());
-                    }
-                }
-                for arg in node.as_ref().verification_args.values() {
-                    if let AnyTagRef::Mapping(tag) = arg.store_in() {
-                        result
-                            .entry(tag.to_owned())
-                            .or_insert(BTreeSet::new())
-                            .extend(ids.clone());
+
+                match &node.as_ref().kind {
+                    ComputeMappingKind::Simple { .. } => {}
+                    ComputeMappingKind::WithReveal { verification_args, .. } => {
+                        for arg in verification_args.values() {
+                            if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                                result
+                                    .entry(tag.to_owned())
+                                    .or_insert(BTreeSet::new())
+                                    .extend(ids.clone());
+                            }
+                        }
                     }
                 }
             }
@@ -301,56 +293,24 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         }
                     }
 
-                    let element_conditions = possible_ids
-                        .iter()
-                        .cloned()
-                        .map(|id| (id, element_condition.clone()))
-                        .collect();
-
-                    let arg_tags = node
-                        .as_ref()
-                        .args
-                        .iter()
-                        .map(|(name, arg)| {
-                            let arg = arg.store_in().to_owned();
-                            (name.clone(), arg)
-                        })
-                        .collect();
-
-                    mapping_rules.push(MappingRule {
-                        dependencies_condition,
-                        scalar_condition,
-                        element_conditions,
-                        kind: MappingRuleKind::Compute {
-                            store_in: node.as_ref().store_in.clone(),
-                            function: node.as_ref().function.clone(),
-                            args: arg_tags,
-                            on_error: on_error.clone(),
-                        },
-                    });
-                }
-                AnyNode::ComputeMappingWithReveal(node) => {
-                    let on_error = get_on_error(&AnyNode::from(node.get_strong_ref()), private_inputs);
-                    let possible_ids = propagated_ids
-                        .get(&MappingTag::Computed(node.as_ref().store_in.clone()))
-                        .ok_or_else(|| {
-                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
-                        })?;
-
-                    let mut scalar_condition = ScalarCondition::empty();
-                    let mut element_condition = ElementCondition::empty();
-                    for arg in node.as_ref().args.values() {
-                        match arg.store_in() {
-                            AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
-                            AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                    match &node.as_ref().kind {
+                        ComputeMappingKind::Simple { .. } => {}
+                        ComputeMappingKind::WithReveal { verification_args, .. } => {
+                            for arg in verification_args.values() {
+                                match arg.store_in() {
+                                    AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
+                                    AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                                }
+                            }
                         }
                     }
-                    for arg in node.as_ref().verification_args.values() {
-                        match arg.store_in() {
-                            AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
-                            AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+
+                    let function = match &node.as_ref().kind {
+                        ComputeMappingKind::Simple { function } => function.clone(),
+                        ComputeMappingKind::WithReveal { function, .. } => {
+                            MappingFunction::SenderAttributableWithReveal(function.clone())
                         }
-                    }
+                    };
 
                     let element_conditions = possible_ids
                         .iter()
@@ -374,7 +334,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         element_conditions,
                         kind: MappingRuleKind::Compute {
                             store_in: node.as_ref().store_in.clone(),
-                            function: MappingFunction::SenderAttributableWithReveal(node.as_ref().function.clone()),
+                            function,
                             args: arg_tags,
                             on_error: on_error.clone(),
                         },

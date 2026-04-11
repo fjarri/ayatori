@@ -11,7 +11,8 @@ use crate::{
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     graph_representation::{
-        AnyNode, ComputeMappingNode, ComputeScalarNode, GeneralizedNode, OutputNode, SerializeAndSignNode, SpecificNode,
+        AnyNode, ComputeMappingKind, ComputeMappingNode, ComputeScalarNode, GeneralizedNode, OutputNode,
+        SerializeAndSignNode, SpecificNode,
     },
     traits::SessionParameters,
 };
@@ -176,7 +177,9 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let MappingFunction::Unattributable(orig_function) = &node.as_ref().function {
+                let new_function = if let ComputeMappingKind::Simple { function } = &node.as_ref().kind
+                    && let MappingFunction::Unattributable(orig_function) = function
+                {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
                     MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
@@ -191,7 +194,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 };
 
                 let mut node = node.shallow_clone();
-                node.function = new_function;
+                node.kind = ComputeMappingKind::Simple { function: new_function };
                 AnyNode::from(ComputeMappingNode::new(node))
             }
             (
@@ -200,10 +203,11 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let MappingFunction::ThirdPartyAttributable {
-                    function: orig_function,
-                    verification,
-                } = &node.as_ref().function
+                let new_function = if let ComputeMappingKind::Simple { function } = &node.as_ref().kind
+                    && let MappingFunction::ThirdPartyAttributable {
+                        function: orig_function,
+                        verification,
+                    } = function
                 {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
@@ -222,7 +226,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 };
 
                 let mut node = node.shallow_clone();
-                node.function = new_function;
+                node.kind = ComputeMappingKind::Simple { function: new_function };
                 AnyNode::ComputeMapping(ComputeMappingNode::new(node))
             }
             (
