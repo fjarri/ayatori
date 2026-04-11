@@ -214,7 +214,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             decrypt_secret,
             &[("C", (&c_cap).into()), ("y", (&my_y).into()), ("Y", (&y_cap).into())],
         );
-        let x_verified = compute_mapping_sender_fallible_with_info(
+        let x_verified = compute_mapping_sender_fallible_with_reveal(
             "x_dec_correct",
             verify_secret,
             &[

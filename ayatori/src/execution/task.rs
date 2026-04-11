@@ -450,7 +450,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_mapping_elem_sender_attributable_with_info(
+    pub(crate) fn compute_mapping_elem_sender_attributable_with_reveal(
         store_in: ComputedMappingTag,
         source: SP::Verifier,
         function: SenderAttributableWithRevealMappingFunction<SP>,

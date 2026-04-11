@@ -226,7 +226,7 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     })
 }
 
-pub fn compute_mapping_sender_fallible_with_info<SP: SessionParameters, Ret: Erasable>(
+pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
     args: &[(&str, ComputeMappingArg<SP>)],

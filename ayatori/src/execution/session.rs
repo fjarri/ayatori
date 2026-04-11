@@ -331,7 +331,7 @@ where
                             Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
                         }
                         MappingFunction::SenderAttributableWithReveal(function) => {
-                            Task::compute_mapping_elem_sender_attributable_with_info(
+                            Task::compute_mapping_elem_sender_attributable_with_reveal(
                                 store_in, index, function, args, on_error,
                             )
                         }
