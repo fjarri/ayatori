@@ -16,7 +16,7 @@ use super::{
         DeserializeAndCheckNode, DirectMessageNode, GeneralizedNode, NodeId, ReceiveNode, ScalarArgumentNode,
         SerializeAndSignNode, SpecificNode, args_to_owned,
     },
-    unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, OutputNode, SerializeAndSignArg},
+    unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
 use crate::{
     entities::{
@@ -522,13 +522,13 @@ impl<SP: SessionParameters> From<ComputeMappingArg<SP>> for AnyNode<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<SerializeAndSignArg<SP>> for AnyNode<SP> {
-    fn from(source: SerializeAndSignArg<SP>) -> Self {
+impl<SP: SessionParameters> From<DirectMessageArg<SP>> for AnyNode<SP> {
+    fn from(source: DirectMessageArg<SP>) -> Self {
         match source {
-            SerializeAndSignArg::ComputeScalar(node) => Self::ComputeScalar(node),
-            SerializeAndSignArg::ScalarArgument(node) => Self::ScalarArgument(node),
-            SerializeAndSignArg::ComputeMapping(node) => Self::ComputeMapping(node),
-            SerializeAndSignArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
+            DirectMessageArg::ComputeScalar(node) => Self::ComputeScalar(node),
+            DirectMessageArg::ScalarArgument(node) => Self::ScalarArgument(node),
+            DirectMessageArg::ComputeMapping(node) => Self::ComputeMapping(node),
+            DirectMessageArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
         }
     }
 }

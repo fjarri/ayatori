@@ -16,7 +16,7 @@ use super::{
         DeserializeAndCheck, DeserializeAndCheckNode, DirectMessage, DirectMessageNode, GeneralizedNode, Receive,
         ReceiveNode, ScalarArgument, ScalarArgumentNode, SerializeAndSign, SerializeAndSignNode, SpecificNode,
     },
-    unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, SerializeAndSignArg},
+    unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
 };
 use crate::{
     entities::{
@@ -295,12 +295,12 @@ pub fn broadcast<SP: SessionParameters>(
     collect(CollectArg::DirectMessage(send_node), group)
 }
 
-pub fn send<SP: SessionParameters>(
+pub fn direct_message<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
-    data: impl Into<SerializeAndSignArg<SP>>,
+    data: impl Into<DirectMessageArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
 ) -> CollectNode<SP> {
-    let data: SerializeAndSignArg<SP> = data.into();
+    let data: DirectMessageArg<SP> = data.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
 

@@ -66,7 +66,7 @@ enum MappingRuleKind<SP: SessionParameters> {
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         on_error: OnError,
     },
-    Send {
+    DirectMessage {
         store_in: SentTag,
         to_send: LocalSignedTag,
     },
@@ -109,7 +109,7 @@ pub(crate) enum Action<SP: SessionParameters> {
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         on_error: OnError,
     },
-    Send {
+    DirectMessage {
         store_in: SentTag,
         to_send: LocalSignedTag,
         destination: SP::Verifier,
@@ -429,7 +429,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         dependencies_condition,
                         scalar_condition: ScalarCondition::empty(),
                         element_conditions,
-                        kind: MappingRuleKind::Send {
+                        kind: MappingRuleKind::DirectMessage {
                             store_in: node.as_ref().store_in.clone(),
                             to_send: tag.clone(),
                         },
@@ -576,8 +576,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     fn pop_send_action(&mut self) -> Option<Action<SP>> {
         self.pop_mapping_action(|id, kind| {
-            if let MappingRuleKind::Send { store_in, to_send } = kind {
-                Some(Action::Send {
+            if let MappingRuleKind::DirectMessage { store_in, to_send } = kind {
+                Some(Action::DirectMessage {
                     store_in: store_in.clone(),
                     to_send: to_send.clone(),
                     destination: id.clone(),
@@ -590,7 +590,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     fn pop_regular_mapping_action(&mut self) -> Option<Action<SP>> {
         self.pop_mapping_action(|id, kind| match kind {
-            MappingRuleKind::Send { .. } => None,
+            MappingRuleKind::DirectMessage { .. } => None,
             MappingRuleKind::Compute {
                 store_in,
                 function,
@@ -742,7 +742,7 @@ impl<SP: SessionParameters> Display for MappingRuleKind<SP> {
                 data,
                 ..
             } => writeln!(f, "{store_in} = {function}({data})"),
-            Self::Send { store_in, to_send } => writeln!(f, "{store_in} = send({to_send})"),
+            Self::DirectMessage { store_in, to_send } => writeln!(f, "{store_in} = direct_message({to_send})"),
         }
     }
 }

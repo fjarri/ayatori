@@ -11,7 +11,7 @@ use itertools::Itertools;
 
 use super::{
     any_node::AnyNode,
-    unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, SerializeAndSignArg, UnionCastError},
+    unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, UnionCastError},
 };
 use crate::{
     entities::{
@@ -317,7 +317,7 @@ pub struct SerializeAndSignNode<SP: SessionParameters>(Arc<SerializeAndSign<SP>>
 pub(crate) struct SerializeAndSign<SP: SessionParameters> {
     pub(crate) store_in: LocalSignedTag,
     pub(crate) function: SerializeAndSignFunction<SP>,
-    pub(crate) data: SerializeAndSignArg<SP>,
+    pub(crate) data: DirectMessageArg<SP>,
     pub(crate) serde_adapter: SerdeAdapter<SP::WireFormat>,
     pub(crate) message_name: FullName,
     pub(crate) dependencies: Vec<Dependency<SP>>,

@@ -287,13 +287,13 @@ where
                 Action::Terminate(tag) => {
                     return Ok(Some(Task::finalize_with_stall(tag)));
                 }
-                Action::Send {
+                Action::DirectMessage {
                     store_in,
                     to_send,
                     destination,
                 } => {
                     let signed_value = self.storage.get_elem(&MappingTag::LocalSigned(to_send), &destination)?;
-                    return Ok(Some(Task::send(store_in, destination, signed_value)));
+                    return Ok(Some(Task::direct_message(store_in, destination, signed_value)));
                 }
                 Action::ComputeScalar {
                     store_in,

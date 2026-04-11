@@ -301,17 +301,15 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for BroadcastArg<SP> {
     }
 }
 
-// TODO: should we have these without Scalar variant, to be used in `send()`?
-// or rename this to SendArg?
 #[derive_where::derive_where(Debug)]
-pub enum SerializeAndSignArg<SP: SessionParameters> {
+pub enum DirectMessageArg<SP: SessionParameters> {
     ComputeScalar(ComputeScalarNode<SP>),
     ScalarArgument(ScalarArgumentNode),
     ComputeMapping(ComputeMappingNode<SP>),
     DeserializeAndCheck(DeserializeAndCheckNode<SP>),
 }
 
-impl<SP: SessionParameters> SerializeAndSignArg<SP> {
+impl<SP: SessionParameters> DirectMessageArg<SP> {
     pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
         match self {
             Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
@@ -322,7 +320,7 @@ impl<SP: SessionParameters> SerializeAndSignArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> GeneralizedNode for SerializeAndSignArg<SP> {
+impl<SP: SessionParameters> GeneralizedNode for DirectMessageArg<SP> {
     fn id(&self) -> NodeId {
         match self {
             Self::ComputeScalar(node) => node.id(),
@@ -342,25 +340,25 @@ impl<SP: SessionParameters> GeneralizedNode for SerializeAndSignArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for SerializeAndSignArg<SP> {
+impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for DirectMessageArg<SP> {
     fn from(source: &ComputeScalarNode<SP>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeMappingNode<SP>> for SerializeAndSignArg<SP> {
+impl<SP: SessionParameters> From<&ComputeMappingNode<SP>> for DirectMessageArg<SP> {
     fn from(source: &ComputeMappingNode<SP>) -> Self {
         Self::ComputeMapping(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&DeserializeAndCheckNode<SP>> for SerializeAndSignArg<SP> {
+impl<SP: SessionParameters> From<&DeserializeAndCheckNode<SP>> for DirectMessageArg<SP> {
     fn from(source: &DeserializeAndCheckNode<SP>) -> Self {
         Self::DeserializeAndCheck(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<BroadcastArg<SP>> for SerializeAndSignArg<SP> {
+impl<SP: SessionParameters> From<BroadcastArg<SP>> for DirectMessageArg<SP> {
     fn from(source: BroadcastArg<SP>) -> Self {
         match source {
             BroadcastArg::ComputeScalar(node) => Self::ComputeScalar(node),
@@ -369,7 +367,7 @@ impl<SP: SessionParameters> From<BroadcastArg<SP>> for SerializeAndSignArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for SerializeAndSignArg<SP> {
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for DirectMessageArg<SP> {
     type Error = UnionCastError;
 
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {

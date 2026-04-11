@@ -342,7 +342,7 @@ impl<SP: SessionParameters> Task<SP> {
         Self::FinalizeWithStall(FinalizeWithStallTask(tag))
     }
 
-    pub(crate) fn send(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
+    pub(crate) fn direct_message(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
         Self::Send(SendTask {
             store_in,
             destination,
