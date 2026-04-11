@@ -5,9 +5,9 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{
-        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingFunction,
-        MappingTag, RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
-        ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, UnattributableError,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingTag,
+        RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
+        SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     graph_representation::{
@@ -178,11 +178,11 @@ impl<SP: SessionParameters> Replacement<SP> {
                 },
             ) => {
                 let new_function = if let ComputeMappingKind::Simple { function } = &node.as_ref().kind
-                    && let MappingFunction::Unattributable(orig_function) = function
+                    && let SimpleMappingFunction::Unattributable(orig_function) = function
                 {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
+                    SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
                         format!("[modified] {orig_function}"),
                         move |id, args| {
                             let orig_value = orig_function.call(id, args)?;
@@ -203,15 +203,14 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let ComputeMappingKind::Simple { function } = &node.as_ref().kind
-                    && let MappingFunction::ThirdPartyAttributable {
-                        function: orig_function,
-                        verification,
-                    } = function
+                let new_kind = if let ComputeMappingKind::ThirdPartyAttributable {
+                    function: orig_function,
+                    verification,
+                } = &node.as_ref().kind
                 {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    MappingFunction::ThirdPartyAttributable {
+                    ComputeMappingKind::ThirdPartyAttributable {
                         function: ThirdPartyAttributableMappingFunction::new_with_name(
                             format!("[modified] {orig_function}"),
                             move |id, args| {
@@ -226,7 +225,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 };
 
                 let mut node = node.shallow_clone();
-                node.kind = ComputeMappingKind::Simple { function: new_function };
+                node.kind = new_kind;
                 AnyNode::ComputeMapping(ComputeMappingNode::new(node))
             }
             (

@@ -6,9 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::{session::Session, task::Task};
 use crate::{
     entities::{
-        AnyTagRef, EvidenceVerdict, MappingFunction, MappingTag, Message, MessageId, RuntimeError, SenderError,
-        SenderErrorWithReveal, SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError,
-        VerifiedValue,
+        AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
+        SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError, VerifiedValue,
     },
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData, SpecificNode},
     traits::{ExecutableProtocol, SessionParameters},
@@ -329,10 +328,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
             return Ok(EvidenceVerdict::invalid("Invalid node type"));
         };
 
-        let ComputeMappingKind::Simple {
-            function: MappingFunction::ThirdPartyAttributable { verification, .. },
-        } = &node.as_ref().kind
-        else {
+        let ComputeMappingKind::ThirdPartyAttributable { verification, .. } = &node.as_ref().kind else {
             return Ok(EvidenceVerdict::invalid("Invalid function type"));
         };
 

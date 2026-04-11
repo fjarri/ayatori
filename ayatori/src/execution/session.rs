@@ -335,7 +335,7 @@ where
                                 store_in, index, function, args, on_error,
                             )
                         }
-                        MappingFunction::ThirdPartyAttributable { function, .. } => {
+                        MappingFunction::ThirdPartyAttributable(function) => {
                             Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
                         }
                     }));

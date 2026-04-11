@@ -21,13 +21,13 @@ use super::{
 use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MappingFunction, PartyGroup,
-        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError,
-        SenderAttributableErrorWithReveal, SenderAttributableMappingFunction,
-        SenderAttributableWithRevealMappingFunction, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId,
-        SignedValue, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableVerificationFunction, UnattributableError, UnattributableMappingFunction,
-        UnattributableMappingFunctionWithRng, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
+        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, PartyGroup, RemoteSignedTag,
+        RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError, SenderAttributableErrorWithReveal,
+        SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SerdeAdapter,
+        SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue, SimpleMappingFunction,
+        ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
+        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
     traits::{ComposableProtocol, SessionParameters},
 };
@@ -98,7 +98,7 @@ pub fn mapping_alias<SP: SessionParameters>(
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
-            function: MappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
+            function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
                 "alias",
                 move |_id, args| Ok(args.get_value(arg_name)?.clone()),
             )),
@@ -200,7 +200,7 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
-            function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(function)),
+            function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(function)),
         },
         // TODO: ensure there are no duplicates
         args: args
@@ -219,7 +219,9 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
-            function: MappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_erased(function)),
+            function: SimpleMappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_erased(
+                function,
+            )),
         },
         // TODO: ensure there are no duplicates
         args: args
@@ -238,7 +240,7 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
-            function: MappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng::new_erased(
+            function: SimpleMappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng::new_erased(
                 function,
             )),
         },
@@ -260,11 +262,9 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
 ) -> ComputeMappingNode<SP> {
     ComputeMappingNode::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
-        kind: ComputeMappingKind::Simple {
-            function: MappingFunction::ThirdPartyAttributable {
-                function: ThirdPartyAttributableMappingFunction::new_erased(function),
-                verification: ThirdPartyAttributableVerificationFunction::new(verification),
-            },
+        kind: ComputeMappingKind::ThirdPartyAttributable {
+            function: ThirdPartyAttributableMappingFunction::new_erased(function),
+            verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
         // TODO: ensure there are no duplicates
         args: args

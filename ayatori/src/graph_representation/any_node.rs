@@ -20,8 +20,8 @@ use super::{
 };
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingFunction, MappingTag, MappingTagRef, PartyGroup,
-        RuntimeError, ScalarFunction, ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum,
+        AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, PartyGroup, RuntimeError,
+        ScalarFunction, ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum, SimpleMappingFunction,
         UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction,
     },
     traits::SessionParameters,
@@ -59,6 +59,9 @@ impl<SP: SessionParameters> AnyNode<SP> {
                     // TODO: is this really the behavior we want?
                     ComputeMappingKind::WithReveal { verification_args, .. } => {
                         Box::new(arg_map_to_any_iter(&node.as_ref().args).chain(arg_map_to_any_iter(verification_args)))
+                    }
+                    ComputeMappingKind::ThirdPartyAttributable { .. } => {
+                        Box::new(arg_map_to_any_iter(&node.as_ref().args))
                     }
                 }
             }
@@ -197,6 +200,9 @@ impl<SP: SessionParameters> AnyNode<SP> {
                         ComputeMappingKind::WithReveal { .. } => {
                             // `function` here does not depend on RNG, so is always reproducible.
                         }
+                        ComputeMappingKind::ThirdPartyAttributable { .. } => {
+                            // `function` here does not depend on RNG, so is always reproducible.
+                        }
                     }
                 }
                 // This is essentially a subtype of compute-mapping with a reproducible function.
@@ -281,7 +287,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::from(ComputeMappingNode::new(ComputeMapping {
                 store_in: node.as_ref().store_in.clone(),
                 kind: ComputeMappingKind::Simple {
-                    function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
+                    function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
                         move |id, args| Ok(verification.call(id, args, &associated_data)?),
                     )),
                 },
@@ -291,13 +297,13 @@ impl<SP: SessionParameters> AnyNode<SP> {
         } else if associated_data.is_none()
             && let Self::ComputeMapping(node) = node
             && let ComputeMappingKind::Simple { function } = &node.as_ref().kind
-            && let MappingFunction::SenderAttributable(function) = function
+            && let SimpleMappingFunction::SenderAttributable(function) = function
         {
             let function = function.clone();
             Self::from(ComputeMappingNode::new(ComputeMapping {
                 store_in: node.as_ref().store_in.clone(),
                 kind: ComputeMappingKind::Simple {
-                    function: MappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
+                    function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
                         move |id, args| match function.call(id, args) {
                             Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
                             Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {

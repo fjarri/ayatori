@@ -181,20 +181,34 @@ impl<SP: SessionParameters> ScalarFunction<SP> {
 }
 
 #[derive_where::derive_where(Debug, Clone)]
+pub(crate) enum SimpleMappingFunction<SP: SessionParameters> {
+    Unattributable(UnattributableMappingFunction<SP>),
+    UnattributableWithRng(UnattributableMappingFunctionWithRng<SP>),
+    SenderAttributable(SenderAttributableMappingFunction<SP>),
+}
+
+impl<SP: SessionParameters> SimpleMappingFunction<SP> {
+    pub fn is_reproducible(&self) -> bool {
+        !matches!(self, Self::UnattributableWithRng(_))
+    }
+}
+
+#[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum MappingFunction<SP: SessionParameters> {
     Unattributable(UnattributableMappingFunction<SP>),
     UnattributableWithRng(UnattributableMappingFunctionWithRng<SP>),
     SenderAttributable(SenderAttributableMappingFunction<SP>),
     SenderAttributableWithReveal(SenderAttributableWithRevealMappingFunction<SP>),
-    ThirdPartyAttributable {
-        function: ThirdPartyAttributableMappingFunction<SP>,
-        verification: ThirdPartyAttributableVerificationFunction<SP>,
-    },
+    ThirdPartyAttributable(ThirdPartyAttributableMappingFunction<SP>),
 }
 
-impl<SP: SessionParameters> MappingFunction<SP> {
-    pub fn is_reproducible(&self) -> bool {
-        !matches!(self, Self::UnattributableWithRng(_))
+impl<SP: SessionParameters> From<SimpleMappingFunction<SP>> for MappingFunction<SP> {
+    fn from(source: SimpleMappingFunction<SP>) -> Self {
+        match source {
+            SimpleMappingFunction::Unattributable(function) => Self::Unattributable(function),
+            SimpleMappingFunction::UnattributableWithRng(function) => Self::UnattributableWithRng(function),
+            SimpleMappingFunction::SenderAttributable(function) => Self::SenderAttributable(function),
+        }
     }
 }
 
@@ -207,6 +221,16 @@ impl<SP: SessionParameters> Display for ScalarFunction<SP> {
     }
 }
 
+impl<SP: SessionParameters> Display for SimpleMappingFunction<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::UnattributableWithRng(function) => write!(f, "{function}[RNG]"),
+            Self::Unattributable(function) => write!(f, "{function}"),
+            Self::SenderAttributable(function) => write!(f, "{function}"),
+        }
+    }
+}
+
 impl<SP: SessionParameters> Display for MappingFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
@@ -214,7 +238,7 @@ impl<SP: SessionParameters> Display for MappingFunction<SP> {
             Self::Unattributable(function) => write!(f, "{function}"),
             Self::SenderAttributable(function) => write!(f, "{function}"),
             Self::SenderAttributableWithReveal(function) => write!(f, "{function}"),
-            Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),
+            Self::ThirdPartyAttributable(function) => write!(f, "{function}"),
         }
     }
 }

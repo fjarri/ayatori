@@ -170,6 +170,7 @@ fn propagate_groups<SP: SessionParameters>(
                             }
                         }
                     }
+                    ComputeMappingKind::ThirdPartyAttributable { .. } => {}
                 }
             }
             AnyNode::SerializeAndSign(node) => {
@@ -303,12 +304,16 @@ impl<SP: SessionParameters> Ruleset<SP> {
                                 }
                             }
                         }
+                        ComputeMappingKind::ThirdPartyAttributable { .. } => {}
                     }
 
                     let function = match &node.as_ref().kind {
-                        ComputeMappingKind::Simple { function } => function.clone(),
+                        ComputeMappingKind::Simple { function } => MappingFunction::from(function.clone()),
                         ComputeMappingKind::WithReveal { function, .. } => {
                             MappingFunction::SenderAttributableWithReveal(function.clone())
+                        }
+                        ComputeMappingKind::ThirdPartyAttributable { function, .. } => {
+                            MappingFunction::ThirdPartyAttributable(function.clone())
                         }
                     };
 

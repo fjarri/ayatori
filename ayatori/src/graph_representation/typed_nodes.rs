@@ -16,9 +16,9 @@ use super::{
 use crate::{
     entities::{
         CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, EvidenceVerificationFunction,
-        FullName, LocalSignedTag, MappingFunction, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError,
-        ScalarArgumentTag, ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
-        SerializeAndSignFunction,
+        FullName, LocalSignedTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
+        ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
     },
     traits::SessionParameters,
 };
@@ -190,12 +190,16 @@ impl<SP: SessionParameters> CollectNode<SP> {
 #[derive_where::derive_where(Debug)]
 pub(crate) enum ComputeMappingKind<SP: SessionParameters> {
     Simple {
-        function: MappingFunction<SP>,
+        function: SimpleMappingFunction<SP>,
     },
     WithReveal {
         function: SenderAttributableWithRevealMappingFunction<SP>,
         verification: EvidenceVerificationFunction<SP>,
         verification_args: BTreeMap<String, ComputeMappingArg<SP>>,
+    },
+    ThirdPartyAttributable {
+        function: ThirdPartyAttributableMappingFunction<SP>,
+        verification: ThirdPartyAttributableVerificationFunction<SP>,
     },
 }
 
@@ -214,6 +218,10 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
                 verification: verification.clone(),
                 verification_args: args_to_owned(verification_args),
             },
+            Self::ThirdPartyAttributable { function, verification } => Self::ThirdPartyAttributable {
+                function: function.clone(),
+                verification: verification.clone(),
+            },
         }
     }
 
@@ -224,6 +232,7 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
             Self::WithReveal { verification_args, .. } => {
                 *verification_args = args_with_replacements(verification_args, replacements)?;
             }
+            Self::ThirdPartyAttributable { .. } => {}
         }
         Ok(kind)
     }
@@ -678,6 +687,7 @@ impl<SP: SessionParameters> Display for ComputeMappingKind<SP> {
         match self {
             Self::Simple { function } => write!(f, "{function}"),
             Self::WithReveal { function, .. } => write!(f, "{function}"),
+            Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),
         }
     }
 }
