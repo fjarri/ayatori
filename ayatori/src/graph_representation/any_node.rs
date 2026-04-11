@@ -6,6 +6,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use core::fmt::{self, Display, Write};
 
 use super::{
     args::BoundProtocolArgs,
@@ -76,7 +77,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         )
     }
 
-    fn store_in(&self) -> AnyTagRef<'_> {
+    pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
         match self {
             Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
             Self::Collect(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
@@ -148,6 +149,15 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::Receive(node) => Self::Receive(node.without_dependencies()),
             Self::ScalarArgument(node) => Self::ScalarArgument(node.without_dependencies()),
         }
+    }
+
+    #[must_use]
+    pub fn display_tree(&self) -> String {
+        let mut s = String::new();
+        for node in self.flattened_leaves_first() {
+            writeln!(&mut s, "{node}").expect("Display impl for a Node is infallible");
+        }
+        s
     }
 
     fn is_local(&self) -> bool {
@@ -654,5 +664,21 @@ impl<SP: SessionParameters> Iterator for LeavesFirstIterator<SP> {
             self.queue.extend(unprocessed_children.into_iter());
         }
         None
+    }
+}
+
+impl<SP: SessionParameters> Display for AnyNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::ComputeScalar(node) => write!(f, "{}", node),
+            Self::Collect(node) => write!(f, "{}", node),
+            Self::ComputeMapping(node) => write!(f, "{}", node),
+            Self::ComputeMappingWithReveal(node) => write!(f, "{}", node),
+            Self::SerializeAndSign(node) => write!(f, "{}", node),
+            Self::DeserializeAndCheck(node) => write!(f, "{}", node),
+            Self::DirectMessage(node) => write!(f, "{}", node),
+            Self::Receive(node) => write!(f, "{}", node),
+            Self::ScalarArgument(node) => write!(f, "{}", node),
+        }
     }
 }

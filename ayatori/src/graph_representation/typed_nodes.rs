@@ -1,4 +1,13 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::fmt::{self, Display};
+
+use itertools::Itertools;
 
 use super::{
     any_node::AnyNode,
@@ -626,6 +635,143 @@ impl ScalarArgumentNode {
 
     pub(crate) fn without_dependencies(&self) -> Self {
         self.get_strong_ref()
+    }
+}
+
+fn display_args<SP, T>(args: &BTreeMap<String, T>) -> String
+where
+    SP: SessionParameters,
+    AnyNode<SP>: From<T>,
+    T: GeneralizedNode,
+{
+    // TODO: we don't need `get_strong_ref()` if we have AnyNodeRef
+    args.iter()
+        .map(|(name, arg)| format!("{}={}", name, AnyNode::from(arg.get_strong_ref()).store_in()))
+        .join(", ")
+}
+
+fn display_dependencies<SP, T>(dependencies: &[T]) -> String
+where
+    SP: SessionParameters,
+    AnyNode<SP>: From<T>,
+    T: GeneralizedNode,
+{
+    if dependencies.is_empty() {
+        String::new()
+    } else {
+        // TODO: we don't need `get_strong_ref()` if we have AnyNodeRef
+        format!(
+            " when {}",
+            dependencies
+                .iter()
+                .map(|dependency| AnyNode::from(dependency.get_strong_ref()).store_in().to_string())
+                .join(", ")
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for ComputeScalarNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{} = {}({}){}",
+            self.0.store_in,
+            self.0.function,
+            display_args(&self.0.args),
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for ComputeMappingNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}[*] = {}(*, {}){}",
+            self.0.store_in,
+            self.0.function,
+            display_args(&self.0.args),
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for ComputeMappingSenderAttributableWithRevealNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}[*] = {}(*, {}){}",
+            self.0.store_in,
+            self.0.function,
+            display_args(&self.0.args),
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for CollectNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{} = collect({}){}",
+            self.0.store_in,
+            AnyNode::from(self.0.values.get_strong_ref()).store_in(),
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for SerializeAndSignNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}[*] = <serialize_and_sign>(*, {}){}",
+            self.0.store_in,
+            AnyNode::from(self.0.data.get_strong_ref()).store_in(),
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for DeserializeAndCheckNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}[*] = <deserialize_and_check>(*, {}){}",
+            self.0.store_in,
+            AnyNode::from(self.0.data.get_strong_ref()).store_in(),
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for DirectMessageNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}[*] = <send>(*, {}){}",
+            self.0.store_in,
+            AnyNode::from(self.0.data.get_strong_ref()).store_in(),
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for ReceiveNode<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}[*] = <receive {}>(*){}",
+            self.0.store_in,
+            self.0.message_name,
+            display_dependencies(&self.0.dependencies)
+        )
+    }
+}
+
+impl Display for ScalarArgumentNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{} = <argument {}>", self.0.store_in, self.0.name,)
     }
 }
 
