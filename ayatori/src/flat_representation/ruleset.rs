@@ -123,9 +123,12 @@ pub(crate) enum Action<SP: SessionParameters> {
     Terminate(CollectedTag),
 }
 
-// TODO: accept anything castable to AnyNode?
-fn get_on_error<SP: SessionParameters>(node: &AnyNode<SP>, private_inputs: &BTreeSet<String>) -> OnError {
-    match node.reproducibility() {
+fn get_on_error<SP: SessionParameters, T>(node: &T, private_inputs: &BTreeSet<String>) -> OnError
+where
+    T: Into<AnyNode<SP>> + GeneralizedNode,
+{
+    let any_node: AnyNode<SP> = node.get_strong_ref().into();
+    match any_node.reproducibility() {
         Reproducibility::Available { arguments, messages } => {
             if !arguments.is_disjoint(private_inputs) {
                 return OnError::Escalate;
@@ -277,7 +280,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     });
                 }
                 AnyNode::ComputeMapping(node) => {
-                    let on_error = get_on_error(&AnyNode::from(node.get_strong_ref()), private_inputs);
+                    let on_error = get_on_error(&node, private_inputs);
                     let possible_ids = propagated_ids
                         .get(&MappingTag::Computed(node.as_ref().store_in.clone()))
                         .ok_or_else(|| {
@@ -380,7 +383,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     });
                 }
                 AnyNode::DeserializeAndCheck(node) => {
-                    let on_error = get_on_error(&AnyNode::from(node.get_strong_ref()), private_inputs);
+                    let on_error = get_on_error(&node, private_inputs);
 
                     let possible_ids = propagated_ids
                         .get(&MappingTag::Received(node.as_ref().store_in.clone()))

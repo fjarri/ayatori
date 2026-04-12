@@ -640,7 +640,6 @@ where
     AnyNode<SP>: From<T>,
     T: GeneralizedNode,
 {
-    // TODO: we don't need `get_strong_ref()` if we have AnyNodeRef
     args.iter()
         .map(|(name, arg)| format!("{}={}", name, AnyNode::from(arg.get_strong_ref()).store_in()))
         .join(", ")
@@ -655,7 +654,6 @@ where
     if dependencies.is_empty() {
         String::new()
     } else {
-        // TODO: we don't need `get_strong_ref()` if we have AnyNodeRef
         format!(
             " when {}",
             dependencies

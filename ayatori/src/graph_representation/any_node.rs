@@ -52,18 +52,13 @@ impl<SP: SessionParameters> AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
             Self::Collect(node) => Box::new(one_arg_to_any_iter(&node.as_ref().values)),
-            Self::ComputeMapping(node) => {
-                match &node.as_ref().kind {
-                    ComputeMappingKind::Simple { .. } => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
-                    // TODO: is this really the behavior we want?
-                    ComputeMappingKind::WithReveal { verification_args, .. } => {
-                        Box::new(arg_map_to_any_iter(&node.as_ref().args).chain(arg_map_to_any_iter(verification_args)))
-                    }
-                    ComputeMappingKind::ThirdPartyAttributable { .. } => {
-                        Box::new(arg_map_to_any_iter(&node.as_ref().args))
-                    }
+            Self::ComputeMapping(node) => match &node.as_ref().kind {
+                ComputeMappingKind::Simple { .. } => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
+                ComputeMappingKind::WithReveal { verification_args, .. } => {
+                    Box::new(arg_map_to_any_iter(&node.as_ref().args).chain(arg_map_to_any_iter(verification_args)))
                 }
-            }
+                ComputeMappingKind::ThirdPartyAttributable { .. } => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
+            },
             Self::SerializeAndSign(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
             Self::DeserializeAndCheck(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
             Self::DirectMessage(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
@@ -175,9 +170,8 @@ impl<SP: SessionParameters> AnyNode<SP> {
             let args = verification_args
                 .values()
                 .map(GeneralizedNode::get_strong_ref)
-                .map(AnyNode::from)
-                .collect::<Vec<_>>();
-            UnorderedIterator::new_with_nodes(&args, true)
+                .map(AnyNode::from);
+            UnorderedIterator::new_with_nodes(args, true)
         } else {
             self.flattened_args_only()
         };
@@ -355,15 +349,11 @@ impl<SP: SessionParameters> AnyNode<SP> {
         Ok(wrapped)
     }
 
-    // TODO: can we somehow enforce this not changing the root node type?
     fn mutated_tree(&self, f: impl Fn(Self) -> Result<Self, RuntimeError>) -> Result<Self, RuntimeError> {
         let mut replacement_nodes = BTreeMap::new();
 
-        for node in self.flattened_leaves_first() {
-            if node.id() == self.id() {
-                // This is the last element of the iterator, and we will process it separately.
-                break;
-            }
+        // The root node will be processed separately
+        for node in LeavesFirstIterator::new_with_nodes(self.args_and_dependencies()) {
             let old_id = node.id();
             let new_node = f(node)?.with_replacements(&replacement_nodes)?;
             // Note that this may lead to errors if the node with `old_id` is dropped,
@@ -373,7 +363,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
             }
         }
 
-        // TODO: are we processing the root the second time here?
         f(self.get_strong_ref())?.with_replacements(&replacement_nodes)
     }
 
@@ -578,12 +567,12 @@ pub(crate) struct UnorderedIterator<SP: SessionParameters> {
 
 impl<SP: SessionParameters> UnorderedIterator<SP> {
     fn new(root: &AnyNode<SP>, args_only: bool) -> Self {
-        Self::new_with_nodes(&[root.get_strong_ref()], args_only)
+        Self::new_with_nodes(core::iter::once(root.get_strong_ref()), args_only)
     }
 
-    fn new_with_nodes(roots: &[AnyNode<SP>], args_only: bool) -> Self {
+    fn new_with_nodes(roots: impl Iterator<Item = AnyNode<SP>>, args_only: bool) -> Self {
         Self {
-            queue: roots.iter().map(GeneralizedNode::get_strong_ref).collect(),
+            queue: roots.collect(),
             emitted: BTreeSet::new(),
             args_only,
         }
@@ -624,6 +613,13 @@ impl<SP: SessionParameters> LeavesFirstIterator<SP> {
     fn new(root: &AnyNode<SP>) -> Self {
         Self {
             queue: vec![root.get_strong_ref()],
+            emitted: BTreeSet::new(),
+        }
+    }
+
+    fn new_with_nodes(roots: impl Iterator<Item = AnyNode<SP>>) -> Self {
+        Self {
+            queue: roots.collect(),
             emitted: BTreeSet::new(),
         }
     }

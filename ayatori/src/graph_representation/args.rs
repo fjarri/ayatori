@@ -108,7 +108,6 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
         Self(BTreeMap::new())
     }
 
-    // TODO: take any T with AnyNode: From<T>
     #[must_use]
     pub fn input(self, name: &str, value: impl Into<AnyNode<SP>>) -> Self {
         let mut args = self.0;

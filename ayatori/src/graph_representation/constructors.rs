@@ -112,20 +112,46 @@ pub fn mapping_alias<SP: SessionParameters>(
     })
 }
 
-// TODO: we do double Arc clone here: first when creating the arg, then when creating the node. Can this be avoided?
+#[derive_where::derive_where(Debug)]
+pub struct ComputeScalarArgs<SP: SessionParameters>(BTreeMap<String, ComputeScalarArg<SP>>);
+
+impl<SP: SessionParameters, const N: usize> From<&[(&str, ComputeScalarArg<SP>); N]> for ComputeScalarArgs<SP> {
+    /// Note that this implementation will not check for repeating argument names.
+    /// Only the last one will be actually stored.
+    fn from(source: &[(&str, ComputeScalarArg<SP>); N]) -> Self {
+        let mut args = BTreeMap::new();
+        for (name, arg) in source.iter() {
+            args.insert(name.to_string(), arg.get_strong_ref());
+        }
+        Self(args)
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct ComputeMappingArgs<SP: SessionParameters>(BTreeMap<String, ComputeMappingArg<SP>>);
+
+impl<SP: SessionParameters, const N: usize> From<&[(&str, ComputeMappingArg<SP>); N]> for ComputeMappingArgs<SP> {
+    /// Note that this implementation will not check for repeating argument names.
+    /// Only the last one will be actually stored.
+    fn from(source: &[(&str, ComputeMappingArg<SP>); N]) -> Self {
+        let mut args = BTreeMap::new();
+        for (name, arg) in source.iter() {
+            args.insert(name.to_string(), arg.get_strong_ref());
+        }
+        Self(args)
+    }
+}
+
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&Args<SP>) -> Result<Ret, UnattributableError>,
-    args: &[(&str, ComputeScalarArg<SP>)],
+    args: impl Into<ComputeScalarArgs<SP>>,
 ) -> Node<ComputeScalar<SP>> {
+    let args: ComputeScalarArgs<SP> = args.into();
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(function)),
-        // TODO: ensure there are no duplicates
-        args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
+        args: args.0,
         dependencies: Vec::new(),
     })
 }
@@ -133,16 +159,13 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
 pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
-    args: &[(&str, ComputeScalarArg<SP>)],
+    args: impl Into<ComputeScalarArgs<SP>>,
 ) -> Node<ComputeScalar<SP>> {
+    let args: ComputeScalarArgs<SP> = args.into();
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::UnattributableWithRng(UnattributableScalarFunctionWithRng::new_erased(function)),
-        // TODO: ensure there are no duplicates
-        args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
+        args: args.0,
         dependencies: Vec::new(),
     })
 }
@@ -150,18 +173,15 @@ pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
 pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
-    args: &[(&str, ComputeMappingArg<SP>)],
+    args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
+    let args: ComputeMappingArgs<SP> = args.into();
     Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
             function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(function)),
         },
-        // TODO: ensure there are no duplicates
-        args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
+        args: args.0,
         dependencies: Vec::new(),
     })
 }
@@ -169,8 +189,9 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
 pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
-    args: &[(&str, ComputeMappingArg<SP>)],
+    args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
+    let args: ComputeMappingArgs<SP> = args.into();
     Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
@@ -178,11 +199,7 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
                 function,
             )),
         },
-        // TODO: ensure there are no duplicates
-        args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
+        args: args.0,
         dependencies: Vec::new(),
     })
 }
@@ -190,8 +207,9 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
 pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
-    args: &[(&str, ComputeMappingArg<SP>)],
+    args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
+    let args: ComputeMappingArgs<SP> = args.into();
     Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
@@ -199,11 +217,7 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
                 function,
             )),
         },
-        // TODO: ensure there are no duplicates
-        args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
+        args: args.0,
         dependencies: Vec::new(),
     })
 }
@@ -211,21 +225,18 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyAttributableError<SP>>,
-    args: &[(&str, ComputeMappingArg<SP>)],
+    args: impl Into<ComputeMappingArgs<SP>>,
     verification: impl 'static
     + Fn(&SP::Verifier, &SessionId<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
 ) -> Node<ComputeMapping<SP>> {
+    let args: ComputeMappingArgs<SP> = args.into();
     Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::ThirdPartyAttributable {
             function: ThirdPartyAttributableMappingFunction::new_erased(function),
             verification: ThirdPartyAttributableVerificationFunction::new(verification),
         },
-        // TODO: ensure there are no duplicates
-        args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
+        args: args.0,
         dependencies: Vec::new(),
     })
 }
@@ -233,24 +244,20 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
 pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
-    args: &[(&str, ComputeMappingArg<SP>)],
+    args: impl Into<ComputeMappingArgs<SP>>,
     verification: impl 'static + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
-    verification_args: &[(&str, ComputeMappingArg<SP>)],
+    verification_args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
+    let args: ComputeMappingArgs<SP> = args.into();
+    let verification_args: ComputeMappingArgs<SP> = verification_args.into();
     Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::WithReveal {
             function: SenderAttributableWithRevealMappingFunction::new_erased(function),
             verification: EvidenceVerificationFunction::new(verification),
-            verification_args: verification_args
-                .iter()
-                .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-                .collect(),
+            verification_args: verification_args.0,
         },
-        args: args
-            .iter()
-            .map(|(name, arg)| (name.to_string(), arg.get_strong_ref()))
-            .collect(),
+        args: args.0,
         dependencies: Vec::new(),
     })
 }
