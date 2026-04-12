@@ -141,7 +141,6 @@ pub(crate) trait GeneralizedNode {
     fn get_strong_ref(&self) -> Self;
 }
 
-// TODO: do we even need this impl?
 impl<T> GeneralizedNode for Node<T> {
     fn id(&self) -> NodeId {
         self.id()
@@ -179,8 +178,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeScalar<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        node.args = args_with_replacements(&node.args, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        replace_in_btreemap(&mut node.args, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements)?;
         Ok(node)
     }
 }
@@ -239,8 +238,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for Collect<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        node.values = node_with_replacements(&node.values, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        replace_in_node(&mut node.values, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements)?;
         Ok(node)
     }
 }
@@ -303,7 +302,7 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
         match &mut kind {
             Self::Simple { .. } | Self::ThirdPartyAttributable { .. } => {}
             Self::WithReveal { verification_args, .. } => {
-                *verification_args = args_with_replacements(verification_args, replacements)?;
+                replace_in_btreemap(verification_args, replacements)?;
             }
         }
         Ok(kind)
@@ -338,9 +337,9 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeMapping<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        node.args = args_with_replacements(&node.args, replacements)?;
+        replace_in_btreemap(&mut node.args, replacements)?;
         node.kind = node.kind.with_replacements(replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements)?;
         Ok(node)
     }
 }
@@ -404,8 +403,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSign<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        node.data = node_with_replacements(&node.data, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        replace_in_node(&mut node.data, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements)?;
         Ok(node)
     }
 }
@@ -469,8 +468,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for DeserializeAndCheck<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        node.data = node_with_replacements(&node.data, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        replace_in_node(&mut node.data, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements)?;
         Ok(node)
     }
 }
@@ -527,8 +526,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for DirectMessage<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        node.data = node_with_replacements(&node.data, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        replace_in_node(&mut node.data, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements)?;
         Ok(node)
     }
 }
@@ -575,7 +574,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for Receive<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements)?;
         Ok(node)
     }
 }
@@ -775,7 +774,6 @@ impl<SP: SessionParameters> Display for ScalarArgument<SP> {
     }
 }
 
-// TODO: change name; it doesn't really mention args explicitly, it's just a mapping of BTreeMap
 pub(crate) fn args_to_owned<T>(args: &BTreeMap<String, T>) -> BTreeMap<String, T>
 where
     T: GeneralizedNode,
@@ -792,49 +790,44 @@ where
     nodes.iter().map(GeneralizedNode::get_strong_ref).collect()
 }
 
-fn node_with_replacements<SP, T>(node: &T, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<T, RuntimeError>
+fn replace_in_node<SP, T>(node: &mut T, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<(), RuntimeError>
 where
     SP: SessionParameters,
     T: GeneralizedNode + TryFrom<AnyNode<SP>>,
 {
     if let Some(new_node) = replacements.get(&node.id()) {
-        let new_node = new_node
+        *node = new_node
             .get_strong_ref()
             .try_into()
             .map_err(|_| RuntimeError::new("Replacement of an unsupported type"))?;
-        Ok(new_node)
-    } else {
-        Ok(node.get_strong_ref())
     }
+    Ok(())
 }
 
-// TODO: can we take `args` by value?
-fn args_with_replacements<SP, T>(
-    args: &BTreeMap<String, T>,
+fn replace_in_btreemap<SP, T>(
+    collection: &mut BTreeMap<String, T>,
     replacements: &BTreeMap<usize, AnyNode<SP>>,
-) -> Result<BTreeMap<String, T>, RuntimeError>
+) -> Result<(), RuntimeError>
 where
     SP: SessionParameters,
     T: GeneralizedNode + TryFrom<AnyNode<SP>>,
 {
-    let mut new_args = BTreeMap::new();
-    for (name, arg) in args {
-        new_args.insert(name.clone(), node_with_replacements(arg, replacements)?);
+    for node in collection.values_mut() {
+        replace_in_node(node, replacements)?;
     }
-    Ok(new_args)
+    Ok(())
 }
 
-fn vec_with_replacements<SP, T>(
-    nodes: &Vec<T>,
+fn replace_in_slice<SP, T>(
+    collection: &mut [T],
     replacements: &BTreeMap<usize, AnyNode<SP>>,
-) -> Result<Vec<T>, RuntimeError>
+) -> Result<(), RuntimeError>
 where
     SP: SessionParameters,
     T: GeneralizedNode + TryFrom<AnyNode<SP>>,
 {
-    let mut new_vec = Vec::new();
-    for node in nodes {
-        new_vec.push(node_with_replacements(node, replacements)?);
+    for node in collection.iter_mut() {
+        replace_in_node(node, replacements)?;
     }
-    Ok(new_vec)
+    Ok(())
 }
