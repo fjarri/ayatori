@@ -28,7 +28,13 @@ pub(crate) type NodeId = usize;
 pub(crate) trait SpecificNode: Sized {
     type Inner;
     fn as_arc(&self) -> &Arc<Self::Inner>;
+    fn into_arc(self) -> Arc<Self::Inner>;
     fn from_arc(arc: Arc<Self::Inner>) -> Self;
+
+    // We don't want to expose Clone to users because its behavior is not intuitive when applied to a graph node.
+    // So we have this method instead that is crate-private and has more defined semantics.
+    /// Clones the node contents but not the child nodes it might have (arguments/dependencies).
+    fn shallow_clone(&self) -> Self::Inner;
 
     fn new(inner: Self::Inner) -> Self {
         Self::from_arc(Arc::new(inner))
@@ -68,17 +74,20 @@ pub(crate) struct ComputeScalar<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SpecificNode for ComputeScalarNode<SP> {
     type Inner = ComputeScalar<SP>;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl<SP: SessionParameters> ComputeScalarNode<SP> {
-    // TODO: add `unwrap_or_shallow_clone()`
-    pub(crate) fn shallow_clone(&self) -> ComputeScalar<SP> {
+    fn shallow_clone(&self) -> Self::Inner {
         ComputeScalar {
             store_in: self.0.store_in.clone(),
             function: self.0.function.clone(),
@@ -86,7 +95,9 @@ impl<SP: SessionParameters> ComputeScalarNode<SP> {
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
+}
 
+impl<SP: SessionParameters> ComputeScalarNode<SP> {
     // TODO: do any of these methods belong in a trait?
 
     // TODO: should this be a method on ComputeScalar instead?
@@ -143,16 +154,20 @@ pub(crate) struct Collect<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SpecificNode for CollectNode<SP> {
     type Inner = Collect<SP>;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl<SP: SessionParameters> CollectNode<SP> {
-    pub(crate) fn shallow_clone(&self) -> Collect<SP> {
+    fn shallow_clone(&self) -> Self::Inner {
         Collect {
             store_in: self.0.store_in.clone(),
             values: self.0.values.get_strong_ref(),
@@ -160,7 +175,9 @@ impl<SP: SessionParameters> CollectNode<SP> {
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
+}
 
+impl<SP: SessionParameters> CollectNode<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self.shallow_clone();
         node.values = node_with_replacements(&self.0.values, replacements)?;
@@ -252,16 +269,20 @@ pub(crate) struct ComputeMapping<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SpecificNode for ComputeMappingNode<SP> {
     type Inner = ComputeMapping<SP>;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl<SP: SessionParameters> ComputeMappingNode<SP> {
-    pub(crate) fn shallow_clone(&self) -> ComputeMapping<SP> {
+    fn shallow_clone(&self) -> Self::Inner {
         ComputeMapping {
             store_in: self.0.store_in.clone(),
             args: args_to_owned(&self.0.args),
@@ -269,7 +290,9 @@ impl<SP: SessionParameters> ComputeMappingNode<SP> {
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
+}
 
+impl<SP: SessionParameters> ComputeMappingNode<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self.shallow_clone();
         node.args = args_with_replacements(&node.args, replacements)?;
@@ -325,16 +348,20 @@ pub(crate) struct SerializeAndSign<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SpecificNode for SerializeAndSignNode<SP> {
     type Inner = SerializeAndSign<SP>;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl<SP: SessionParameters> SerializeAndSignNode<SP> {
-    pub(crate) fn shallow_clone(&self) -> SerializeAndSign<SP> {
+    fn shallow_clone(&self) -> Self::Inner {
         SerializeAndSign {
             store_in: self.0.store_in.clone(),
             function: self.0.function.clone(),
@@ -344,7 +371,9 @@ impl<SP: SessionParameters> SerializeAndSignNode<SP> {
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
+}
 
+impl<SP: SessionParameters> SerializeAndSignNode<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self.shallow_clone();
         node.data = node_with_replacements(&node.data, replacements)?;
@@ -400,16 +429,20 @@ pub(crate) struct DeserializeAndCheck<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SpecificNode for DeserializeAndCheckNode<SP> {
     type Inner = DeserializeAndCheck<SP>;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl<SP: SessionParameters> DeserializeAndCheckNode<SP> {
-    pub(crate) fn shallow_clone(&self) -> DeserializeAndCheck<SP> {
+    fn shallow_clone(&self) -> Self::Inner {
         DeserializeAndCheck {
             store_in: self.0.store_in.clone(),
             function: self.0.function.clone(),
@@ -419,7 +452,9 @@ impl<SP: SessionParameters> DeserializeAndCheckNode<SP> {
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
+}
 
+impl<SP: SessionParameters> DeserializeAndCheckNode<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self.shallow_clone();
         node.data = node_with_replacements(&node.data, replacements)?;
@@ -472,23 +507,29 @@ pub(crate) struct DirectMessage<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SpecificNode for DirectMessageNode<SP> {
     type Inner = DirectMessage<SP>;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl<SP: SessionParameters> DirectMessageNode<SP> {
-    pub(crate) fn shallow_clone(&self) -> DirectMessage<SP> {
+    fn shallow_clone(&self) -> Self::Inner {
         DirectMessage {
             store_in: self.0.store_in.clone(),
             data: self.0.data.get_strong_ref(),
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
+}
 
+impl<SP: SessionParameters> DirectMessageNode<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self.shallow_clone();
         node.data = node_with_replacements(&node.data, replacements)?;
@@ -529,23 +570,29 @@ pub(crate) struct Receive<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SpecificNode for ReceiveNode<SP> {
     type Inner = Receive<SP>;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl<SP: SessionParameters> ReceiveNode<SP> {
-    pub(crate) fn shallow_clone(&self) -> Receive<SP> {
+    fn shallow_clone(&self) -> Self::Inner {
         Receive {
             store_in: self.0.store_in.clone(),
             message_name: self.0.message_name.clone(),
             dependencies: node_slice_to_owned(&self.0.dependencies),
         }
     }
+}
 
+impl<SP: SessionParameters> ReceiveNode<SP> {
     pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self.shallow_clone();
         node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
@@ -596,22 +643,28 @@ pub(crate) struct ScalarArgument {
 
 impl SpecificNode for ScalarArgumentNode {
     type Inner = ScalarArgument;
+
     fn as_arc(&self) -> &Arc<Self::Inner> {
         &self.0
     }
+
+    fn into_arc(self) -> Arc<Self::Inner> {
+        self.0
+    }
+
     fn from_arc(arc: Arc<Self::Inner>) -> Self {
         Self(arc)
     }
-}
 
-impl ScalarArgumentNode {
-    pub(crate) fn shallow_clone(&self) -> ScalarArgument {
+    fn shallow_clone(&self) -> Self::Inner {
         ScalarArgument {
             store_in: self.0.store_in.clone(),
             name: self.0.name.clone(),
         }
     }
+}
 
+impl ScalarArgumentNode {
     pub(crate) fn with_replacements<SP: SessionParameters>(
         &self,
         _replacements: &BTreeMap<usize, AnyNode<SP>>,
