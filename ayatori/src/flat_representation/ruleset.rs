@@ -14,7 +14,7 @@ use crate::{
         LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, ReceivedTag, RemoteSignedTag, RuntimeError,
         ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
-    graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, Reproducibility, SpecificNode},
+    graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, Reproducibility},
     traits::SessionParameters,
 };
 

@@ -4,7 +4,11 @@ use alloc::{
     string::{String, ToString},
 };
 
-use super::{any_node::AnyNode, constructors::scalar_argument, typed_nodes::ScalarArgumentNode};
+use super::{
+    any_node::AnyNode,
+    constructors::scalar_argument,
+    typed_nodes::{Node, ScalarArgument},
+};
 use crate::{
     entities::{Erasable, RuntimeError, Value},
     traits::SessionParameters,
@@ -75,9 +79,9 @@ impl PublicInputs {
 }
 
 #[derive(Debug, Default)]
-pub struct ArgNodes(BTreeMap<String, ScalarArgumentNode>);
+pub struct ArgNodes<SP: SessionParameters>(BTreeMap<String, Node<ScalarArgument<SP>>>);
 
-impl ArgNodes {
+impl<SP: SessionParameters> ArgNodes<SP> {
     pub(crate) fn new(signature: &ProtocolSignature) -> Self {
         Self(
             signature
@@ -88,7 +92,7 @@ impl ArgNodes {
         )
     }
 
-    pub fn get(&self, name: &str) -> Result<&ScalarArgumentNode, RuntimeError> {
+    pub fn get(&self, name: &str) -> Result<&Node<ScalarArgument<SP>>, RuntimeError> {
         self.0
             .get(name)
             .ok_or_else(|| RuntimeError::new(format!("Argument {name} was not found")))

@@ -5,7 +5,10 @@ mod typed_nodes;
 mod unions;
 
 pub(crate) use any_node::Reproducibility;
-pub(crate) use typed_nodes::{ComputeMappingKind, GeneralizedNode, SpecificNode};
+pub(crate) use typed_nodes::{ComputeMappingKind, GeneralizedNode};
+
+#[cfg(any(test, feature = "dev"))]
+pub(crate) use typed_nodes::ShallowClone;
 
 pub use any_node::AnyNode;
 pub use args::{ArgNodes, PartyBuildData, PrivateInputs, ProtocolArgs, ProtocolSignature, PublicInputs};
@@ -16,8 +19,8 @@ pub use constructors::{
     scalar_alias,
 };
 pub use typed_nodes::{
-    CollectNode, ComputeMappingNode, ComputeScalarNode, DeserializeAndCheckNode, DirectMessageNode, ReceiveNode,
-    ScalarArgumentNode, SerializeAndSignNode,
+    Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, DirectMessage, Node, Receive, ScalarArgument,
+    SerializeAndSign,
 };
 pub use unions::{
     BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode,

@@ -12,9 +12,8 @@ use super::{
     args::BoundProtocolArgs,
     constructors::collect,
     typed_nodes::{
-        CollectNode, ComputeMapping, ComputeMappingKind, ComputeMappingNode, ComputeScalar, ComputeScalarNode,
-        DeserializeAndCheckNode, DirectMessageNode, GeneralizedNode, NodeId, ReceiveNode, ScalarArgumentNode,
-        SerializeAndSignNode, SpecificNode, args_to_owned,
+        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
+        GeneralizedNode, Node, NodeId, Receive, ScalarArgument, SerializeAndSign, args_to_owned,
     },
     unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
@@ -38,14 +37,14 @@ pub(crate) enum Reproducibility {
 
 #[derive_where::derive_where(Debug)]
 pub enum AnyNode<SP: SessionParameters> {
-    ComputeScalar(ComputeScalarNode<SP>),
-    Collect(CollectNode<SP>),
-    ComputeMapping(ComputeMappingNode<SP>),
-    SerializeAndSign(SerializeAndSignNode<SP>),
-    DeserializeAndCheck(DeserializeAndCheckNode<SP>),
-    DirectMessage(DirectMessageNode<SP>),
-    Receive(ReceiveNode<SP>),
-    ScalarArgument(ScalarArgumentNode),
+    ComputeScalar(Node<ComputeScalar<SP>>),
+    Collect(Node<Collect<SP>>),
+    ComputeMapping(Node<ComputeMapping<SP>>),
+    SerializeAndSign(Node<SerializeAndSign<SP>>),
+    DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
+    DirectMessage(Node<DirectMessage<SP>>),
+    Receive(Node<Receive<SP>>),
+    ScalarArgument(Node<ScalarArgument<SP>>),
 }
 
 impl<SP: SessionParameters> AnyNode<SP> {
@@ -109,7 +108,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         }
     }
 
-    fn with_replacements(&self, replacements: &BTreeMap<NodeId, Self>) -> Result<Self, RuntimeError> {
+    fn with_replacements(self, replacements: &BTreeMap<NodeId, Self>) -> Result<Self, RuntimeError> {
         Ok(match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.with_replacements(replacements)?),
             Self::Collect(node) => Self::Collect(node.with_replacements(replacements)?),
@@ -122,7 +121,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         })
     }
 
-    fn with_added_prefix(&self, prefix: &str) -> Self {
+    fn with_added_prefix(self, prefix: &str) -> Self {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.with_added_prefix(prefix)),
             Self::Collect(node) => Self::Collect(node.with_added_prefix(prefix)),
@@ -135,7 +134,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         }
     }
 
-    fn without_dependencies(&self) -> Self {
+    fn without_dependencies(self) -> Self {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.without_dependencies()),
             Self::Collect(node) => Self::Collect(node.without_dependencies()),
@@ -144,7 +143,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.without_dependencies()),
             Self::DirectMessage(node) => Self::DirectMessage(node.without_dependencies()),
             Self::Receive(node) => Self::Receive(node.without_dependencies()),
-            Self::ScalarArgument(node) => Self::ScalarArgument(node.without_dependencies()),
+            Self::ScalarArgument(node) => Self::ScalarArgument(node), // Does not have dependencies
         }
     }
 
@@ -281,7 +280,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         {
             let associated_data = associated_data.clone();
             let verification = verification.clone();
-            Self::from(ComputeMappingNode::new(ComputeMapping {
+            Self::from(Node::new(ComputeMapping {
                 store_in: node.as_ref().store_in.clone(),
                 kind: ComputeMappingKind::Simple {
                     function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
@@ -297,7 +296,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             && let SimpleMappingFunction::SenderAttributable(function) = function
         {
             let function = function.clone();
-            Self::from(ComputeMappingNode::new(ComputeMapping {
+            Self::from(Node::new(ComputeMapping {
                 store_in: node.as_ref().store_in.clone(),
                 kind: ComputeMappingKind::Simple {
                     function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
@@ -338,7 +337,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         };
         let arg_name = "value";
         let guilty_party = guilty_party.clone();
-        let wrapped = OutputNode::ComputeScalar(ComputeScalarNode::new(ComputeScalar {
+        let wrapped = OutputNode::ComputeScalar(Node::new(ComputeScalar {
             store_in: original_output_tag.clone(),
             function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(
                 move |args| -> Result<EvidenceVerdict, UnattributableError> {
@@ -434,56 +433,56 @@ impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for AnyNode<SP> {
-    fn from(source: &ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for AnyNode<SP> {
+    fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<ComputeScalarNode<SP>> for AnyNode<SP> {
-    fn from(source: ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<ComputeScalar<SP>>> for AnyNode<SP> {
+    fn from(source: Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source)
     }
 }
 
-impl<SP: SessionParameters> From<CollectNode<SP>> for AnyNode<SP> {
-    fn from(source: CollectNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<Collect<SP>>> for AnyNode<SP> {
+    fn from(source: Node<Collect<SP>>) -> Self {
         Self::Collect(source)
     }
 }
 
-impl<SP: SessionParameters> From<ComputeMappingNode<SP>> for AnyNode<SP> {
-    fn from(source: ComputeMappingNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<ComputeMapping<SP>>> for AnyNode<SP> {
+    fn from(source: Node<ComputeMapping<SP>>) -> Self {
         Self::ComputeMapping(source)
     }
 }
 
-impl<SP: SessionParameters> From<SerializeAndSignNode<SP>> for AnyNode<SP> {
-    fn from(source: SerializeAndSignNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<SerializeAndSign<SP>>> for AnyNode<SP> {
+    fn from(source: Node<SerializeAndSign<SP>>) -> Self {
         Self::SerializeAndSign(source)
     }
 }
 
-impl<SP: SessionParameters> From<DeserializeAndCheckNode<SP>> for AnyNode<SP> {
-    fn from(source: DeserializeAndCheckNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<DeserializeAndCheck<SP>>> for AnyNode<SP> {
+    fn from(source: Node<DeserializeAndCheck<SP>>) -> Self {
         Self::DeserializeAndCheck(source)
     }
 }
 
-impl<SP: SessionParameters> From<DirectMessageNode<SP>> for AnyNode<SP> {
-    fn from(source: DirectMessageNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<DirectMessage<SP>>> for AnyNode<SP> {
+    fn from(source: Node<DirectMessage<SP>>) -> Self {
         Self::DirectMessage(source)
     }
 }
 
-impl<SP: SessionParameters> From<ReceiveNode<SP>> for AnyNode<SP> {
-    fn from(source: ReceiveNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<Receive<SP>>> for AnyNode<SP> {
+    fn from(source: Node<Receive<SP>>) -> Self {
         Self::Receive(source)
     }
 }
 
-impl<SP: SessionParameters> From<ScalarArgumentNode> for AnyNode<SP> {
-    fn from(source: ScalarArgumentNode) -> Self {
+impl<SP: SessionParameters> From<Node<ScalarArgument<SP>>> for AnyNode<SP> {
+    fn from(source: Node<ScalarArgument<SP>>) -> Self {
         Self::ScalarArgument(source)
     }
 }

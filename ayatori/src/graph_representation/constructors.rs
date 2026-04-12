@@ -4,6 +4,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 use signature::rand_core::CryptoRngCore;
@@ -12,9 +13,8 @@ use super::{
     any_node::AnyNode,
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
     typed_nodes::{
-        Collect, CollectNode, ComputeMapping, ComputeMappingKind, ComputeMappingNode, ComputeScalar, ComputeScalarNode,
-        DeserializeAndCheck, DeserializeAndCheckNode, DirectMessage, DirectMessageNode, GeneralizedNode, Receive,
-        ReceiveNode, ScalarArgument, ScalarArgumentNode, SerializeAndSign, SerializeAndSignNode, SpecificNode,
+        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
+        GeneralizedNode, Node, Receive, ScalarArgument, SerializeAndSign,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
 };
@@ -57,16 +57,17 @@ impl<SP: SessionParameters> ProtocolMessage<SP> {
     }
 }
 
-pub(crate) fn scalar_argument(name: &str) -> ScalarArgumentNode {
-    ScalarArgumentNode::new(ScalarArgument {
+pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<ScalarArgument<SP>> {
+    Node::new(ScalarArgument {
         store_in: ScalarArgumentTag::new(name),
         name: name.into(),
+        phantom: PhantomData,
     })
 }
 
-pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> ComputeScalarNode<SP> {
+pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<ComputeScalar<SP>> {
     let erased_value = Value::new(value);
-    ComputeScalarNode::new(ComputeScalar {
+    Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(name, move |_args| {
             Ok(erased_value.clone())
@@ -77,9 +78,12 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
 }
 
 #[must_use]
-pub fn scalar_alias<SP: SessionParameters>(name: &str, node: impl Into<ComputeScalarArg<SP>>) -> ComputeScalarNode<SP> {
+pub fn scalar_alias<SP: SessionParameters>(
+    name: &str,
+    node: impl Into<ComputeScalarArg<SP>>,
+) -> Node<ComputeScalar<SP>> {
     let arg_name = "value";
-    ComputeScalarNode::new(ComputeScalar {
+    Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name("alias", move |args| {
             Ok(args.get_value(arg_name)?.clone())
@@ -93,9 +97,9 @@ pub fn scalar_alias<SP: SessionParameters>(name: &str, node: impl Into<ComputeSc
 pub fn mapping_alias<SP: SessionParameters>(
     name: &str,
     node: impl Into<ComputeMappingArg<SP>>,
-) -> ComputeMappingNode<SP> {
+) -> Node<ComputeMapping<SP>> {
     let arg_name = "value";
-    ComputeMappingNode::new(ComputeMapping {
+    Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
             function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
@@ -113,8 +117,8 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&Args<SP>) -> Result<Ret, UnattributableError>,
     args: &[(&str, ComputeScalarArg<SP>)],
-) -> ComputeScalarNode<SP> {
-    ComputeScalarNode::new(ComputeScalar {
+) -> Node<ComputeScalar<SP>> {
+    Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(function)),
         // TODO: ensure there are no duplicates
@@ -130,8 +134,8 @@ pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: &[(&str, ComputeScalarArg<SP>)],
-) -> ComputeScalarNode<SP> {
-    ComputeScalarNode::new(ComputeScalar {
+) -> Node<ComputeScalar<SP>> {
+    Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
         function: ScalarFunction::UnattributableWithRng(UnattributableScalarFunctionWithRng::new_erased(function)),
         // TODO: ensure there are no duplicates
@@ -147,8 +151,8 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: &[(&str, ComputeMappingArg<SP>)],
-) -> ComputeMappingNode<SP> {
-    ComputeMappingNode::new(ComputeMapping {
+) -> Node<ComputeMapping<SP>> {
+    Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
             function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(function)),
@@ -166,8 +170,8 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
     args: &[(&str, ComputeMappingArg<SP>)],
-) -> ComputeMappingNode<SP> {
-    ComputeMappingNode::new(ComputeMapping {
+) -> Node<ComputeMapping<SP>> {
+    Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
             function: SimpleMappingFunction::SenderAttributable(SenderAttributableMappingFunction::new_erased(
@@ -187,8 +191,8 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: &[(&str, ComputeMappingArg<SP>)],
-) -> ComputeMappingNode<SP> {
-    ComputeMappingNode::new(ComputeMapping {
+) -> Node<ComputeMapping<SP>> {
+    Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::Simple {
             function: SimpleMappingFunction::UnattributableWithRng(UnattributableMappingFunctionWithRng::new_erased(
@@ -210,8 +214,8 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     args: &[(&str, ComputeMappingArg<SP>)],
     verification: impl 'static
     + Fn(&SP::Verifier, &SessionId<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
-) -> ComputeMappingNode<SP> {
-    ComputeMappingNode::new(ComputeMapping {
+) -> Node<ComputeMapping<SP>> {
+    Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::ThirdPartyAttributable {
             function: ThirdPartyAttributableMappingFunction::new_erased(function),
@@ -232,8 +236,8 @@ pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: E
     args: &[(&str, ComputeMappingArg<SP>)],
     verification: impl 'static + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
     verification_args: &[(&str, ComputeMappingArg<SP>)],
-) -> ComputeMappingNode<SP> {
-    ComputeMappingNode::new(ComputeMapping {
+) -> Node<ComputeMapping<SP>> {
+    Node::new(ComputeMapping {
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::WithReveal {
             function: SenderAttributableWithRevealMappingFunction::new_erased(function),
@@ -272,12 +276,12 @@ pub fn broadcast<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     scalar: impl Into<BroadcastArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
-) -> CollectNode<SP> {
+) -> Node<Collect<SP>> {
     let scalar: BroadcastArg<SP> = scalar.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
 
-    let serialize_and_sign = SerializeAndSignNode::new(SerializeAndSign {
+    let serialize_and_sign = Node::new(SerializeAndSign {
         store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
         data: scalar.into(),
@@ -286,7 +290,7 @@ pub fn broadcast<SP: SessionParameters>(
         dependencies: Vec::new(),
     });
 
-    let send_node = DirectMessageNode::new(DirectMessage {
+    let send_node = Node::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
         dependencies: Vec::new(),
@@ -299,12 +303,12 @@ pub fn direct_message<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     data: impl Into<DirectMessageArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
-) -> CollectNode<SP> {
+) -> Node<Collect<SP>> {
     let data: DirectMessageArg<SP> = data.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
 
-    let serialize_and_sign = SerializeAndSignNode::new(SerializeAndSign {
+    let serialize_and_sign = Node::new(SerializeAndSign {
         store_in: signed_tag,
         function: SerializeAndSignFunction::new(default_serialize_and_sign),
         data: data.get_strong_ref(),
@@ -313,7 +317,7 @@ pub fn direct_message<SP: SessionParameters>(
         dependencies: Vec::new(),
     });
 
-    let send_node = DirectMessageNode::new(DirectMessage {
+    let send_node = Node::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
         dependencies: Vec::new(),
@@ -344,18 +348,18 @@ fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Res
 
 pub fn receive_split<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
-) -> (ReceiveNode<SP>, DeserializeAndCheckNode<SP>) {
+) -> (Node<Receive<SP>>, Node<DeserializeAndCheck<SP>>) {
     let receive_store_in = RemoteSignedTag::new(message.name());
     let deserialize_store_in = receive_store_in.to_received();
     let message_name = FullName::new(message.name());
 
-    let receive = ReceiveNode::new(Receive {
+    let receive = Node::new(Receive {
         store_in: receive_store_in,
         message_name: message_name.clone(),
         dependencies: Vec::new(),
     });
 
-    let deserialize = DeserializeAndCheckNode::new(DeserializeAndCheck {
+    let deserialize = Node::new(DeserializeAndCheck {
         store_in: deserialize_store_in,
         function: DeserializeFunction::new(default_deserialize),
         data: receive.get_strong_ref(),
@@ -368,7 +372,7 @@ pub fn receive_split<SP: SessionParameters>(
 }
 
 #[must_use]
-pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> DeserializeAndCheckNode<SP> {
+pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Node<DeserializeAndCheck<SP>> {
     let (_receive, deserialize) = receive_split(message);
     deserialize
 }
@@ -376,10 +380,10 @@ pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Deserial
 pub fn collect<SP: SessionParameters>(
     values: impl Into<CollectArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
-) -> CollectNode<SP> {
+) -> Node<Collect<SP>> {
     let values = values.into();
     let store_in = values.store_in();
-    CollectNode::new(Collect {
+    Node::new(Collect {
         store_in: store_in.to_collected(),
         values,
         group: group.clone(),

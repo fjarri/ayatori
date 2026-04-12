@@ -165,7 +165,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
-    type OutputNode = ComputeScalarNode<SP>;
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -175,7 +175,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     fn build(
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        _inputs: ArgNodes,
+        _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<u64>("X");
         let message_y = ProtocolMessage::new::<u64>("Y");

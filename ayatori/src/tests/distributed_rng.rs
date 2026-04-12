@@ -78,7 +78,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
     type BuildData = PartyGroup<SP::Verifier>;
-    type OutputNode = ComputeScalarNode<SP>;
+    type OutputNode = Node<ComputeScalar<SP>>;
 
     fn signature() -> ProtocolSignature {
         ProtocolSignature::new()
@@ -87,7 +87,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
     fn build(
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        _inputs: ArgNodes,
+        _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
         let message_b = ProtocolMessage::new::<u64>("b");
         let message_r = ProtocolMessage::new::<u64>("r");

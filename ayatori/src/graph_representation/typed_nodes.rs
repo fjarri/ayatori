@@ -5,7 +5,10 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::fmt::{self, Display};
+use core::{
+    fmt::{self, Display},
+    marker::PhantomData,
+};
 
 use itertools::Itertools;
 
@@ -23,114 +26,181 @@ use crate::{
     traits::SessionParameters,
 };
 
+#[derive(Debug)]
+pub struct Node<T>(Arc<T>);
+
+impl<T> Node<T> {
+    pub(crate) fn new(inner: T) -> Self {
+        Self(Arc::new(inner))
+    }
+
+    pub(crate) fn as_ref(&self) -> &T {
+        self.0.as_ref()
+    }
+
+    fn id(&self) -> NodeId {
+        // Using the pointer adderss of `Arc` to uniquely identify nodes. A little hacky.
+        Arc::as_ptr(&self.0) as NodeId
+    }
+
+    fn get_strong_ref(&self) -> Self {
+        Self(self.0.clone())
+    }
+
+    fn unwrap_or_shallow_clone(self) -> T
+    where
+        T: ShallowClone,
+    {
+        Arc::try_unwrap(self.0).unwrap_or_else(|inner| inner.shallow_clone())
+    }
+
+    pub(crate) fn try_mutated(self, f: impl FnOnce(T) -> Result<T, RuntimeError>) -> Result<Self, RuntimeError>
+    where
+        T: ShallowClone,
+    {
+        Ok(Self::new(f(self.unwrap_or_shallow_clone())?))
+    }
+
+    pub(crate) fn mutated(self, f: impl FnOnce(T) -> T) -> Self
+    where
+        T: ShallowClone,
+    {
+        Self::new(f(self.unwrap_or_shallow_clone()))
+    }
+
+    pub(crate) fn with_replacements<SP>(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError>
+    where
+        SP: SessionParameters,
+        T: ShallowClone + SpecificNode<SP>,
+    {
+        self.try_mutated(|inner| inner.with_replacements(replacements))
+    }
+
+    pub(crate) fn with_added_prefix<SP>(self, prefix: &str) -> Self
+    where
+        SP: SessionParameters,
+        T: ShallowClone + SpecificNode<SP>,
+    {
+        self.mutated(|inner| inner.with_added_prefix(prefix))
+    }
+
+    #[must_use]
+    pub fn with_dependency<SP>(self, dependency: impl Into<Dependency<SP>>) -> Self
+    where
+        SP: SessionParameters,
+        T: HasDependencies<SP>,
+    {
+        self.mutated(|inner| inner.with_dependency(dependency))
+    }
+
+    pub(crate) fn without_dependencies<SP>(self) -> Self
+    where
+        SP: SessionParameters,
+        T: HasDependencies<SP>,
+    {
+        self.mutated(sealed::HasDependenciesInner::without_dependencies)
+    }
+}
+
 pub(crate) type NodeId = usize;
 
-pub(crate) trait SpecificNode: Sized {
-    type Inner;
-    fn as_arc(&self) -> &Arc<Self::Inner>;
-    fn into_arc(self) -> Arc<Self::Inner>;
-    fn from_arc(arc: Arc<Self::Inner>) -> Self;
+pub(crate) trait SpecificNode<SP: SessionParameters>: Sized {
+    fn with_added_prefix(self, prefix: &str) -> Self;
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError>;
+}
+
+// We want the user to see which nodes can have dependencies (and can have `with_dependency()` called on them),
+// but we don't want to expose the specifics of what the trait does.
+// So it has to be sealed here (along with ShallowClone it depends on).
+mod sealed {
+    use super::{Dependency, SessionParameters};
 
     // We don't want to expose Clone to users because its behavior is not intuitive when applied to a graph node.
     // So we have this method instead that is crate-private and has more defined semantics.
-    /// Clones the node contents but not the child nodes it might have (arguments/dependencies).
-    fn shallow_clone(&self) -> Self::Inner;
-
-    fn new(inner: Self::Inner) -> Self {
-        Self::from_arc(Arc::new(inner))
+    pub trait ShallowClone {
+        /// Clones the node contents but not the child nodes it might have (arguments/dependencies).
+        fn shallow_clone(&self) -> Self;
     }
 
-    fn as_ref(&self) -> &Self::Inner {
-        self.as_arc()
+    pub trait HasDependenciesInner<SP: SessionParameters>: ShallowClone {
+        fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self;
+
+        fn without_dependencies(self) -> Self;
     }
 }
+
+pub(crate) use sealed::ShallowClone;
+
+pub trait HasDependencies<SP: SessionParameters>: sealed::HasDependenciesInner<SP> {}
+
+impl<SP: SessionParameters, T: sealed::HasDependenciesInner<SP>> HasDependencies<SP> for T {}
 
 pub(crate) trait GeneralizedNode {
     fn id(&self) -> NodeId;
     fn get_strong_ref(&self) -> Self;
 }
 
-impl<T: SpecificNode> GeneralizedNode for T {
+// TODO: do we even need this impl?
+impl<T> GeneralizedNode for Node<T> {
     fn id(&self) -> NodeId {
-        // Using the pointer adderss of `Arc` to uniquely identify nodes. A little hacky.
-        Arc::as_ptr(self.as_arc()) as NodeId
+        self.id()
     }
-
     fn get_strong_ref(&self) -> Self {
-        Self::from_arc(self.as_arc().clone())
+        self.get_strong_ref()
     }
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct ComputeScalarNode<SP: SessionParameters>(Arc<ComputeScalar<SP>>);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct ComputeScalar<SP: SessionParameters> {
+pub struct ComputeScalar<SP: SessionParameters> {
     pub(crate) store_in: ComputedScalarTag,
     pub(crate) function: ScalarFunction<SP>,
     pub(crate) args: BTreeMap<String, ComputeScalarArg<SP>>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> SpecificNode for ComputeScalarNode<SP> {
-    type Inner = ComputeScalar<SP>;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
-        ComputeScalar {
-            store_in: self.0.store_in.clone(),
-            function: self.0.function.clone(),
-            args: args_to_owned(&self.0.args),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
+impl<SP: SessionParameters> ShallowClone for ComputeScalar<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            function: self.function.clone(),
+            args: args_to_owned(&self.args),
+            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
-impl<SP: SessionParameters> ComputeScalarNode<SP> {
-    // TODO: do any of these methods belong in a trait?
+impl<SP: SessionParameters> SpecificNode<SP> for ComputeScalar<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node
+    }
 
-    // TODO: should this be a method on ComputeScalar instead?
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
         node.args = args_with_replacements(&node.args, replacements)?;
         node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
-        node.store_in = node.store_in.with_added_prefix(prefix);
-        Self::new(node)
-    }
-
-    #[must_use]
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let dependency = dependency.into();
-        let mut node = self.shallow_clone();
-        node.dependencies.push(dependency);
-        Self::new(node)
-    }
-
-    // TODO: inefficient, we don't really need to copy dependencies
-    pub(crate) fn without_dependencies(&self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
-        Self::new(node)
+        Ok(node)
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeScalarNode<SP> {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for ComputeScalar<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeScalar<SP>> {
     type Error = UnionCastError;
 
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
@@ -142,67 +212,51 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeScalarNode<SP> {
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct CollectNode<SP: SessionParameters>(Arc<Collect<SP>>);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct Collect<SP: SessionParameters> {
+pub struct Collect<SP: SessionParameters> {
     pub(crate) store_in: CollectedTag,
     pub(crate) values: CollectArg<SP>,
     pub(crate) group: PartyGroup<SP::Verifier>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> SpecificNode for CollectNode<SP> {
-    type Inner = Collect<SP>;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
-        Collect {
-            store_in: self.0.store_in.clone(),
-            values: self.0.values.get_strong_ref(),
-            group: self.0.group.clone(),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
+impl<SP: SessionParameters> ShallowClone for Collect<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            values: self.values.get_strong_ref(),
+            group: self.group.clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
-impl<SP: SessionParameters> CollectNode<SP> {
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
-        node.values = node_with_replacements(&self.0.values, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
+impl<SP: SessionParameters> SpecificNode<SP> for Collect<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
-        Self::new(node)
+        node
     }
 
-    #[must_use]
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        node.values = node_with_replacements(&node.values, replacements)?;
+        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        Ok(node)
+    }
+}
+
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Collect<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
         let dependency = dependency.into();
-        let mut node = self.shallow_clone();
         node.dependencies.push(dependency);
-        Self::new(node)
+        node
     }
 
-    pub(crate) fn without_dependencies(&self) -> Self {
-        let mut node = self.shallow_clone();
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
         node.dependencies = Vec::new();
-        Self::new(node)
+        node
     }
 }
 
@@ -244,8 +298,8 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
         }
     }
 
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut kind = self.shallow_clone();
+    pub(crate) fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut kind = self;
         match &mut kind {
             Self::Simple { .. } | Self::ThirdPartyAttributable { .. } => {}
             Self::WithReveal { verification_args, .. } => {
@@ -257,72 +311,56 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct ComputeMappingNode<SP: SessionParameters>(Arc<ComputeMapping<SP>>);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct ComputeMapping<SP: SessionParameters> {
+pub struct ComputeMapping<SP: SessionParameters> {
     pub(crate) store_in: ComputedMappingTag,
     pub(crate) args: BTreeMap<String, ComputeMappingArg<SP>>,
     pub(crate) kind: ComputeMappingKind<SP>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> SpecificNode for ComputeMappingNode<SP> {
-    type Inner = ComputeMapping<SP>;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
-        ComputeMapping {
-            store_in: self.0.store_in.clone(),
-            args: args_to_owned(&self.0.args),
-            kind: self.0.kind.shallow_clone(),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
+impl<SP: SessionParameters> ShallowClone for ComputeMapping<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            args: args_to_owned(&self.args),
+            kind: self.kind.shallow_clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
-impl<SP: SessionParameters> ComputeMappingNode<SP> {
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
+impl<SP: SessionParameters> SpecificNode<SP> for ComputeMapping<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node
+    }
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
         node.args = args_with_replacements(&node.args, replacements)?;
         node.kind = node.kind.with_replacements(replacements)?;
         node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
-        node.store_in = node.store_in.with_added_prefix(prefix);
-        Self::new(node)
-    }
-
-    #[must_use]
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let dependency = dependency.into();
-        let mut node = self.shallow_clone();
-        node.dependencies.push(dependency);
-        Self::new(node)
-    }
-
-    pub(crate) fn without_dependencies(&self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
-        Self::new(node)
+        Ok(node)
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeMappingNode<SP> {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for ComputeMapping<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self.shallow_clone();
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeMapping<SP>> {
     type Error = UnionCastError;
 
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
@@ -334,10 +372,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeMappingNode<SP> {
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct SerializeAndSignNode<SP: SessionParameters>(Arc<SerializeAndSign<SP>>);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct SerializeAndSign<SP: SessionParameters> {
+pub struct SerializeAndSign<SP: SessionParameters> {
     pub(crate) store_in: LocalSignedTag,
     pub(crate) function: SerializeAndSignFunction<SP>,
     pub(crate) data: DirectMessageArg<SP>,
@@ -346,64 +381,51 @@ pub(crate) struct SerializeAndSign<SP: SessionParameters> {
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> SpecificNode for SerializeAndSignNode<SP> {
-    type Inner = SerializeAndSign<SP>;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
-        SerializeAndSign {
-            store_in: self.0.store_in.clone(),
-            function: self.0.function.clone(),
-            data: self.0.data.get_strong_ref(),
-            serde_adapter: self.0.serde_adapter.clone(),
-            message_name: self.0.message_name.clone(),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
+impl<SP: SessionParameters> ShallowClone for SerializeAndSign<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            function: self.function.clone(),
+            data: self.data.get_strong_ref(),
+            serde_adapter: self.serde_adapter.clone(),
+            message_name: self.message_name.clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
-impl<SP: SessionParameters> SerializeAndSignNode<SP> {
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
-        node.data = node_with_replacements(&node.data, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
+impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSign<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
         node.message_name = node.message_name.with_added_prefix(prefix);
-        Self::new(node)
+        node
     }
 
-    #[must_use]
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let dependency = dependency.into();
-        let mut node = self.shallow_clone();
-        node.dependencies.push(dependency);
-        Self::new(node)
-    }
-
-    pub(crate) fn without_dependencies(&self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
-        Self::new(node)
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        node.data = node_with_replacements(&node.data, replacements)?;
+        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        Ok(node)
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for SerializeAndSignNode<SP> {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSign<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SerializeAndSign<SP>> {
     type Error = UnionCastError;
 
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
@@ -415,76 +437,60 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for SerializeAndSignNode<SP> {
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct DeserializeAndCheckNode<SP: SessionParameters>(Arc<DeserializeAndCheck<SP>>);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct DeserializeAndCheck<SP: SessionParameters> {
+pub struct DeserializeAndCheck<SP: SessionParameters> {
     pub(crate) store_in: ReceivedTag,
     pub(crate) function: DeserializeFunction<SP>,
-    pub(crate) data: ReceiveNode<SP>,
+    pub(crate) data: Node<Receive<SP>>,
     pub(crate) serde_adapter: SerdeAdapter<SP::WireFormat>,
     pub(crate) message_name: FullName,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> SpecificNode for DeserializeAndCheckNode<SP> {
-    type Inner = DeserializeAndCheck<SP>;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
-        DeserializeAndCheck {
-            store_in: self.0.store_in.clone(),
-            function: self.0.function.clone(),
-            data: self.0.data.get_strong_ref(),
-            serde_adapter: self.0.serde_adapter.clone(),
-            message_name: self.0.message_name.clone(),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
+impl<SP: SessionParameters> ShallowClone for DeserializeAndCheck<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            function: self.function.clone(),
+            data: self.data.get_strong_ref(),
+            serde_adapter: self.serde_adapter.clone(),
+            message_name: self.message_name.clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
-impl<SP: SessionParameters> DeserializeAndCheckNode<SP> {
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
-        node.data = node_with_replacements(&node.data, replacements)?;
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
+impl<SP: SessionParameters> SpecificNode<SP> for DeserializeAndCheck<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
         node.message_name = node.message_name.with_added_prefix(prefix);
-        Self::new(node)
+        node
     }
 
-    #[must_use]
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let dependency = dependency.into();
-        let mut node = self.shallow_clone();
-        node.dependencies.push(dependency);
-        Self::new(node)
-    }
-
-    pub(crate) fn without_dependencies(&self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
-        Self::new(node)
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        node.data = node_with_replacements(&node.data, replacements)?;
+        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        Ok(node)
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for DeserializeAndCheckNode<SP> {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for DeserializeAndCheck<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<DeserializeAndCheck<SP>> {
     type Error = UnionCastError;
 
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
@@ -496,132 +502,100 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for DeserializeAndCheckNode<SP>
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct DirectMessageNode<SP: SessionParameters>(Arc<DirectMessage<SP>>);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct DirectMessage<SP: SessionParameters> {
+pub struct DirectMessage<SP: SessionParameters> {
     pub(crate) store_in: SentTag,
-    pub(crate) data: SerializeAndSignNode<SP>,
+    pub(crate) data: Node<SerializeAndSign<SP>>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> SpecificNode for DirectMessageNode<SP> {
-    type Inner = DirectMessage<SP>;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
-        DirectMessage {
-            store_in: self.0.store_in.clone(),
-            data: self.0.data.get_strong_ref(),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
+impl<SP: SessionParameters> ShallowClone for DirectMessage<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            data: self.data.get_strong_ref(),
+            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
-impl<SP: SessionParameters> DirectMessageNode<SP> {
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
+impl<SP: SessionParameters> SpecificNode<SP> for DirectMessage<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node
+    }
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
         node.data = node_with_replacements(&node.data, replacements)?;
         node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
+        Ok(node)
     }
+}
 
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
-        node.store_in = node.store_in.with_added_prefix(prefix);
-        Self::new(node)
-    }
-
-    #[must_use]
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for DirectMessage<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
         let dependency = dependency.into();
-        let mut node = self.shallow_clone();
         node.dependencies.push(dependency);
-        Self::new(node)
+        node
     }
 
-    pub(crate) fn without_dependencies(&self) -> Self {
+    fn without_dependencies(self) -> Self {
         let mut node = self.shallow_clone();
         node.dependencies = Vec::new();
-        Self::new(node)
+        node
     }
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct ReceiveNode<SP: SessionParameters>(Arc<Receive<SP>>);
-
-#[derive_where::derive_where(Debug)]
-pub(crate) struct Receive<SP: SessionParameters> {
+pub struct Receive<SP: SessionParameters> {
     pub(crate) store_in: RemoteSignedTag,
     pub(crate) message_name: FullName,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> SpecificNode for ReceiveNode<SP> {
-    type Inner = Receive<SP>;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
-        Receive {
-            store_in: self.0.store_in.clone(),
-            message_name: self.0.message_name.clone(),
-            dependencies: node_slice_to_owned(&self.0.dependencies),
+impl<SP: SessionParameters> ShallowClone for Receive<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            message_name: self.message_name.clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
-impl<SP: SessionParameters> ReceiveNode<SP> {
-    pub(crate) fn with_replacements(&self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self.shallow_clone();
-        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
-        Ok(Self::new(node))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
+impl<SP: SessionParameters> SpecificNode<SP> for Receive<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
         node.message_name = node.message_name.with_added_prefix(prefix);
-        Self::new(node)
+        node
     }
 
-    #[must_use]
-    pub fn with_dependency(&self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let dependency = dependency.into();
-        let mut node = self.shallow_clone();
-        node.dependencies.push(dependency);
-        Self::new(node)
-    }
-
-    pub(crate) fn without_dependencies(&self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
-        Self::new(node)
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        node.dependencies = vec_with_replacements(&node.dependencies, replacements)?;
+        Ok(node)
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ReceiveNode<SP> {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Receive<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<Receive<SP>> {
     type Error = UnionCastError;
 
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
@@ -632,54 +606,32 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ReceiveNode<SP> {
     }
 }
 
-#[derive(Debug)]
-pub struct ScalarArgumentNode(Arc<ScalarArgument>);
-
-#[derive(Debug)]
-pub(crate) struct ScalarArgument {
+#[derive_where::derive_where(Debug)]
+pub struct ScalarArgument<SP> {
     pub(crate) store_in: ScalarArgumentTag,
     pub(crate) name: String,
+    pub(crate) phantom: PhantomData<fn() -> SP>,
 }
 
-impl SpecificNode for ScalarArgumentNode {
-    type Inner = ScalarArgument;
-
-    fn as_arc(&self) -> &Arc<Self::Inner> {
-        &self.0
-    }
-
-    fn into_arc(self) -> Arc<Self::Inner> {
-        self.0
-    }
-
-    fn from_arc(arc: Arc<Self::Inner>) -> Self {
-        Self(arc)
-    }
-
-    fn shallow_clone(&self) -> Self::Inner {
+impl<SP: SessionParameters> ShallowClone for ScalarArgument<SP> {
+    fn shallow_clone(&self) -> Self {
         ScalarArgument {
-            store_in: self.0.store_in.clone(),
-            name: self.0.name.clone(),
+            store_in: self.store_in.clone(),
+            name: self.name.clone(),
+            phantom: PhantomData,
         }
     }
 }
 
-impl ScalarArgumentNode {
-    pub(crate) fn with_replacements<SP: SessionParameters>(
-        &self,
-        _replacements: &BTreeMap<usize, AnyNode<SP>>,
-    ) -> Result<Self, RuntimeError> {
-        Ok(Self::new(self.shallow_clone()))
-    }
-
-    pub(crate) fn with_added_prefix(&self, prefix: &str) -> Self {
-        let mut node = self.shallow_clone();
+impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
-        Self::new(node)
+        node
     }
 
-    pub(crate) fn without_dependencies(&self) -> Self {
-        self.get_strong_ref()
+    fn with_replacements(self, _replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        Ok(self)
     }
 }
 
@@ -715,28 +667,34 @@ where
     }
 }
 
-impl<SP: SessionParameters> Display for ComputeScalarNode<SP> {
+impl<T: Display> Display for Node<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<SP: SessionParameters> Display for ComputeScalar<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{} = {}({}){}",
-            self.0.store_in,
-            self.0.function,
-            display_args(&self.0.args),
-            display_dependencies(&self.0.dependencies)
+            self.store_in,
+            self.function,
+            display_args(&self.args),
+            display_dependencies(&self.dependencies)
         )
     }
 }
 
-impl<SP: SessionParameters> Display for ComputeMappingNode<SP> {
+impl<SP: SessionParameters> Display for ComputeMapping<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{}[*] = {}(*, {}){}",
-            self.0.store_in,
-            self.0.kind,
-            display_args(&self.0.args),
-            display_dependencies(&self.0.dependencies)
+            self.store_in,
+            self.kind,
+            display_args(&self.args),
+            display_dependencies(&self.dependencies)
         )
     }
 }
@@ -751,69 +709,69 @@ impl<SP: SessionParameters> Display for ComputeMappingKind<SP> {
     }
 }
 
-impl<SP: SessionParameters> Display for CollectNode<SP> {
+impl<SP: SessionParameters> Display for Collect<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{} = collect({}){}",
-            self.0.store_in,
-            AnyNode::from(self.0.values.get_strong_ref()).store_in(),
-            display_dependencies(&self.0.dependencies)
+            self.store_in,
+            AnyNode::from(self.values.get_strong_ref()).store_in(),
+            display_dependencies(&self.dependencies)
         )
     }
 }
 
-impl<SP: SessionParameters> Display for SerializeAndSignNode<SP> {
+impl<SP: SessionParameters> Display for SerializeAndSign<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{}[*] = <serialize_and_sign>(*, {}){}",
-            self.0.store_in,
-            AnyNode::from(self.0.data.get_strong_ref()).store_in(),
-            display_dependencies(&self.0.dependencies)
+            self.store_in,
+            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            display_dependencies(&self.dependencies)
         )
     }
 }
 
-impl<SP: SessionParameters> Display for DeserializeAndCheckNode<SP> {
+impl<SP: SessionParameters> Display for DeserializeAndCheck<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{}[*] = <deserialize_and_check>(*, {}){}",
-            self.0.store_in,
-            AnyNode::from(self.0.data.get_strong_ref()).store_in(),
-            display_dependencies(&self.0.dependencies)
+            self.store_in,
+            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            display_dependencies(&self.dependencies)
         )
     }
 }
 
-impl<SP: SessionParameters> Display for DirectMessageNode<SP> {
+impl<SP: SessionParameters> Display for DirectMessage<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{}[*] = <send>(*, {}){}",
-            self.0.store_in,
-            AnyNode::from(self.0.data.get_strong_ref()).store_in(),
-            display_dependencies(&self.0.dependencies)
+            self.store_in,
+            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            display_dependencies(&self.dependencies)
         )
     }
 }
 
-impl<SP: SessionParameters> Display for ReceiveNode<SP> {
+impl<SP: SessionParameters> Display for Receive<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{}[*] = <receive {}>(*){}",
-            self.0.store_in,
-            self.0.message_name,
-            display_dependencies(&self.0.dependencies)
+            self.store_in,
+            self.message_name,
+            display_dependencies(&self.dependencies)
         )
     }
 }
 
-impl Display for ScalarArgumentNode {
+impl<SP: SessionParameters> Display for ScalarArgument<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{} = <argument {}>", self.0.store_in, self.0.name,)
+        write!(f, "{} = <argument {}>", self.store_in, self.name,)
     }
 }
 

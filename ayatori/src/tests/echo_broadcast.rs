@@ -140,7 +140,7 @@ fn verify_echo_contents_error<SP: SessionParameters>(
 struct EchoBroadcast;
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
-    type OutputNode = ComputeMappingNode<SP>;
+    type OutputNode = Node<ComputeMapping<SP>>;
     type BuildData = (ProtocolMessage<SP>, PartyGroup<SP::Verifier>);
 
     fn signature() -> ProtocolSignature {
@@ -150,7 +150,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
     fn build(
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        inputs: ArgNodes,
+        inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
         let (message, all_parties) = build_data;
         let my_value = inputs.get("value")?;
@@ -247,7 +247,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
-    type OutputNode = ComputeScalarNode<SP>;
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -257,7 +257,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     fn build(
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        _inputs: ArgNodes,
+        _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
 

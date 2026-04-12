@@ -1,8 +1,8 @@
 use super::{
     any_node::AnyNode,
     typed_nodes::{
-        CollectNode, ComputeMappingNode, ComputeScalarNode, DeserializeAndCheckNode, DirectMessageNode,
-        GeneralizedNode, NodeId, ReceiveNode, ScalarArgumentNode, SerializeAndSignNode, SpecificNode,
+        Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, DirectMessage, GeneralizedNode, Node, NodeId,
+        Receive, ScalarArgument, SerializeAndSign,
     },
 };
 use crate::{
@@ -15,9 +15,9 @@ pub struct UnionCastError;
 
 #[derive_where::derive_where(Debug)]
 pub enum ComputeScalarArg<SP: SessionParameters> {
-    ComputeScalar(ComputeScalarNode<SP>),
-    ScalarArgument(ScalarArgumentNode),
-    Collect(CollectNode<SP>),
+    ComputeScalar(Node<ComputeScalar<SP>>),
+    ScalarArgument(Node<ScalarArgument<SP>>),
+    Collect(Node<Collect<SP>>),
 }
 
 impl<SP: SessionParameters> ComputeScalarArg<SP> {
@@ -48,20 +48,20 @@ impl<SP: SessionParameters> GeneralizedNode for ComputeScalarArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for ComputeScalarArg<SP> {
-    fn from(source: &ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for ComputeScalarArg<SP> {
+    fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&ScalarArgumentNode> for ComputeScalarArg<SP> {
-    fn from(source: &ScalarArgumentNode) -> Self {
+impl<SP: SessionParameters> From<&Node<ScalarArgument<SP>>> for ComputeScalarArg<SP> {
+    fn from(source: &Node<ScalarArgument<SP>>) -> Self {
         Self::ScalarArgument(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&CollectNode<SP>> for ComputeScalarArg<SP> {
-    fn from(source: &CollectNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<Collect<SP>>> for ComputeScalarArg<SP> {
+    fn from(source: &Node<Collect<SP>>) -> Self {
         Self::Collect(source.get_strong_ref())
     }
 }
@@ -81,11 +81,11 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeScalarArg<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub enum ComputeMappingArg<SP: SessionParameters> {
-    ComputeScalar(ComputeScalarNode<SP>),
-    Collect(CollectNode<SP>),
-    ComputeMapping(ComputeMappingNode<SP>),
-    SerializeAndSign(SerializeAndSignNode<SP>),
-    DeserializeAndCheck(DeserializeAndCheckNode<SP>),
+    ComputeScalar(Node<ComputeScalar<SP>>),
+    Collect(Node<Collect<SP>>),
+    ComputeMapping(Node<ComputeMapping<SP>>),
+    SerializeAndSign(Node<SerializeAndSign<SP>>),
+    DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
 }
 
 impl<SP: SessionParameters> ComputeMappingArg<SP> {
@@ -122,32 +122,32 @@ impl<SP: SessionParameters> GeneralizedNode for ComputeMappingArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for ComputeMappingArg<SP> {
-    fn from(source: &ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for ComputeMappingArg<SP> {
+    fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&CollectNode<SP>> for ComputeMappingArg<SP> {
-    fn from(source: &CollectNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<Collect<SP>>> for ComputeMappingArg<SP> {
+    fn from(source: &Node<Collect<SP>>) -> Self {
         Self::Collect(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeMappingNode<SP>> for ComputeMappingArg<SP> {
-    fn from(source: &ComputeMappingNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeMapping<SP>>> for ComputeMappingArg<SP> {
+    fn from(source: &Node<ComputeMapping<SP>>) -> Self {
         Self::ComputeMapping(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&SerializeAndSignNode<SP>> for ComputeMappingArg<SP> {
-    fn from(source: &SerializeAndSignNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<SerializeAndSign<SP>>> for ComputeMappingArg<SP> {
+    fn from(source: &Node<SerializeAndSign<SP>>) -> Self {
         Self::SerializeAndSign(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&DeserializeAndCheckNode<SP>> for ComputeMappingArg<SP> {
-    fn from(source: &DeserializeAndCheckNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<DeserializeAndCheck<SP>>> for ComputeMappingArg<SP> {
+    fn from(source: &Node<DeserializeAndCheck<SP>>) -> Self {
         Self::DeserializeAndCheck(source.get_strong_ref())
     }
 }
@@ -169,11 +169,11 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeMappingArg<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub enum CollectArg<SP: SessionParameters> {
-    ComputeMapping(ComputeMappingNode<SP>),
-    SerializeAndSign(SerializeAndSignNode<SP>),
-    DeserializeAndCheck(DeserializeAndCheckNode<SP>),
-    DirectMessage(DirectMessageNode<SP>),
-    Receive(ReceiveNode<SP>),
+    ComputeMapping(Node<ComputeMapping<SP>>),
+    SerializeAndSign(Node<SerializeAndSign<SP>>),
+    DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
+    DirectMessage(Node<DirectMessage<SP>>),
+    Receive(Node<Receive<SP>>),
 }
 
 impl<SP: SessionParameters> CollectArg<SP> {
@@ -210,32 +210,32 @@ impl<SP: SessionParameters> GeneralizedNode for CollectArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeMappingNode<SP>> for CollectArg<SP> {
-    fn from(source: &ComputeMappingNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeMapping<SP>>> for CollectArg<SP> {
+    fn from(source: &Node<ComputeMapping<SP>>) -> Self {
         Self::ComputeMapping(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&SerializeAndSignNode<SP>> for CollectArg<SP> {
-    fn from(source: &SerializeAndSignNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<SerializeAndSign<SP>>> for CollectArg<SP> {
+    fn from(source: &Node<SerializeAndSign<SP>>) -> Self {
         Self::SerializeAndSign(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&DeserializeAndCheckNode<SP>> for CollectArg<SP> {
-    fn from(source: &DeserializeAndCheckNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<DeserializeAndCheck<SP>>> for CollectArg<SP> {
+    fn from(source: &Node<DeserializeAndCheck<SP>>) -> Self {
         Self::DeserializeAndCheck(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&DirectMessageNode<SP>> for CollectArg<SP> {
-    fn from(source: &DirectMessageNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<DirectMessage<SP>>> for CollectArg<SP> {
+    fn from(source: &Node<DirectMessage<SP>>) -> Self {
         Self::DirectMessage(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&ReceiveNode<SP>> for CollectArg<SP> {
-    fn from(source: &ReceiveNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<Receive<SP>>> for CollectArg<SP> {
+    fn from(source: &Node<Receive<SP>>) -> Self {
         Self::Receive(source.get_strong_ref())
     }
 }
@@ -257,8 +257,8 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for CollectArg<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub enum BroadcastArg<SP: SessionParameters> {
-    ComputeScalar(ComputeScalarNode<SP>),
-    ScalarArgument(ScalarArgumentNode),
+    ComputeScalar(Node<ComputeScalar<SP>>),
+    ScalarArgument(Node<ScalarArgument<SP>>),
 }
 
 impl<SP: SessionParameters> GeneralizedNode for BroadcastArg<SP> {
@@ -277,14 +277,14 @@ impl<SP: SessionParameters> GeneralizedNode for BroadcastArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for BroadcastArg<SP> {
-    fn from(source: &ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for BroadcastArg<SP> {
+    fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&ScalarArgumentNode> for BroadcastArg<SP> {
-    fn from(source: &ScalarArgumentNode) -> Self {
+impl<SP: SessionParameters> From<&Node<ScalarArgument<SP>>> for BroadcastArg<SP> {
+    fn from(source: &Node<ScalarArgument<SP>>) -> Self {
         Self::ScalarArgument(source.get_strong_ref())
     }
 }
@@ -303,10 +303,10 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for BroadcastArg<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub enum DirectMessageArg<SP: SessionParameters> {
-    ComputeScalar(ComputeScalarNode<SP>),
-    ScalarArgument(ScalarArgumentNode),
-    ComputeMapping(ComputeMappingNode<SP>),
-    DeserializeAndCheck(DeserializeAndCheckNode<SP>),
+    ComputeScalar(Node<ComputeScalar<SP>>),
+    ScalarArgument(Node<ScalarArgument<SP>>),
+    ComputeMapping(Node<ComputeMapping<SP>>),
+    DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
 }
 
 impl<SP: SessionParameters> DirectMessageArg<SP> {
@@ -340,20 +340,20 @@ impl<SP: SessionParameters> GeneralizedNode for DirectMessageArg<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for DirectMessageArg<SP> {
-    fn from(source: &ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for DirectMessageArg<SP> {
+    fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeMappingNode<SP>> for DirectMessageArg<SP> {
-    fn from(source: &ComputeMappingNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeMapping<SP>>> for DirectMessageArg<SP> {
+    fn from(source: &Node<ComputeMapping<SP>>) -> Self {
         Self::ComputeMapping(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&DeserializeAndCheckNode<SP>> for DirectMessageArg<SP> {
-    fn from(source: &DeserializeAndCheckNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<DeserializeAndCheck<SP>>> for DirectMessageArg<SP> {
+    fn from(source: &Node<DeserializeAndCheck<SP>>) -> Self {
         Self::DeserializeAndCheck(source.get_strong_ref())
     }
 }
@@ -383,7 +383,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for DirectMessageArg<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub enum OutputNode<SP: SessionParameters> {
-    ComputeScalar(ComputeScalarNode<SP>),
+    ComputeScalar(Node<ComputeScalar<SP>>),
 }
 
 impl<SP: SessionParameters> OutputNode<SP> {
@@ -408,8 +408,8 @@ impl<SP: SessionParameters> GeneralizedNode for OutputNode<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<ComputeScalarNode<SP>> for OutputNode<SP> {
-    fn from(source: ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<Node<ComputeScalar<SP>>> for OutputNode<SP> {
+    fn from(source: Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source)
     }
 }
@@ -427,8 +427,8 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for OutputNode<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub enum Dependency<SP: SessionParameters> {
-    ComputeScalar(ComputeScalarNode<SP>),
-    Collect(CollectNode<SP>),
+    ComputeScalar(Node<ComputeScalar<SP>>),
+    Collect(Node<Collect<SP>>),
 }
 
 impl<SP: SessionParameters> Dependency<SP> {
@@ -456,14 +456,14 @@ impl<SP: SessionParameters> GeneralizedNode for Dependency<SP> {
     }
 }
 
-impl<SP: SessionParameters> From<&ComputeScalarNode<SP>> for Dependency<SP> {
-    fn from(source: &ComputeScalarNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for Dependency<SP> {
+    fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
     }
 }
 
-impl<SP: SessionParameters> From<&CollectNode<SP>> for Dependency<SP> {
-    fn from(source: &CollectNode<SP>) -> Self {
+impl<SP: SessionParameters> From<&Node<Collect<SP>>> for Dependency<SP> {
+    fn from(source: &Node<Collect<SP>>) -> Self {
         Self::Collect(source.get_strong_ref())
     }
 }

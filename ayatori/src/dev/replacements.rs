@@ -10,10 +10,7 @@ use crate::{
         SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
-    graph_representation::{
-        AnyNode, ComputeMappingKind, ComputeMappingNode, ComputeScalarNode, GeneralizedNode, OutputNode,
-        SerializeAndSignNode, SpecificNode,
-    },
+    graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, ShallowClone},
     traits::SessionParameters,
 };
 
@@ -167,9 +164,11 @@ impl<SP: SessionParameters> Replacement<SP> {
                     return Err(RuntimeError::new("Invalid function type"));
                 };
 
-                let mut node = node.shallow_clone();
-                node.function = new_function;
-                AnyNode::ComputeScalar(ComputeScalarNode::new(node))
+                AnyNode::from(node.get_strong_ref().mutated(|inner| {
+                    let mut inner = inner.shallow_clone();
+                    inner.function = new_function;
+                    inner
+                }))
             }
             (
                 AnyNode::ComputeMapping(node),
@@ -177,25 +176,29 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let ComputeMappingKind::Simple { function } = &node.as_ref().kind
+                let new_kind = if let ComputeMappingKind::Simple { function } = &node.as_ref().kind
                     && let SimpleMappingFunction::Unattributable(orig_function) = function
                 {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
-                        format!("[modified] {orig_function}"),
-                        move |id, args| {
-                            let orig_value = orig_function.call(id, args)?;
-                            replacement_function(orig_value, id, args)
-                        },
-                    ))
+                    let new_function =
+                        SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
+                            format!("[modified] {orig_function}"),
+                            move |id, args| {
+                                let orig_value = orig_function.call(id, args)?;
+                                replacement_function(orig_value, id, args)
+                            },
+                        ));
+                    ComputeMappingKind::Simple { function: new_function }
                 } else {
                     return Err(RuntimeError::new("Invalid function type"));
                 };
 
-                let mut node = node.shallow_clone();
-                node.kind = ComputeMappingKind::Simple { function: new_function };
-                AnyNode::from(ComputeMappingNode::new(node))
+                AnyNode::from(node.get_strong_ref().mutated(|inner| {
+                    let mut inner = inner.shallow_clone();
+                    inner.kind = new_kind;
+                    inner
+                }))
             }
             (
                 AnyNode::ComputeMapping(node),
@@ -224,9 +227,11 @@ impl<SP: SessionParameters> Replacement<SP> {
                     return Err(RuntimeError::new("Invalid function type"));
                 };
 
-                let mut node = node.shallow_clone();
-                node.kind = new_kind;
-                AnyNode::ComputeMapping(ComputeMappingNode::new(node))
+                AnyNode::from(node.get_strong_ref().mutated(|inner| {
+                    let mut inner = inner.shallow_clone();
+                    inner.kind = new_kind;
+                    inner
+                }))
             }
             (
                 AnyNode::SerializeAndSign(node),
@@ -241,9 +246,11 @@ impl<SP: SessionParameters> Replacement<SP> {
                     replacement_function(rng, orig_value, destination, args)
                 });
 
-                let mut node = node.shallow_clone();
-                node.function = new_function;
-                AnyNode::SerializeAndSign(SerializeAndSignNode::new(node))
+                AnyNode::from(node.get_strong_ref().mutated(|inner| {
+                    let mut inner = inner.shallow_clone();
+                    inner.function = new_function;
+                    inner
+                }))
             }
             _ => return Err(RuntimeError::new("Not supported")),
         };

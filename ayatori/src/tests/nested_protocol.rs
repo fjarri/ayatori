@@ -27,7 +27,7 @@ fn make_protocol2_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, 
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
-    type OutputNode = ComputeScalarNode<SP>;
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -37,7 +37,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
     fn build(
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        inputs: ArgNodes,
+        inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<Protocol2Message>("x");
 
@@ -102,7 +102,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol1 {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
-    type OutputNode = ComputeScalarNode<SP>;
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -112,7 +112,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
     fn build(
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        inputs: ArgNodes,
+        inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<Protocol1Message>("x");
 

@@ -9,7 +9,7 @@ use crate::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
         SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError, VerifiedValue,
     },
-    graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData, SpecificNode},
+    graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
     traits::{ExecutableProtocol, SessionParameters},
 };
 

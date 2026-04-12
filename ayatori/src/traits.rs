@@ -77,6 +77,6 @@ pub trait ComposableProtocol<SP: SessionParameters>: Debug {
     fn build(
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
-        inputs: ArgNodes,
+        inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError>;
 }
