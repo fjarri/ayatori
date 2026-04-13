@@ -27,6 +27,7 @@ fn make_protocol2_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, 
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -37,18 +38,22 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<Protocol2Message>("x");
 
         let all_parties = build_data;
         let p2 = inputs.get("p2")?;
 
-        let my_x = compute_scalar("my_x", make_protocol2_value, &[("p2", p2)])?;
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x)?;
-        let all_x = collect(&x, all_parties)?.with_dependencies(&[&x_broadcasted])?;
+        let my_x = compute_scalar("my_x", make_protocol2_value, &[("p2", p2.into())]);
+        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x = receive(&message_x);
+        let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
 
-        compute_scalar("output", make_protocol2_output, &[("x", &all_x)])
+        Ok(compute_scalar(
+            "output",
+            make_protocol2_output,
+            &[("x", (&all_x).into())],
+        ))
     }
 }
 
@@ -97,6 +102,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol1 {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -107,18 +113,18 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<Protocol1Message>("x");
 
         let all_parties = build_data;
         let p1 = inputs.get("p1")?;
 
-        let my_x = compute_scalar("my_x", make_protocol1_value, &[("p1", p1)])?;
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x)?;
-        let all_x = collect(&x, all_parties)?.with_dependencies(&[&x_broadcasted])?;
+        let my_x = compute_scalar("my_x", make_protocol1_value, &[("p1", p1.into())]);
+        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x = receive(&message_x);
+        let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
 
-        let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", &all_x)])?;
+        let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", (&all_x).into())]);
 
         let args = ProtocolArgs::new().input("p2", &p1_sum);
         call_protocol::<SP, Protocol2>("protocol2", party_build_data, build_data, args)

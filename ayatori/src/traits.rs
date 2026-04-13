@@ -6,7 +6,9 @@ use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest}
 
 use crate::{
     entities::{Erasable, RuntimeError},
-    graph_representation::{ArgNodes, Node, PartyBuildData, PrivateInputs, ProtocolSignature, PublicInputs},
+    graph_representation::{
+        AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, ProtocolSignature, PublicInputs,
+    },
 };
 
 pub trait PartyId:
@@ -51,7 +53,9 @@ pub trait SessionParameters: 'static {
     type WireFormat: WireFormat;
 }
 
-pub trait ExecutableProtocol<SP: SessionParameters>: Debug + ComposableProtocol<SP> {
+pub trait ExecutableProtocol<SP: SessionParameters>:
+    Debug + ComposableProtocol<SP, OutputNode: Into<OutputNode<SP>>>
+{
     type SharedData;
     type PrivateData;
     // The `Clone` bound is necessary to downcast the erased value to a typed one when the session is ready to finalize;
@@ -66,6 +70,7 @@ pub trait ExecutableProtocol<SP: SessionParameters>: Debug + ComposableProtocol<
 
 pub trait ComposableProtocol<SP: SessionParameters>: Debug {
     type BuildData;
+    type OutputNode: Into<AnyNode<SP>> + TryFrom<AnyNode<SP>>;
 
     fn signature() -> ProtocolSignature;
 
@@ -73,5 +78,5 @@ pub trait ComposableProtocol<SP: SessionParameters>: Debug {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError>;
+    ) -> Result<Self::OutputNode, RuntimeError>;
 }

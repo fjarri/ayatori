@@ -55,6 +55,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -65,17 +66,17 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<u64>("x");
 
         let all_parties = build_data;
-        let my_x = compute_scalar("my_x", gen_value, &[])?;
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x)?;
-        let x_correct = compute_mapping_sender_fallible("x_correct", verify, &[("x", &x)])?;
-        let all_x_correct = collect(&x_correct, all_parties)?.with_dependencies(&[&x_broadcasted])?;
-        let all_x = collect(&x, all_parties)?;
-        compute_scalar("output", gen_output, &[("x", &all_x)])?.with_dependencies(&[&all_x_correct])
+        let my_x = compute_scalar("my_x", gen_value, &[]);
+        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x = receive(&message_x);
+        let x_correct = compute_mapping_sender_fallible("x_correct", verify, &[("x", (&x).into())]);
+        let all_x_correct = collect(&x_correct, all_parties).with_dependency(&x_broadcasted);
+        let all_x = collect(&x, all_parties);
+        Ok(compute_scalar("output", gen_output, &[("x", (&all_x).into())]).with_dependency(&all_x_correct))
     }
 }
 

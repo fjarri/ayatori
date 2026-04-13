@@ -315,21 +315,7 @@ pub(crate) enum AnyTagRef<'a> {
     Mapping(MappingTagRef<'a>),
 }
 
-impl<'a> AnyTagRef<'a> {
-    pub fn scalar(&self) -> Option<ScalarTagRef<'a>> {
-        match self {
-            Self::Scalar(tag) => Some(*tag),
-            Self::Mapping(_) => None,
-        }
-    }
-
-    pub fn mapping(&self) -> Option<MappingTagRef<'a>> {
-        match self {
-            Self::Scalar(_) => None,
-            Self::Mapping(tag) => Some(*tag),
-        }
-    }
-
+impl AnyTagRef<'_> {
     pub fn to_owned(self) -> AnyTag {
         match self {
             Self::Scalar(tag) => AnyTag::Scalar(tag.to_owned()),

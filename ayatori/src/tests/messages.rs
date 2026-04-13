@@ -85,6 +85,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
+    type OutputNode = Node<ComputeScalar<SP>>;
     type BuildData = PartyGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
@@ -95,30 +96,34 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
-    ) -> Result<Node<SP>, RuntimeError> {
+    ) -> Result<Self::OutputNode, RuntimeError> {
         let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
         let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
         let message_z = ProtocolMessage::new::<Message3<SP::Verifier>>("z");
 
         let all_parties = build_data;
 
-        let my_x = compute_scalar("my_x", make_scalar_value, &[])?;
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties)?;
-        let x = receive(&message_x)?;
-        let all_x = collect(&x, all_parties)?.with_dependencies(&[&x_broadcasted])?;
+        let my_x = compute_scalar("my_x", make_scalar_value, &[]);
+        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x = receive(&message_x);
+        let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
 
-        let my_y = compute_mapping("my_y", make_mapping_elem, &[])?;
-        let y_sent = send(&message_y, &my_y, all_parties)?;
-        let y = receive(&message_y)?;
-        let all_y = collect(&y, all_parties)?.with_dependencies(&[&y_sent])?;
+        let my_y = compute_mapping("my_y", make_mapping_elem, &[]);
+        let y_sent = direct_message(&message_y, &my_y, all_parties);
+        let y = receive(&message_y);
+        let all_y = collect(&y, all_parties).with_dependency(&y_sent);
 
         let my_z_group = all_parties.except(party_build_data.id());
-        let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[])?;
-        let z_sent = send(&message_z, &my_z, &my_z_group)?;
-        let z = receive(&message_z)?;
-        let all_z = collect(&z, &my_z_group)?.with_dependencies(&[&z_sent])?;
+        let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[]);
+        let z_sent = direct_message(&message_z, &my_z, &my_z_group);
+        let z = receive(&message_z);
+        let all_z = collect(&z, &my_z_group).with_dependency(&z_sent);
 
-        compute_scalar("output", gen_output, &[("x", &all_x), ("y", &all_y), ("z", &all_z)])
+        Ok(compute_scalar(
+            "output",
+            gen_output,
+            &[("x", (&all_x).into()), ("y", (&all_y).into()), ("z", (&all_z).into())],
+        ))
     }
 }
 

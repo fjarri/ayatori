@@ -342,7 +342,7 @@ impl<SP: SessionParameters> Task<SP> {
         Self::FinalizeWithStall(FinalizeWithStallTask(tag))
     }
 
-    pub(crate) fn send(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
+    pub(crate) fn direct_message(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
         Self::Send(SendTask {
             store_in,
             destination,
@@ -450,7 +450,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_mapping_elem_sender_attributable_with_info(
+    pub(crate) fn compute_mapping_elem_sender_attributable_with_reveal(
         store_in: ComputedMappingTag,
         source: SP::Verifier,
         function: SenderAttributableWithRevealMappingFunction<SP>,

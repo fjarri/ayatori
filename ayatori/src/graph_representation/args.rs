@@ -4,7 +4,11 @@ use alloc::{
     string::{String, ToString},
 };
 
-use super::{constructors::scalar_argument, node::Node};
+use super::{
+    any_node::AnyNode,
+    constructors::scalar_argument,
+    typed_nodes::{Node, ScalarArgument},
+};
 use crate::{
     entities::{Erasable, RuntimeError, Value},
     traits::SessionParameters,
@@ -75,7 +79,7 @@ impl PublicInputs {
 }
 
 #[derive(Debug, Default)]
-pub struct ArgNodes<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+pub struct ArgNodes<SP: SessionParameters>(BTreeMap<String, Node<ScalarArgument<SP>>>);
 
 impl<SP: SessionParameters> ArgNodes<SP> {
     pub(crate) fn new(signature: &ProtocolSignature) -> Self {
@@ -88,7 +92,7 @@ impl<SP: SessionParameters> ArgNodes<SP> {
         )
     }
 
-    pub fn get(&self, name: &str) -> Result<&Node<SP>, RuntimeError> {
+    pub fn get(&self, name: &str) -> Result<&Node<ScalarArgument<SP>>, RuntimeError> {
         self.0
             .get(name)
             .ok_or_else(|| RuntimeError::new(format!("Argument {name} was not found")))
@@ -96,7 +100,7 @@ impl<SP: SessionParameters> ArgNodes<SP> {
 }
 
 #[derive(Debug, Default)]
-pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, AnyNode<SP>>);
 
 impl<SP: SessionParameters> ProtocolArgs<SP> {
     #[must_use]
@@ -105,21 +109,10 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
     }
 
     #[must_use]
-    pub fn input(self, name: &str, value: &Node<SP>) -> Self {
+    pub fn input(self, name: &str, value: impl Into<AnyNode<SP>>) -> Self {
         let mut args = self.0;
-        args.insert(name.to_string(), value.get_strong_ref());
+        args.insert(name.to_string(), value.into());
         Self(args)
-    }
-
-    #[must_use]
-    pub fn nodes(&self) -> &BTreeMap<String, Node<SP>> {
-        &self.0
-    }
-
-    pub fn get(&self, name: &str) -> Result<&Node<SP>, RuntimeError> {
-        self.0
-            .get(name)
-            .ok_or_else(|| RuntimeError::new(format!("Argument {name} was not found")))
     }
 }
 
@@ -151,10 +144,10 @@ impl ProtocolSignature {
     }
 }
 
-pub(crate) struct BoundProtocolArgs<SP: SessionParameters>(BTreeMap<String, Node<SP>>);
+pub(crate) struct BoundProtocolArgs<SP: SessionParameters>(BTreeMap<String, AnyNode<SP>>);
 
 impl<SP: SessionParameters> BoundProtocolArgs<SP> {
-    pub fn get(&self, name: &str) -> Result<&Node<SP>, RuntimeError> {
+    pub fn get(&self, name: &str) -> Result<&AnyNode<SP>, RuntimeError> {
         self.0
             .get(name)
             .ok_or_else(|| RuntimeError::new(format!("Bound argument {name} was not found")))
