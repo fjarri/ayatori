@@ -53,11 +53,12 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::ComputeScalar(node) => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
             Self::Collect(node) => Box::new(one_arg_to_any_iter(&node.as_ref().values)),
             Self::ComputeMapping(node) => match &node.as_ref().kind {
-                ComputeMappingKind::Simple { .. } => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
+                ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
+                    Box::new(arg_map_to_any_iter(&node.as_ref().args))
+                }
                 ComputeMappingKind::WithReveal { verification_args, .. } => {
                     Box::new(arg_map_to_any_iter(&node.as_ref().args).chain(arg_map_to_any_iter(verification_args)))
                 }
-                ComputeMappingKind::ThirdPartyAttributable { .. } => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
             },
             Self::SerializeAndSign(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
             Self::DeserializeAndCheck(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),

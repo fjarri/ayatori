@@ -120,7 +120,7 @@ impl<SP: SessionParameters, const N: usize> From<&[(&str, ComputeScalarArg<SP>);
     /// Only the last one will be actually stored.
     fn from(source: &[(&str, ComputeScalarArg<SP>); N]) -> Self {
         let mut args = BTreeMap::new();
-        for (name, arg) in source.iter() {
+        for (name, arg) in source {
             args.insert(name.to_string(), arg.get_strong_ref());
         }
         Self(args)
@@ -135,7 +135,7 @@ impl<SP: SessionParameters, const N: usize> From<&[(&str, ComputeMappingArg<SP>)
     /// Only the last one will be actually stored.
     fn from(source: &[(&str, ComputeMappingArg<SP>); N]) -> Self {
         let mut args = BTreeMap::new();
-        for (name, arg) in source.iter() {
+        for (name, arg) in source {
             args.insert(name.to_string(), arg.get_strong_ref());
         }
         Self(args)
