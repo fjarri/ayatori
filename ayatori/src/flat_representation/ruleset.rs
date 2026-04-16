@@ -7,7 +7,10 @@ use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use super::conditions::{ElementCondition, QuorumCondition, ScalarCondition};
+use super::conditions::{
+    ElementCondition, ElementConditionWithState, QuorumCondition, QuorumConditionWithState, ScalarCondition,
+    ScalarConditionWithState,
+};
 use crate::{
     entities::{
         AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
@@ -20,8 +23,8 @@ use crate::{
 
 #[derive_where::derive_where(Debug)]
 struct ScalarRule<SP: SessionParameters> {
-    dependencies_condition: ScalarCondition,
-    scalar_condition: ScalarCondition,
+    dependencies_condition: ScalarConditionWithState,
+    scalar_condition: ScalarConditionWithState,
     store_in: ComputedScalarTag,
     function: ScalarFunction<SP>,
     args: BTreeMap<String, ScalarTag>,
@@ -29,17 +32,17 @@ struct ScalarRule<SP: SessionParameters> {
 
 #[derive_where::derive_where(Debug)]
 struct CollectRule<SP: SessionParameters> {
-    dependencies_condition: ScalarCondition,
-    quorum_condition: QuorumCondition<SP::Verifier>,
+    dependencies_condition: ScalarConditionWithState,
+    quorum_condition: QuorumConditionWithState<SP::Verifier>,
     store_in: CollectedTag,
     values: MappingTag,
 }
 
 #[derive_where::derive_where(Debug)]
 struct MappingRule<SP: SessionParameters> {
-    dependencies_condition: ScalarCondition,
-    scalar_condition: ScalarCondition,
-    element_conditions: BTreeMap<SP::Verifier, ElementCondition>,
+    dependencies_condition: ScalarConditionWithState,
+    scalar_condition: ScalarConditionWithState,
+    element_condition: ElementConditionWithState<SP::Verifier>,
     kind: MappingRuleKind<SP>,
 }
 
@@ -66,10 +69,15 @@ enum MappingRuleKind<SP: SessionParameters> {
         serde_adapter: SerdeAdapter<SP::WireFormat>,
         on_error: OnError,
     },
-    DirectMessage {
-        store_in: SentTag,
-        to_send: LocalSignedTag,
-    },
+}
+
+#[derive_where::derive_where(Debug)]
+struct SendRule<SP: SessionParameters> {
+    dependencies_condition: ScalarConditionWithState,
+    scalar_condition: ScalarConditionWithState,
+    element_condition: ElementConditionWithState<SP::Verifier>,
+    store_in: SentTag,
+    to_send: LocalSignedTag,
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +240,7 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     scalar_rules: Vec<ScalarRule<SP>>,
     collect_rules: Vec<CollectRule<SP>>,
     mapping_rules: Vec<MappingRule<SP>>,
+    send_rules: Vec<SendRule<SP>>,
     expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
     arguments: BTreeMap<String, ScalarArgumentTag>,
     state: State,
@@ -246,6 +255,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
         let mut scalar_rules = Vec::new();
         let mut collect_rules = Vec::new();
         let mut mapping_rules = Vec::new();
+        let mut send_rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
 
         let mut arguments = BTreeMap::new();
@@ -258,6 +268,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
             for dependency in node.dependencies() {
                 dependencies_condition = dependencies_condition.and(dependency.store_in());
             }
+
+            let dependencies_condition = ScalarConditionWithState::new(dependencies_condition);
 
             match node {
                 AnyNode::ScalarArgument(node) => {
@@ -273,7 +285,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     }
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,
-                        scalar_condition,
+                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
                         store_in: node.as_ref().store_in.clone(),
                         function: node.as_ref().function.clone(),
                         args: arg_tags,
@@ -318,12 +330,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         }
                     };
 
-                    let element_conditions = possible_ids
-                        .iter()
-                        .cloned()
-                        .map(|id| (id, element_condition.clone()))
-                        .collect();
-
                     let arg_tags = node
                         .as_ref()
                         .args
@@ -336,8 +342,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
-                        scalar_condition,
-                        element_conditions,
+                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         kind: MappingRuleKind::Compute {
                             store_in: node.as_ref().store_in.clone(),
                             function,
@@ -363,16 +369,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
                     }
 
-                    let element_conditions = possible_ids
-                        .iter()
-                        .cloned()
-                        .map(|id| (id, element_condition.clone()))
-                        .collect();
-
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
-                        scalar_condition,
-                        element_conditions,
+                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         kind: MappingRuleKind::SerializeAndSign {
                             store_in: node.as_ref().store_in.clone(),
                             function: node.as_ref().function.clone(),
@@ -383,27 +383,22 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     });
                 }
                 AnyNode::DeserializeAndCheck(node) => {
-                    let on_error = get_on_error(&node, private_inputs);
-
                     let possible_ids = propagated_ids
                         .get(&MappingTag::Received(node.as_ref().store_in.clone()))
                         .ok_or_else(|| {
                             RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                         })?;
 
+                    let on_error = get_on_error(&node, private_inputs);
+
                     let tag = &node.as_ref().data.as_ref().store_in;
 
                     let element_condition = ElementCondition::empty().and(MappingTagRef::RemoteSigned(tag));
-                    let element_conditions = possible_ids
-                        .iter()
-                        .cloned()
-                        .map(|id| (id, element_condition.clone()))
-                        .collect();
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
-                        scalar_condition: ScalarCondition::empty(),
-                        element_conditions,
+                        scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
+                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         kind: MappingRuleKind::Deserialize {
                             store_in: node.as_ref().store_in.clone(),
                             function: node.as_ref().function.clone(),
@@ -423,19 +418,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     let tag = &node.as_ref().data.as_ref().store_in;
                     let element_condition = ElementCondition::empty().and(MappingTagRef::LocalSigned(tag));
-                    let element_conditions = possible_ids
-                        .iter()
-                        .cloned()
-                        .map(|id| (id, element_condition.clone()))
-                        .collect();
-                    mapping_rules.push(MappingRule {
+
+                    send_rules.push(SendRule {
                         dependencies_condition,
-                        scalar_condition: ScalarCondition::empty(),
-                        element_conditions,
-                        kind: MappingRuleKind::DirectMessage {
-                            store_in: node.as_ref().store_in.clone(),
-                            to_send: tag.clone(),
-                        },
+                        scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
+                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
+                        store_in: node.as_ref().store_in.clone(),
+                        to_send: tag.clone(),
                     });
                 }
                 AnyNode::Collect(node) => {
@@ -443,7 +432,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let quorum_condition = QuorumCondition::new(tag, &node.as_ref().group);
                     collect_rules.push(CollectRule {
                         dependencies_condition,
-                        quorum_condition,
+                        quorum_condition: QuorumConditionWithState::new(quorum_condition),
                         store_in: node.as_ref().store_in.clone(),
                         values: tag.to_owned(),
                     });
@@ -464,6 +453,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             scalar_rules,
             collect_rules,
             mapping_rules,
+            send_rules,
             expected_messages,
             arguments,
             state: State::InProgress,
@@ -499,6 +489,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
             rule.dependencies_condition.update_with_scalar_ready(tag);
             rule.scalar_condition.update_with_scalar_ready(tag);
         }
+
+        for rule in &mut self.send_rules {
+            rule.dependencies_condition.update_with_scalar_ready(tag);
+            rule.scalar_condition.update_with_scalar_ready(tag);
+        }
     }
 
     pub fn update_with_element_ready(&mut self, tag: &MappingTag, id: &SP::Verifier) {
@@ -507,9 +502,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
         }
 
         for rule in &mut self.mapping_rules {
-            if let Some(condition) = rule.element_conditions.get_mut(id) {
-                condition.update_with_scalar_ready(tag);
-            }
+            rule.element_condition.update_with_element_ready(tag, id);
+        }
+
+        for rule in &mut self.send_rules {
+            rule.element_condition.update_with_element_ready(tag, id);
         }
     }
 
@@ -539,104 +536,79 @@ impl<SP: SessionParameters> Ruleset<SP> {
             })
     }
 
-    fn pop_mapping_action(
-        &mut self,
-        predicate: impl Fn(&SP::Verifier, &MappingRuleKind<SP>) -> Option<Action<SP>>,
-    ) -> Option<Action<SP>> {
-        let mut result = None;
-        let mut rule_idx_to_delete = None;
-
-        for (idx, rule) in &mut self.mapping_rules.iter_mut().enumerate() {
+    fn pop_send_action(&mut self) -> Option<Action<SP>> {
+        for rule in &mut self.send_rules.iter_mut() {
             if !rule.dependencies_condition.is_satisfied() || !rule.scalar_condition.is_satisfied() {
                 continue;
             }
 
-            let maybe_id = rule
-                .element_conditions
-                .iter()
-                .find(|(_id, condition)| condition.is_satisfied())
-                .map(|(id, _condition)| id.clone());
-
-            if let Some(id) = maybe_id {
-                let maybe_action = predicate(&id, &rule.kind);
-                if let Some(action) = maybe_action {
-                    rule.element_conditions.remove(&id);
-                    if rule.element_conditions.is_empty() {
-                        rule_idx_to_delete = Some(idx);
-                    }
-                    result = Some(action);
-                    break;
-                }
+            if let Some(id) = rule.element_condition.pop_satisfied() {
+                return Some(Action::DirectMessage {
+                    store_in: rule.store_in.clone(),
+                    to_send: rule.to_send.clone(),
+                    destination: id,
+                });
             }
         }
 
-        if let Some(idx) = rule_idx_to_delete {
-            self.mapping_rules.remove(idx);
+        None
+    }
+
+    fn pop_mapping_action(&mut self) -> Option<Action<SP>> {
+        for rule in &mut self.mapping_rules.iter_mut() {
+            if !rule.dependencies_condition.is_satisfied() || !rule.scalar_condition.is_satisfied() {
+                continue;
+            }
+
+            if let Some(id) = rule.element_condition.pop_satisfied() {
+                return Some(match &rule.kind {
+                    MappingRuleKind::Compute {
+                        store_in,
+                        function,
+                        args,
+                        on_error,
+                    } => Action::ComputeMappingElement {
+                        store_in: store_in.clone(),
+                        index: id.clone(),
+                        function: function.clone(),
+                        args: args.clone(),
+                        on_error: on_error.clone(),
+                    },
+                    MappingRuleKind::SerializeAndSign {
+                        store_in,
+                        function,
+                        data,
+                        message_name,
+                        serde_adapter,
+                    } => Action::ComputeSerializeAndSignElement {
+                        store_in: store_in.clone(),
+                        index: id.clone(),
+                        function: function.clone(),
+                        data: data.clone(),
+                        message_name: message_name.clone(),
+                        serde_adapter: serde_adapter.clone(),
+                    },
+                    MappingRuleKind::Deserialize {
+                        store_in,
+                        function,
+                        data,
+                        message_name,
+                        serde_adapter,
+                        on_error,
+                    } => Action::ComputeDeserializeElement {
+                        store_in: store_in.clone(),
+                        index: id.clone(),
+                        function: function.clone(),
+                        data: data.clone(),
+                        message_name: message_name.clone(),
+                        serde_adapter: serde_adapter.clone(),
+                        on_error: on_error.clone(),
+                    },
+                });
+            }
         }
 
-        result
-    }
-
-    fn pop_send_action(&mut self) -> Option<Action<SP>> {
-        self.pop_mapping_action(|id, kind| {
-            if let MappingRuleKind::DirectMessage { store_in, to_send } = kind {
-                Some(Action::DirectMessage {
-                    store_in: store_in.clone(),
-                    to_send: to_send.clone(),
-                    destination: id.clone(),
-                })
-            } else {
-                None
-            }
-        })
-    }
-
-    fn pop_regular_mapping_action(&mut self) -> Option<Action<SP>> {
-        self.pop_mapping_action(|id, kind| match kind {
-            MappingRuleKind::DirectMessage { .. } => None,
-            MappingRuleKind::Compute {
-                store_in,
-                function,
-                args,
-                on_error,
-            } => Some(Action::ComputeMappingElement {
-                store_in: store_in.clone(),
-                index: id.clone(),
-                function: function.clone(),
-                args: args.clone(),
-                on_error: on_error.clone(),
-            }),
-            MappingRuleKind::SerializeAndSign {
-                store_in,
-                function,
-                data,
-                message_name,
-                serde_adapter,
-            } => Some(Action::ComputeSerializeAndSignElement {
-                store_in: store_in.clone(),
-                index: id.clone(),
-                function: function.clone(),
-                data: data.clone(),
-                message_name: message_name.clone(),
-                serde_adapter: serde_adapter.clone(),
-            }),
-            MappingRuleKind::Deserialize {
-                store_in,
-                function,
-                data,
-                message_name,
-                serde_adapter,
-                on_error,
-            } => Some(Action::ComputeDeserializeElement {
-                store_in: store_in.clone(),
-                index: id.clone(),
-                function: function.clone(),
-                data: data.clone(),
-                message_name: message_name.clone(),
-                serde_adapter: serde_adapter.clone(),
-                on_error: on_error.clone(),
-            }),
-        })
+        None
     }
 
     pub fn pop_action(&mut self) -> Result<Option<Action<SP>>, RuntimeError> {
@@ -652,7 +624,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             State::InProgress => self
                 .pop_scalar_action()
                 .or_else(|| self.pop_collect_action())
-                .or_else(|| self.pop_regular_mapping_action())
+                .or_else(|| self.pop_mapping_action())
                 .or_else(|| self.pop_send_action()),
             // If we are ready to terminate, pop all send actions first so that we don't stall other nodes,
             // then return the terminating action.
@@ -685,7 +657,7 @@ impl<SP: SessionParameters> Display for ScalarRule<SP> {
         }
         writeln!(
             f,
-            "{} = {}({})",
+            "  {} = {}({})",
             self.store_in,
             self.function,
             self.args.values().map(ToString::to_string).join(", ")
@@ -701,7 +673,7 @@ impl<SP: SessionParameters> Display for CollectRule<SP> {
         if !self.quorum_condition.is_satisfied() {
             writeln!(f, "if {}", self.quorum_condition)?;
         }
-        writeln!(f, "{} = collect({})", self.store_in, self.values)
+        writeln!(f, "  {} = collect({})", self.store_in, self.values)
     }
 }
 
@@ -713,9 +685,7 @@ impl<SP: SessionParameters> Display for MappingRule<SP> {
         if !self.scalar_condition.is_satisfied() {
             writeln!(f, "if {}", self.scalar_condition)?;
         }
-        for (id, condition) in &self.element_conditions {
-            writeln!(f, "if element-ready({id:?}, {condition})")?;
-        }
+        writeln!(f, "if {})", self.element_condition)?;
         writeln!(f, "  {}", self.kind)
     }
 }
@@ -745,18 +715,38 @@ impl<SP: SessionParameters> Display for MappingRuleKind<SP> {
                 data,
                 ..
             } => writeln!(f, "{store_in} = {function}({data})"),
-            Self::DirectMessage { store_in, to_send } => writeln!(f, "{store_in} = direct_message({to_send})"),
         }
+    }
+}
+
+impl<SP: SessionParameters> Display for SendRule<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        if !self.dependencies_condition.is_satisfied() {
+            writeln!(f, "if {}", self.dependencies_condition)?;
+        }
+        if !self.scalar_condition.is_satisfied() {
+            writeln!(f, "if {}", self.scalar_condition)?;
+        }
+        writeln!(f, "if {})", self.element_condition)?;
+        writeln!(f, "  {} = direct_message({})", self.store_in, self.to_send)
     }
 }
 
 impl<SP: SessionParameters> Display for Ruleset<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        writeln!(f, "Ruleset:")?;
+        writeln!(f, "Mapping rules:")?;
+        for rule in &self.mapping_rules {
+            writeln!(f, "{rule}")?;
+        }
+        for rule in &self.send_rules {
+            writeln!(f, "{rule}")?;
+        }
+
+        writeln!(f, "Scalar rules:")?;
         for rule in &self.scalar_rules {
             writeln!(f, "{rule}")?;
         }
-        for rule in &self.mapping_rules {
+        for rule in &self.collect_rules {
             writeln!(f, "{rule}")?;
         }
         Ok(())
