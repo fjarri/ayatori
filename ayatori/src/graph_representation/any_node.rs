@@ -656,7 +656,7 @@ impl<SP: SessionParameters> Iterator for LeavesFirstIterator<SP> {
             // Note that this may push some nodes that are already in the queue (if they had multiple parents).
             // We will pop the last pushed instance first, so it is guaranteed to be emitted before any of its parents,
             // and the rest will be skipped by the condition at the start of the loop.
-            self.queue.extend(unprocessed_children.into_iter());
+            self.queue.extend(unprocessed_children);
         }
         None
     }
