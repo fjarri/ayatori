@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::ToString,
     vec::Vec,
 };
 use core::fmt::{self, Display};
@@ -7,26 +8,98 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use crate::{
-    entities::{MappingTag, MappingTagRef, PartyGroup, ScalarTag, ScalarTagRef},
-    traits::PartyId,
+    entities::{AnyTagRef, MappingTag, MappingTagRef, PartyGroup, ScalarTag},
+    graph_representation::{
+        ComputeMapping, ComputeMappingKind, ComputeScalar, Dependency, MergedScalar, SerializeAndSign,
+    },
+    traits::{PartyId, SessionParameters},
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct ScalarCondition {
-    all_of: BTreeSet<ScalarTag>,
+pub(crate) struct Either {
+    left: ScalarTag,
+    right: ScalarTag,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ScalarCondition {
+    And(BTreeSet<ScalarTag>),
+    // For now we only need no more than 1 condtion (to be used in merge nodes).
+    // This can be expaned to a vector if necessary.
+    Or(Option<Either>),
 }
 
 impl ScalarCondition {
+    pub fn from_compute_scalar<SP: SessionParameters>(node: &ComputeScalar<SP>) -> Self {
+        let mut all_of = BTreeSet::new();
+        for arg in node.args.values() {
+            all_of.insert(arg.store_in().to_owned());
+        }
+        Self::And(all_of)
+    }
+
+    pub fn from_merged_scalar<SP: SessionParameters>(node: &MergedScalar<SP>) -> Self {
+        Self::Or(Some(Either {
+            left: ScalarTag::Computed(node.left.as_ref().store_in.clone()),
+            right: ScalarTag::Computed(node.right.as_ref().store_in.clone()),
+        }))
+    }
+
     pub fn empty() -> Self {
-        Self {
-            all_of: BTreeSet::new(),
+        Self::And(BTreeSet::new())
+    }
+
+    pub fn from_compute_mapping<SP: SessionParameters>(node: &ComputeMapping<SP>) -> Self {
+        let mut all_of = BTreeSet::new();
+        for arg in node.args.values() {
+            if let AnyTagRef::Scalar(tag) = arg.store_in() {
+                all_of.insert(tag.to_owned());
+            }
+        }
+        match &node.kind {
+            ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
+            ComputeMappingKind::WithReveal { verification_args, .. } => {
+                for arg in verification_args.values() {
+                    if let AnyTagRef::Scalar(tag) = arg.store_in() {
+                        all_of.insert(tag.to_owned());
+                    }
+                }
+            }
+        }
+        Self::And(all_of)
+    }
+
+    pub fn from_serialize_and_sign<SP: SessionParameters>(node: &SerializeAndSign<SP>) -> Self {
+        if let AnyTagRef::Scalar(tag) = node.data.store_in() {
+            Self::And(BTreeSet::from([tag.to_owned()]))
+        } else {
+            Self::And(BTreeSet::new())
         }
     }
 
-    pub fn and(self, tag: ScalarTagRef<'_>) -> Self {
-        let mut result = self;
-        result.all_of.insert(tag.to_owned());
-        result
+    pub fn from_dependencies<SP: SessionParameters>(nodes: &[Dependency<SP>]) -> Self {
+        let mut all_of = BTreeSet::new();
+        for arg in nodes {
+            all_of.insert(arg.store_in().to_owned());
+        }
+        Self::And(all_of)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::And(all_of) => all_of.is_empty(),
+            Self::Or(maybe_either) => maybe_either.is_none(),
+        }
+    }
+}
+
+impl Display for ScalarCondition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::And(all_of) => write!(f, "ready({})", all_of.iter().map(ToString::to_string).join(" && ")),
+            Self::Or(Some(either)) => write!(f, "ready({} || {})", either.left, either.right),
+            Self::Or(None) => write!(f, "ready()"),
+        }
     }
 }
 
@@ -74,18 +147,29 @@ impl<Id: PartyId> QuorumCondition<Id> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ScalarConditionWithState {
-    current_condition: BTreeSet<ScalarTag>,
+    current_condition: ScalarCondition,
 }
 
 impl ScalarConditionWithState {
     pub fn new(condition: ScalarCondition) -> Self {
         Self {
-            current_condition: condition.all_of,
+            current_condition: condition,
         }
     }
 
     pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) {
-        self.current_condition.remove(tag);
+        match &mut self.current_condition {
+            ScalarCondition::And(all_of) => {
+                all_of.remove(tag);
+            }
+            ScalarCondition::Or(maybe_either) => {
+                if let Some(either) = maybe_either
+                    && (&either.left == tag || &either.right == tag)
+                {
+                    *maybe_either = None;
+                }
+            }
+        }
     }
 
     pub fn is_satisfied(&self) -> bool {
@@ -176,7 +260,7 @@ impl<Id: PartyId> QuorumConditionWithState<Id> {
 
 impl Display for ScalarConditionWithState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "ready({})", self.current_condition.iter().join(", "))
+        write!(f, "ready({})", self.current_condition)
     }
 }
 

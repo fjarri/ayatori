@@ -117,6 +117,11 @@ define_typed_function_type!(
     (args: &Args<SP>) -> UnattributableError
 );
 
+define_erased_function_type!(
+    UnattributableOptionalScalarFunction<SP>,
+    (args: &Args<SP>) -> Result<Option<Value>, RuntimeError>
+);
+
 define_typed_function_type!(
     UnattributableScalarFunctionWithRng<SP>,
     (rng: &mut dyn CryptoRngCore, args: &Args<SP>) -> UnattributableError
@@ -170,6 +175,7 @@ define_erased_function_type!(
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ScalarFunction<SP: SessionParameters> {
     Unattributable(UnattributableScalarFunction<SP>),
+    UnattributableOptional(UnattributableOptionalScalarFunction<SP>),
     UnattributableWithRng(UnattributableScalarFunctionWithRng<SP>),
 }
 
@@ -216,6 +222,7 @@ impl<SP: SessionParameters> Display for ScalarFunction<SP> {
         match self {
             Self::UnattributableWithRng(function) => write!(f, "{function}[RNG]"),
             Self::Unattributable(function) => write!(f, "{function}"),
+            Self::UnattributableOptional(function) => write!(f, "{function}"),
         }
     }
 }

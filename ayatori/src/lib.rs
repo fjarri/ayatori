@@ -11,6 +11,7 @@
     unused_qualifications,
     missing_debug_implementations
 )]
+#![allow(clippy::missing_errors_doc, clippy::too_many_lines)]
 
 extern crate alloc;
 

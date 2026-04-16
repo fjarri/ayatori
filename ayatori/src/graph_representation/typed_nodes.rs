@@ -634,6 +634,51 @@ impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
     }
 }
 
+#[derive_where::derive_where(Debug)]
+pub struct MergedScalar<SP: SessionParameters> {
+    pub(crate) store_in: ComputedScalarTag,
+    // TODO: should it be `ComputeScalarArg`?
+    pub(crate) left: Node<ComputeScalar<SP>>,
+    pub(crate) right: Node<ComputeScalar<SP>>,
+}
+
+impl<SP: SessionParameters> ShallowClone for MergedScalar<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            left: self.left.get_strong_ref(),
+            right: self.right.get_strong_ref(),
+        }
+    }
+}
+
+impl<SP: SessionParameters> SpecificNode<SP> for MergedScalar<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node
+    }
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        replace_in_node(&mut node.left, replacements)?;
+        replace_in_node(&mut node.right, replacements)?;
+        Ok(node)
+    }
+}
+
+impl<SP: SessionParameters> core::ops::BitOr for &Node<ComputeScalar<SP>> {
+    type Output = Node<MergedScalar<SP>>;
+
+    fn bitor(self, rhs: &Node<ComputeScalar<SP>>) -> Self::Output {
+        Node::new(MergedScalar {
+            store_in: ComputedScalarTag::new(&format!("merged-{}-or-{}", self.0.store_in, rhs.0.store_in)), // TODO: its own tag type?
+            left: self.get_strong_ref(),
+            right: rhs.get_strong_ref(),
+        })
+    }
+}
+
 fn display_args<SP, T>(args: &BTreeMap<String, T>) -> String
 where
     SP: SessionParameters,
@@ -768,7 +813,13 @@ impl<SP: SessionParameters> Display for Receive<SP> {
 
 impl<SP: SessionParameters> Display for ScalarArgument<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{} = <argument {}>", self.store_in, self.name,)
+        write!(f, "{} = <argument {}>", self.store_in, self.name)
+    }
+}
+
+impl<SP: SessionParameters> Display for MergedScalar<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "{} = <merge {} {}>", self.store_in, self.left, self.right)
     }
 }
 

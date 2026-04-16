@@ -21,13 +21,28 @@ use crate::{
     traits::SessionParameters,
 };
 
+// TODO: can we merge Scalar/Merge/Collect into a single rule?
+// Or if we have a single condition type, MappingRule can be merged in as well
+
 #[derive_where::derive_where(Debug)]
 struct ScalarRule<SP: SessionParameters> {
     dependencies_condition: ScalarConditionWithState,
     scalar_condition: ScalarConditionWithState,
-    store_in: ComputedScalarTag,
-    function: ScalarFunction<SP>,
-    args: BTreeMap<String, ScalarTag>,
+    kind: ScalarRuleKind<SP>,
+}
+
+#[derive_where::derive_where(Debug, Clone)]
+enum ScalarRuleKind<SP: SessionParameters> {
+    Compute {
+        store_in: ComputedScalarTag,
+        function: ScalarFunction<SP>,
+        args: BTreeMap<String, ScalarTag>,
+    },
+    Merge {
+        store_in: ComputedScalarTag,
+        left: ScalarTag,
+        right: ScalarTag,
+    },
 }
 
 #[derive_where::derive_where(Debug)]
@@ -127,6 +142,11 @@ pub(crate) enum Action<SP: SessionParameters> {
         values: MappingTag,
         indices: BTreeSet<SP::Verifier>,
     },
+    MergeScalar {
+        store_in: ComputedScalarTag,
+        left: ScalarTag,
+        right: ScalarTag,
+    },
     ReturnOutput(ComputedScalarTag),
     Terminate(CollectedTag),
 }
@@ -154,7 +174,8 @@ fn propagate_groups<SP: SessionParameters>(
 
     for node in root.flattened_roots_first() {
         match node {
-            AnyNode::ScalarArgument(_) | AnyNode::ComputeScalar(_) | AnyNode::Receive(_) => {}
+            AnyNode::ScalarArgument(_) | AnyNode::MergedScalar(_) | AnyNode::ComputeScalar(_) | AnyNode::Receive(_) => {
+            }
             AnyNode::ComputeMapping(node) => {
                 let ids = result
                     .get(&MappingTag::Computed(node.as_ref().store_in.clone()))
@@ -263,32 +284,27 @@ impl<SP: SessionParameters> Ruleset<SP> {
         // Nodes can be iterated in any order here, but we do leaves first to make the sequence of rules more logical
         // in case someone has to look at it during debugging.
         for node in AnyNode::from(output_node.get_strong_ref()).flattened_leaves_first() {
-            let mut dependencies_condition = ScalarCondition::empty();
-
-            for dependency in node.dependencies() {
-                dependencies_condition = dependencies_condition.and(dependency.store_in());
-            }
-
-            let dependencies_condition = ScalarConditionWithState::new(dependencies_condition);
-
+            let dependencies_condition =
+                ScalarConditionWithState::new(ScalarCondition::from_dependencies(node.dependencies()));
             match node {
                 AnyNode::ScalarArgument(node) => {
                     arguments.insert(node.as_ref().name.clone(), node.as_ref().store_in.clone());
                 }
                 AnyNode::ComputeScalar(node) => {
                     let mut arg_tags = BTreeMap::new();
-                    let mut scalar_condition = ScalarCondition::empty();
+                    let scalar_condition = ScalarCondition::from_compute_scalar(node.as_ref());
                     for (name, arg) in &node.as_ref().args {
                         let tag = arg.store_in();
-                        scalar_condition = scalar_condition.and(tag);
                         arg_tags.insert(name.clone(), tag.to_owned());
                     }
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(scalar_condition),
-                        store_in: node.as_ref().store_in.clone(),
-                        function: node.as_ref().function.clone(),
-                        args: arg_tags,
+                        kind: ScalarRuleKind::Compute {
+                            store_in: node.as_ref().store_in.clone(),
+                            function: node.as_ref().function.clone(),
+                            args: arg_tags,
+                        },
                     });
                 }
                 AnyNode::ComputeMapping(node) => {
@@ -299,12 +315,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                         })?;
 
-                    let mut scalar_condition = ScalarCondition::empty();
+                    let scalar_condition = ScalarCondition::from_compute_mapping(node.as_ref());
                     let mut element_condition = ElementCondition::empty();
                     for arg in node.as_ref().args.values() {
                         match arg.store_in() {
                             AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
-                            AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                            AnyTagRef::Scalar(_) => {}
                         }
                     }
 
@@ -314,7 +330,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             for arg in verification_args.values() {
                                 match arg.store_in() {
                                     AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
-                                    AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                                    AnyTagRef::Scalar(_) => {}
                                 }
                             }
                         }
@@ -361,11 +377,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     let tag = node.as_ref().data.store_in();
 
-                    let mut scalar_condition = ScalarCondition::empty();
+                    let scalar_condition = ScalarCondition::from_serialize_and_sign(node.as_ref());
                     let mut element_condition = ElementCondition::empty();
 
                     match tag {
-                        AnyTagRef::Scalar(tag) => scalar_condition = scalar_condition.and(tag),
+                        AnyTagRef::Scalar(_) => {}
                         AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
                     }
 
@@ -445,6 +461,18 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         })?;
                     expected_messages.insert(node.as_ref().message_name.clone(), possible_ids.clone());
                 }
+                AnyNode::MergedScalar(node) => {
+                    let scalar_condition = ScalarCondition::from_merged_scalar(node.as_ref());
+                    scalar_rules.push(ScalarRule {
+                        dependencies_condition,
+                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        kind: ScalarRuleKind::Merge {
+                            store_in: node.as_ref().store_in.clone(),
+                            left: ScalarTag::Computed(node.as_ref().left.as_ref().store_in.clone()),
+                            right: ScalarTag::Computed(node.as_ref().right.as_ref().store_in.clone()),
+                        },
+                    });
+                }
             }
         }
 
@@ -516,10 +544,17 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 rule.dependencies_condition.is_satisfied() && rule.scalar_condition.is_satisfied()
             })
             .next()
-            .map(|rule| Action::ComputeScalar {
-                store_in: rule.store_in,
-                function: rule.function,
-                args: rule.args,
+            .map(|rule| match rule.kind {
+                ScalarRuleKind::Compute {
+                    store_in,
+                    function,
+                    args,
+                } => Action::ComputeScalar {
+                    store_in,
+                    function,
+                    args,
+                },
+                ScalarRuleKind::Merge { store_in, left, right } => Action::MergeScalar { store_in, left, right },
             })
     }
 
@@ -655,13 +690,18 @@ impl<SP: SessionParameters> Display for ScalarRule<SP> {
         if !self.scalar_condition.is_satisfied() {
             writeln!(f, "if {}", self.scalar_condition)?;
         }
-        writeln!(
-            f,
-            "  {} = {}({})",
-            self.store_in,
-            self.function,
-            self.args.values().map(ToString::to_string).join(", ")
-        )
+        match &self.kind {
+            ScalarRuleKind::Compute {
+                store_in,
+                function,
+                args,
+            } => writeln!(
+                f,
+                "  {store_in} = {function}({})",
+                args.values().map(ToString::to_string).join(", ")
+            ),
+            ScalarRuleKind::Merge { store_in, left, right } => writeln!(f, "  {store_in} = {left} | {right}"),
+        }
     }
 }
 

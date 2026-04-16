@@ -23,8 +23,8 @@ use crate::dev::Replacement;
 use crate::{
     entities::{
         AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
+        MappingFunction, MappingTag, Message, MessageId, OneOrBoth, RemoteSignedTag, RuntimeError, ScalarFunction,
+        ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
@@ -306,6 +306,9 @@ where
                         ScalarFunction::Unattributable(function) => {
                             Task::compute_scalar_infallible(store_in, function, args)
                         }
+                        ScalarFunction::UnattributableOptional(function) => {
+                            Task::compute_scalar_infallible_optional(store_in, function, args)
+                        }
                         ScalarFunction::UnattributableWithRng(function) => {
                             Task::compute_scalar_infallible_with_rng(store_in, function, args)
                         }
@@ -380,6 +383,22 @@ where
                         store_in, index, function, args, on_error,
                     )));
                 }
+                Action::MergeScalar { store_in, left, right } => {
+                    let maybe_left = self.storage.get_scalar(&left).ok();
+                    let maybe_right = self.storage.get_scalar(&right).ok();
+                    // TODO: make a method of Storage?
+                    let result = match (maybe_left, maybe_right) {
+                        (None, None) => {
+                            return Err(RuntimeError::expect(format!(
+                                "Expected either {left} or {right} to be in storage"
+                            )));
+                        }
+                        (Some(left), None) => OneOrBoth::Left(left),
+                        (None, Some(right)) => OneOrBoth::Right(right),
+                        (Some(left), Some(right)) => OneOrBoth::Both { left, right },
+                    };
+                    self.add_scalar(&ScalarTag::Computed(store_in.clone()), Value::new(result))?;
+                }
                 Action::Collect {
                     store_in,
                     values,
@@ -398,6 +417,7 @@ where
 
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
+            TaskResultEnum::Success => {}
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
             }
