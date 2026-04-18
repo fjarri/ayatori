@@ -33,6 +33,7 @@ use crate::{
     traits::{ComposableProtocol, SessionParameters},
 };
 
+/// A typed message that can be sent to other parties.
 #[derive(Debug)]
 #[derive_where::derive_where(Clone)]
 pub struct ProtocolMessage<SP: SessionParameters> {
@@ -41,6 +42,7 @@ pub struct ProtocolMessage<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ProtocolMessage<SP> {
+    /// Declares a new message.
     #[must_use]
     pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
         Self {
@@ -66,6 +68,7 @@ pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<ScalarA
     })
 }
 
+/// Creates a scalar node that returns `value` every time it is called.
 pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) -> Node<ComputeScalar<SP>> {
     let erased_value = Value::new(value);
     Node::new(ComputeScalar {
@@ -78,6 +81,9 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     })
 }
 
+/// Creates a scalar node that repackages another scalar node.
+///
+/// Used to attach dependencies to an externally passed node.
 #[must_use]
 pub fn scalar_alias<SP: SessionParameters>(
     name: &str,
@@ -94,6 +100,9 @@ pub fn scalar_alias<SP: SessionParameters>(
     })
 }
 
+/// Creates a mapping node that repackages another mapping node.
+///
+/// Used to attach dependencies to an externally passed node.
 #[must_use]
 pub fn mapping_alias<SP: SessionParameters>(
     name: &str,
@@ -113,6 +122,7 @@ pub fn mapping_alias<SP: SessionParameters>(
     })
 }
 
+/// A set of arguments to a [`ComputeScalar`] node.
 #[derive_where::derive_where(Debug)]
 pub struct ComputeScalarArgs<SP: SessionParameters>(BTreeMap<String, ComputeScalarArg<SP>>);
 
@@ -128,6 +138,7 @@ impl<SP: SessionParameters, const N: usize> From<&[(&str, ComputeScalarArg<SP>);
     }
 }
 
+/// A set of arguments to a [`ComputeMapping`] node.
 #[derive_where::derive_where(Debug)]
 pub struct ComputeMappingArgs<SP: SessionParameters>(BTreeMap<String, ComputeMappingArg<SP>>);
 
@@ -143,6 +154,7 @@ impl<SP: SessionParameters, const N: usize> From<&[(&str, ComputeMappingArg<SP>)
     }
 }
 
+/// Calls `function` and saves the result to the scalar slot `name`.
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&Args<SP>) -> Result<Ret, UnattributableError>,
@@ -157,6 +169,7 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     })
 }
 
+/// Same as [`compute_scalar`], but `function` may use an RNG.
 pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
@@ -207,6 +220,10 @@ fn fork_right<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Cl
     })
 }
 
+/// Calls `function` and splits the result into two nodes, depending on the variant used in the return value.
+///
+/// Both `lname` and `rname` results may or may not be created (and therefore won't trigger any dependent nodes),
+/// depending on what `function` returns.
 pub fn compute_forked_scalar<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
     fork_name: &str,
     lname: &str,
@@ -220,6 +237,7 @@ pub fn compute_forked_scalar<SP: SessionParameters, LRet: Erasable + Clone, RRet
     (lnode, rnode)
 }
 
+/// Same as [`compute_forked_scalar`], but `function` may use an RNG.
 pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
     fork_name: &str,
     lname: &str,
@@ -233,6 +251,9 @@ pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Cl
     (lnode, rnode)
 }
 
+/// Calls `function` for a set of party IDs and saves the results to the mapping slot `name`.
+///
+/// The set of IDs it is called for is defined by the [`collect`] nodes downstream.
 pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
@@ -249,6 +270,8 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
     })
 }
 
+/// Same as [`compute_mapping`], but `function` may result in an error
+/// caused by the data provided by the party with the ID it is called for.
 pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
@@ -267,6 +290,7 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     })
 }
 
+/// Same as [`compute_mapping`], but `function` may use an RNG.
 pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
@@ -285,6 +309,8 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
     })
 }
 
+/// Same as [`compute_mapping`], but `function` may result in an error caused by a third party
+/// (that is, not the one which whose ID it is called).
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyAttributableError<SP>>,
@@ -304,6 +330,8 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
     })
 }
 
+/// Same as [`compute_mapping_sender_fallible`], but in case of sender-attributable error
+/// it needs to reveal some additional piece of data to be attached to the evidence.
 pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
@@ -342,6 +370,9 @@ fn default_serialize_and_sign<SP: SessionParameters>(
     Ok(Value::new(signed_value))
 }
 
+/// Broadcasts the scalar data with the type and name defined by `message` to all the nodes from `group`.
+///
+/// The return values are the collected outcomes of messages being sent (`()` on success).
 pub fn broadcast<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     scalar: impl Into<BroadcastArg<SP>>,
@@ -369,6 +400,10 @@ pub fn broadcast<SP: SessionParameters>(
     collect(CollectArg::DirectMessage(send_node), group)
 }
 
+/// Sends a direct message with the corresponding element from the given mapping,
+/// and with the type and name defined by `message`, to all the nodes from `group`.
+///
+/// The return values are the collected outcomes of messages being sent (`()` on success).
 pub fn direct_message<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     data: impl Into<DirectMessageArg<SP>>,
@@ -416,6 +451,7 @@ fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Res
     Ok(value)
 }
 
+/// Returns the result of [`receive`], along with the node containing the original signed value.
 pub fn receive_split<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
 ) -> (Node<Receive<SP>>, Node<DeserializeAndCheck<SP>>) {
@@ -441,12 +477,14 @@ pub fn receive_split<SP: SessionParameters>(
     (receive, deserialize)
 }
 
+/// Returns the node for deserialized and checked message stripped of metadata.
 #[must_use]
 pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Node<DeserializeAndCheck<SP>> {
     let (_receive, deserialize) = receive_split(message);
     deserialize
 }
 
+/// Collects the elements of a mapping node into a scalar node.
 pub fn collect<SP: SessionParameters>(
     values: impl Into<CollectArg<SP>>,
     group: &PartyGroup<SP::Verifier>,
@@ -461,6 +499,7 @@ pub fn collect<SP: SessionParameters>(
     })
 }
 
+/// When `left`, or `right`, or both values are available, merges them into a single scalar value of type [`OneOrBoth`].
 pub fn merge_scalars<SP: SessionParameters>(
     left: impl Into<ComputeScalarArg<SP>>,
     right: impl Into<ComputeScalarArg<SP>>,
@@ -472,6 +511,7 @@ pub fn merge_scalars<SP: SessionParameters>(
     Node::new(MergeScalars { store_in, left, right })
 }
 
+/// Builds a protocol and integrates it into the current graph.
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     prefix: &str,
     party_build_data: &PartyBuildData<SP>,

@@ -20,6 +20,9 @@ use crate::{
     traits::SessionParameters,
 };
 
+#[cfg(doc)]
+use crate::protocol_user_api::Session;
+
 #[derive_where::derive_where(Debug)]
 enum ComputeTaskEnum<SP: SessionParameters> {
     ScalarUnattributable {
@@ -332,21 +335,29 @@ impl FinalizeWithSuccessTask {
 }
 
 #[derive(Debug, Clone)]
-pub struct FinalizeWithStallTask(CollectedTag);
+pub struct FinalizeWithStalledTask(CollectedTag);
 
-impl FinalizeWithStallTask {
+impl FinalizeWithStalledTask {
     pub(crate) fn stalled_tag(self) -> CollectedTag {
         self.0
     }
 }
 
+/// A session task to be executed.
 #[derive_where::derive_where(Debug)]
 pub enum Task<SP: SessionParameters> {
+    /// Send an outgoing message.
     Send(SendTask<SP>),
+    /// Perform a dererministic computation.
     Compute(ComputeTask<SP>),
+    /// Perform a computation that needs access to an RNG.
     ComputeWithRng(ComputeWithRngTask<SP>),
+    /// The protocol reached the output, and the session may now be finalized
+    /// (using [`Session::finalize_with_success`]).
     FinalizeWithSuccess(FinalizeWithSuccessTask),
-    FinalizeWithStall(FinalizeWithStallTask),
+    /// The protocol cannot reach the output, and the session may now be finalized
+    /// (using [`Session::finalize_with_stalled`]).
+    FinalizeWithStalled(FinalizeWithStalledTask),
 }
 
 impl<SP: SessionParameters> Task<SP> {
@@ -359,7 +370,7 @@ impl<SP: SessionParameters> Task<SP> {
     }
 
     pub(crate) fn finalize_with_stall(tag: CollectedTag) -> Self {
-        Self::FinalizeWithStall(FinalizeWithStallTask(tag))
+        Self::FinalizeWithStalled(FinalizeWithStalledTask(tag))
     }
 
     pub(crate) fn direct_message(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {

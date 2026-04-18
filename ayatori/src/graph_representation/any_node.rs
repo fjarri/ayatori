@@ -35,16 +35,26 @@ pub(crate) enum Reproducibility {
     NotAvailable,
 }
 
+/// A union of all possible nodes.
 #[derive_where::derive_where(Debug)]
 pub enum AnyNode<SP: SessionParameters> {
+    /// A scalar computation.
     ComputeScalar(Node<ComputeScalar<SP>>),
+    /// A collection of mapping elements.
     Collect(Node<Collect<SP>>),
+    /// A mapping computation.
     ComputeMapping(Node<ComputeMapping<SP>>),
+    /// A serialization.
     SerializeAndSign(Node<SerializeAndSign<SP>>),
+    /// A deserialization.
     DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
+    /// An outgoing direct message.
     DirectMessage(Node<DirectMessage<SP>>),
+    /// An expected message.
     Receive(Node<Receive<SP>>),
+    /// An argument to the protocol.
     ScalarArgument(Node<ScalarArgument<SP>>),
+    /// One or both scalar node results merged into one.
     MergeScalars(Node<MergeScalars<SP>>),
 }
 
@@ -152,6 +162,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         }
     }
 
+    /// Pretty prints the node tree.
     #[must_use]
     pub fn display_tree(&self) -> String {
         let mut s = String::new();
@@ -517,6 +528,8 @@ impl<SP: SessionParameters> From<ComputeMappingArg<SP>> for AnyNode<SP> {
     fn from(source: ComputeMappingArg<SP>) -> Self {
         match source {
             ComputeMappingArg::ComputeScalar(node) => Self::ComputeScalar(node),
+            ComputeMappingArg::MergeScalars(node) => Self::MergeScalars(node),
+            ComputeMappingArg::ScalarArgument(node) => Self::ScalarArgument(node),
             ComputeMappingArg::Collect(node) => Self::Collect(node),
             ComputeMappingArg::ComputeMapping(node) => Self::ComputeMapping(node),
             ComputeMappingArg::SerializeAndSign(node) => Self::SerializeAndSign(node),

@@ -9,6 +9,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "dev")]
 use super::errors::RuntimeError;
 
+/// A fully qualified name associated with a node in a graph (or, in other terms,
+/// the name of the slot the node's result will be stored in).
+///
+/// Contains the name of the slot itself and all the prefixes
+/// added when the graph is included as a subgraph in a larger graph.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FullName {
     prefix: Vec<String>,

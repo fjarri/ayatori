@@ -8,6 +8,7 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
+/// Execute the given sessions without offloading tasks to separate threads.
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
@@ -62,7 +63,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                         finished_with_success.push((id.clone(), token));
                         Ok(())
                     }
-                    Task::FinalizeWithStall(token) => {
+                    Task::FinalizeWithStalled(token) => {
                         finished_with_stall.push((id.clone(), token));
                         Ok(())
                     }
@@ -108,7 +109,9 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     Ok(ExecutionResult { reports })
 }
 
+/// The result of executing sessions.
 #[derive(Debug)]
 pub struct ExecutionResult<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    /// The combined reports of finished sessions.
     pub reports: BTreeMap<SP::Verifier, SessionReport<SP, P>>,
 }

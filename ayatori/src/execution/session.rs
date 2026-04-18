@@ -16,7 +16,7 @@ use super::{
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
-    task::{FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
+    task::{FinalizeWithStalledTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
 #[cfg(feature = "dev")]
 use crate::dev::Replacement;
@@ -45,6 +45,7 @@ impl<SP: SessionParameters> SessionData<SP> {
     }
 }
 
+/// A state of a protocol being executed.
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
@@ -157,6 +158,7 @@ where
         Ok(())
     }
 
+    /// Creates a new session with the given party identity (signer), and session ID.
     pub fn new(
         id: SessionId<SP>,
         signer: SP::Signer,
@@ -185,6 +187,7 @@ where
         Self::new_inner(id, None, reported_by, &output_node, PrivateInputs::new(), shared_data)
     }
 
+    /// Creates a new session applying some replacements to the node graph (for testing purposes).
     #[cfg(feature = "dev")]
     pub fn new_with_replacements(
         id: SessionId<SP>,
@@ -202,6 +205,7 @@ where
         Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
     }
 
+    /// Returns the identity of the party associated with the session.
     pub fn verifier(&self) -> &SP::Verifier {
         &self.verifier
     }
@@ -229,7 +233,7 @@ where
             .insert(guilty_party, format!("Error when calculating {tag}"));
     }
 
-    pub fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
+    fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
         SessionReport::<SP, P> {
             outcome,
             provable_errors: self.provable_errors,
@@ -250,22 +254,28 @@ where
         Ok(verdict)
     }
 
+    /// Destroys the session and returns the report containing the output
+    /// and recorded failures of remote parties (if any).
     pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, RuntimeError> {
         let result = self.get_output::<P::Output>(task.output_tag())?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
 
-    pub fn finalize_with_stalled(self, task: FinalizeWithStallTask) -> SessionReport<SP, P> {
+    /// Destroys the session and returns the report containing the output
+    /// and recorded failures of remote parties (if any).
+    pub fn finalize_with_stalled(self, task: FinalizeWithStalledTask) -> SessionReport<SP, P> {
         self.make_report(SessionOutcome::Unfinishable(format!(
             "Stalled at {}",
             task.stalled_tag()
         )))
     }
 
+    /// Terminates the session and returns the report containing the recorded failures of remote parties (if any).
     pub fn terminate(self) -> SessionReport<SP, P> {
         self.make_report(SessionOutcome::ManuallyTerminated)
     }
 
+    /// Registers a received message.
     pub fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
         let tasks = message
             .into_values()
@@ -274,6 +284,9 @@ where
         self.preprocessing_tasks.extend(tasks);
     }
 
+    /// Attempts to make a task to execute.
+    ///
+    /// The returned task may be offloaded to a thread pool.
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, RuntimeError> {
         if let Some(task) = self.preprocessing_tasks.pop() {
             return Ok(Some(Task::preprocess_message(task)));
@@ -405,6 +418,7 @@ where
         Ok(None)
     }
 
+    /// Registers the result of an executed task.
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
             TaskResultEnum::Success => {}
@@ -533,16 +547,26 @@ where
     }
 }
 
+/// A possible error when registering a task's result.
 #[derive_where::derive_where(Debug)]
 pub enum TaskError<SP: SessionParameters> {
+    /// An error that is not attributable to a specific party.
     Unattributable(UnattributableError),
+    /// A registered message was found to be invalid.
     InvalidMessage(InvalidMessageError<SP>),
+    /// A registered message was found to be a duplicate of a previously registered message.
     DuplicateMessages(DuplicateMessagesError<SP>),
 }
 
+/// A registered message was found to be invalid.
 #[derive_where::derive_where(Debug)]
 pub struct InvalidMessageError<SP: SessionParameters> {
+    /// The message's ID.
+    ///
+    /// The user may possess the means of attributing it to a specific party,
+    /// in which case it should be penalized.
     pub message_id: MessageId<SP>,
+    /// The description of the error.
     pub description: String,
 }
 
@@ -552,20 +576,34 @@ impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
     }
 }
 
+/// A registered message was found to be a duplicate of a previously registered message.
 #[derive_where::derive_where(Debug)]
 pub struct DuplicateMessagesError<SP: SessionParameters> {
+    /// The first message's ID.
+    ///
+    /// The user may possess the means of attributing it to a specific party,
+    /// in which case it should be penalized.
     pub first: MessageId<SP>,
+    /// The second message's ID.
+    ///
+    /// The user may possess the means of attributing it to a specific party,
+    /// in which case it should be penalized.
     pub second: MessageId<SP>,
 }
 
+/// The results of a session.
 #[derive(Debug, Clone)]
 pub struct SessionReport<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    /// The session's outcome.
     pub outcome: SessionOutcome<SP, P>,
+    /// The provable attributable errors registered during the execution.
     pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
+    /// The unprovable attributable errors registered during the execution.
     pub attributable_errors: BTreeMap<SP::Verifier, String>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
+    /// Returns the protocol's output if the session was successful.
     pub fn success(self) -> Option<P::Output> {
         if let SessionOutcome::Success(output) = self.outcome {
             Some(output)
@@ -574,6 +612,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
         }
     }
 
+    /// Returns a reference to the protocol's output if the session was successful.
     pub fn success_ref(&self) -> Option<&P::Output> {
         if let SessionOutcome::Success(output) = &self.outcome {
             Some(output)
@@ -582,6 +621,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
         }
     }
 
+    /// Returns `true` if the session was terminated due to being unfinishable
+    /// (enough nodes were banned to make some collection nodes impossible to trigger).
     pub fn is_unfinishable(&self) -> bool {
         matches!(self.outcome, SessionOutcome::Unfinishable(..))
     }

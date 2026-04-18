@@ -14,6 +14,17 @@ use crate::{
     traits::SessionParameters,
 };
 
+#[cfg(doc)]
+use crate::{
+    protocol_author_api::{
+        broadcast, compute_mapping, compute_mapping_third_party_fallible, compute_scalar, direct_message,
+    },
+    protocol_user_api::Session,
+};
+
+/// Defines a replacement of a node in a protocol graph.
+///
+/// Used for testing purposes, see [`Session::new_with_replacements`].
 #[derive_where::derive_where(Clone)]
 pub struct Replacement<SP: SessionParameters> {
     tag: AnyTag,
@@ -52,6 +63,7 @@ enum ReplacementEnum<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> Replacement<SP> {
+    /// Replaces a [`compute_scalar`] node.
     pub fn compute_scalar<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
@@ -70,6 +82,7 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
+    /// Replaces a [`compute_mapping`] node.
     pub fn compute_mapping<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
@@ -88,7 +101,8 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub fn compute_mapping_third_party_attributable<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
+    /// Replaces a [`compute_mapping_third_party_fallible`] node.
+    pub fn compute_mapping_third_party_fallible<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
         F: 'static
@@ -116,7 +130,8 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    pub fn message<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
+    /// Replaces the serialize-and-check part of a [`broadcast`] or [`direct_message`] node.
+    pub fn serialize_and_check<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         F: 'static
             + Fn(

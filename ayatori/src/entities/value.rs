@@ -24,6 +24,7 @@ Unfortunately in the current stable Rust we cannot do `Arc<dyn Any + MyTrait>`,
 so we have to create our own trait and do manual typechecks and some `unsafe` magic.
 */
 
+/// A value that can be used as an argument to a node, or returned from it.
 pub trait Erasable: Any + Debug + Send + Sync + 'static {}
 
 impl<T: Any + Debug + Send + Sync + 'static> Erasable for T {}
@@ -167,11 +168,13 @@ impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdap
 
 struct DynAdapterHolder<F, T>(PhantomData<(F, T)>);
 
+/// An adapter that encapsulates the wire format used by the session
+/// and can be used to (de)serialize a value.
 pub struct SerdeAdapter<F: WireFormat>(Box<dyn DynAdapter<F>>);
 
 impl<F: WireFormat> SerdeAdapter<F> {
     #[must_use]
-    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>() -> Self {
+    pub(crate) fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>() -> Self {
         Self(Box::new(DynAdapterHolder::<F, T>(PhantomData)))
     }
 
@@ -179,6 +182,7 @@ impl<F: WireFormat> SerdeAdapter<F> {
         self.0.serialize(value)
     }
 
+    /// Serializes a typed value.
     pub fn serialize_typed<T: Erasable>(&self, value: T) -> Result<SerializedValue, RuntimeError> {
         self.serialize(&Value::new(value))
     }
@@ -200,6 +204,7 @@ impl<F: WireFormat> Debug for SerdeAdapter<F> {
     }
 }
 
+/// Serialized value.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializedValue(#[serde(with = "SliceLike::<Hex>")] Box<[u8]>);
 

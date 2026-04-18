@@ -108,7 +108,7 @@ fn verify_evidence<SP: SessionParameters>(
     args: &Args<SP>,
     associated_data: &AssociatedData<SP>,
 ) -> Result<EvidenceVerdict, RuntimeError> {
-    let y = associated_data.deserialize::<u64>()?; // our secret
+    let y = associated_data.extract::<u64>()?; // our secret
     let x_cap = args.get::<u64>("X")?;
     let y_cap_remote = args.get::<u64>("Y_remote")?;
     let y_cap_local = args.get::<u64>("Y")?;

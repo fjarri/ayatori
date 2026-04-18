@@ -17,20 +17,26 @@ use super::{
 };
 use crate::traits::SessionParameters;
 
+/// The result of checking an evidence of malicious behavior of a protocol participant.
 #[derive(displaydoc::Display, Debug, Clone)]
 pub enum EvidenceVerdict {
+    /// The evidence was found to be conclusive.
     #[displaydoc("Valid evidence")]
     Valid,
+    /// There were problems with the evidence (missing data, incorrectly signed messages,
+    /// the data was found to be self-consistent and not leading to failures etc).
     #[displaydoc("Invalid evidence: {0}")]
     Invalid(String),
 }
 
 impl EvidenceVerdict {
+    /// Creates a new "valid" verdict.
     #[must_use]
     pub fn valid() -> Self {
         Self::Valid
     }
 
+    /// Creates a new "invalid" verdict with an associated description.
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid(message.into())
     }

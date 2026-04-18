@@ -30,7 +30,7 @@ pub use errors::{
     ThirdPartyAttributableError, UnattributableError,
 };
 pub use function::EvidenceVerdict;
-pub use message::{Message, MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
+pub use message::{Message, MessageId, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedValue};
 pub use party::PartyGroup;
 pub use session_id::SessionId;
 pub use tag::FullName;

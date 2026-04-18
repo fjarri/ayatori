@@ -13,6 +13,8 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
+/// Evidence of malicious behavior of a protocol participant,
+/// verifiable by anyone having access to the shared public data used during the protocol's execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     session_id: SessionId<SP>,
@@ -29,14 +31,17 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
         }
     }
 
+    /// Returns the ID of the session where the evidence was recorded.
     pub fn session_id(&self) -> &SessionId<SP> {
         &self.session_id
     }
 
+    /// Returns the ID of the guilty party.
     pub fn guilty_party(&self) -> &SP::Verifier {
         &self.guilty_party
     }
 
+    /// Verifies the evidence given the same public shared data used for the protocol execution.
     pub fn verify(&self, shared_data: &P::SharedData) -> Result<EvidenceVerdict, RuntimeError> {
         self.kind.verify(&self.session_id, &self.guilty_party, shared_data)
     }
@@ -272,7 +277,7 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
             Task::FinalizeWithSuccess(task) => {
                 return session.finalize_with_evidence_verdict(task);
             }
-            Task::FinalizeWithStall(_task) => {
+            Task::FinalizeWithStalled(_task) => {
                 return Ok(EvidenceVerdict::invalid("Unexpected finalization with stall task"));
             }
         };

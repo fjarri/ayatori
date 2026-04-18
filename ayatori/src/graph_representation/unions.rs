@@ -10,14 +10,32 @@ use crate::{
     traits::SessionParameters,
 };
 
+#[cfg(doc)]
+use crate::protocol_author_api::Args;
+
+/// An error returned when attempting to downcast from a larger union type to a smaller one (or a single type),
+/// and the variant of the larger union is not present in the smalle one.
 #[derive(Debug, Clone, Copy)]
 pub struct UnionCastError;
 
+/// Possible arguments to a [`ComputeScalar`] node.
 #[derive_where::derive_where(Debug)]
 pub enum ComputeScalarArg<SP: SessionParameters> {
+    /// A result of a scalar computation.
+    ///
+    /// In the function, needs to be accessed via [`Args::get`].
     ComputeScalar(Node<ComputeScalar<SP>>),
+    /// An input argument to the protocol.
+    ///
+    /// In the function, needs to be accessed via [`Args::get`].
     ScalarArgument(Node<ScalarArgument<SP>>),
+    /// A result of merged scalars.
+    ///
+    /// In the function, needs to be accessed via [`Args::get_merged`].
     MergeScalars(Node<MergeScalars<SP>>),
+    /// A result of collecting mapping elements.
+    ///
+    /// In the function, needs to be accessed via [`Args::get_map`].
     Collect(Node<Collect<SP>>),
 }
 
@@ -90,12 +108,36 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeScalarArg<SP> {
     }
 }
 
+/// Possible arguments to a [`ComputeMapping`] node.
 #[derive_where::derive_where(Debug)]
 pub enum ComputeMappingArg<SP: SessionParameters> {
+    /// A result of a scalar computation.
+    ///
+    /// In the function, needs to be accessed via [`Args::get`].
     ComputeScalar(Node<ComputeScalar<SP>>),
+    /// An input argument to the protocol.
+    ///
+    /// In the function, needs to be accessed via [`Args::get`].
+    ScalarArgument(Node<ScalarArgument<SP>>),
+    /// A result of merged scalars.
+    ///
+    /// In the function, needs to be accessed via [`Args::get_merged`].
+    MergeScalars(Node<MergeScalars<SP>>),
+    /// A result of collecting mapping elements.
+    ///
+    /// In the function, needs to be accessed via [`Args::get_map`].
     Collect(Node<Collect<SP>>),
+    /// A result of a mapping computation (for the same ID as this computation is called for).
+    ///
+    /// In the function, needs to be accessed via [`Args::get`].
     ComputeMapping(Node<ComputeMapping<SP>>),
+    /// A result of serialization.
+    ///
+    /// In the function, needs to be accessed via [`Args::get`].
     SerializeAndSign(Node<SerializeAndSign<SP>>),
+    /// A result of deserialization.
+    ///
+    /// In the function, needs to be accessed via [`Args::get`].
     DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
 }
 
@@ -103,6 +145,8 @@ impl<SP: SessionParameters> ComputeMappingArg<SP> {
     pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
         match self {
             Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
+            Self::MergeScalars(node) => AnyTagRef::Scalar(ScalarTagRef::Merged(&node.as_ref().store_in)),
+            Self::ScalarArgument(node) => AnyTagRef::Scalar(ScalarTagRef::Argument(&node.as_ref().store_in)),
             Self::Collect(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
             Self::ComputeMapping(node) => AnyTagRef::Mapping(MappingTagRef::Computed(&node.as_ref().store_in)),
             Self::SerializeAndSign(node) => AnyTagRef::Mapping(MappingTagRef::LocalSigned(&node.as_ref().store_in)),
@@ -115,6 +159,8 @@ impl<SP: SessionParameters> GeneralizedNode for ComputeMappingArg<SP> {
     fn id(&self) -> NodeId {
         match self {
             Self::ComputeScalar(node) => node.id(),
+            Self::MergeScalars(node) => node.id(),
+            Self::ScalarArgument(node) => node.id(),
             Self::Collect(node) => node.id(),
             Self::ComputeMapping(node) => node.id(),
             Self::SerializeAndSign(node) => node.id(),
@@ -125,6 +171,8 @@ impl<SP: SessionParameters> GeneralizedNode for ComputeMappingArg<SP> {
     fn get_strong_ref(&self) -> Self {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.get_strong_ref()),
+            Self::MergeScalars(node) => Self::MergeScalars(node.get_strong_ref()),
+            Self::ScalarArgument(node) => Self::ScalarArgument(node.get_strong_ref()),
             Self::Collect(node) => Self::Collect(node.get_strong_ref()),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.get_strong_ref()),
             Self::SerializeAndSign(node) => Self::SerializeAndSign(node.get_strong_ref()),
@@ -169,6 +217,8 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeMappingArg<SP> {
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
         match source {
             AnyNode::ComputeScalar(node) => Ok(Self::ComputeScalar(node)),
+            AnyNode::MergeScalars(node) => Ok(Self::MergeScalars(node)),
+            AnyNode::ScalarArgument(node) => Ok(Self::ScalarArgument(node)),
             AnyNode::Collect(node) => Ok(Self::Collect(node)),
             AnyNode::ComputeMapping(node) => Ok(Self::ComputeMapping(node)),
             AnyNode::SerializeAndSign(node) => Ok(Self::SerializeAndSign(node)),
@@ -178,12 +228,18 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeMappingArg<SP> {
     }
 }
 
+/// Possible arguments to a [`Collect`] node.
 #[derive_where::derive_where(Debug)]
 pub enum CollectArg<SP: SessionParameters> {
+    /// Results of a mapping computation.
     ComputeMapping(Node<ComputeMapping<SP>>),
+    /// Results of a serialization.
     SerializeAndSign(Node<SerializeAndSign<SP>>),
+    /// Results of a deserialization.
     DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
+    /// The tokens corresponding to messages successfully sent (will be `()` values).
     DirectMessage(Node<DirectMessage<SP>>),
+    /// Received signed (but not yet verified) values.
     Receive(Node<Receive<SP>>),
 }
 
@@ -266,9 +322,12 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for CollectArg<SP> {
     }
 }
 
+/// Possible arguments for message broadcasting.
 #[derive_where::derive_where(Debug)]
 pub enum BroadcastArg<SP: SessionParameters> {
+    /// A result of a scalar computation.
     ComputeScalar(Node<ComputeScalar<SP>>),
+    /// An input argument to the protocol.
     ScalarArgument(Node<ScalarArgument<SP>>),
 }
 
@@ -312,11 +371,16 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for BroadcastArg<SP> {
     }
 }
 
+/// Possible arguments for outcoming direct messages.
 #[derive_where::derive_where(Debug)]
 pub enum DirectMessageArg<SP: SessionParameters> {
+    /// A result of a scalar computation.
     ComputeScalar(Node<ComputeScalar<SP>>),
+    /// An input argument to the protocol.
     ScalarArgument(Node<ScalarArgument<SP>>),
+    /// A result of a mapping computation.
     ComputeMapping(Node<ComputeMapping<SP>>),
+    /// A result of a deserialization.
     DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
 }
 
@@ -436,9 +500,12 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for OutputNode<SP> {
     }
 }
 
+/// A possible dependency for a graph node.
 #[derive_where::derive_where(Debug)]
 pub enum Dependency<SP: SessionParameters> {
+    /// A result of a scalar computation.
     ComputeScalar(Node<ComputeScalar<SP>>),
+    /// A result of collecting mapping elements.
     Collect(Node<Collect<SP>>),
 }
 
