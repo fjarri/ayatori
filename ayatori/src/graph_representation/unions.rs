@@ -1,7 +1,7 @@
 use super::{
     any_node::AnyNode,
     typed_nodes::{
-        Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, DirectMessage, GeneralizedNode, MergedScalar,
+        Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, DirectMessage, GeneralizedNode, MergeScalars,
         Node, NodeId, Receive, ScalarArgument, SerializeAndSign,
     },
 };
@@ -17,7 +17,7 @@ pub struct UnionCastError;
 pub enum ComputeScalarArg<SP: SessionParameters> {
     ComputeScalar(Node<ComputeScalar<SP>>),
     ScalarArgument(Node<ScalarArgument<SP>>),
-    MergedScalar(Node<MergedScalar<SP>>),
+    MergeScalars(Node<MergeScalars<SP>>),
     Collect(Node<Collect<SP>>),
 }
 
@@ -26,7 +26,7 @@ impl<SP: SessionParameters> ComputeScalarArg<SP> {
         match self {
             Self::ComputeScalar(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
             Self::ScalarArgument(node) => ScalarTagRef::Argument(&node.as_ref().store_in),
-            Self::MergedScalar(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
+            Self::MergeScalars(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
             Self::Collect(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
         }
     }
@@ -37,7 +37,7 @@ impl<SP: SessionParameters> GeneralizedNode for ComputeScalarArg<SP> {
         match self {
             Self::ComputeScalar(node) => node.id(),
             Self::ScalarArgument(node) => node.id(),
-            Self::MergedScalar(node) => node.id(),
+            Self::MergeScalars(node) => node.id(),
             Self::Collect(node) => node.id(),
         }
     }
@@ -46,7 +46,7 @@ impl<SP: SessionParameters> GeneralizedNode for ComputeScalarArg<SP> {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.get_strong_ref()),
             Self::ScalarArgument(node) => Self::ScalarArgument(node.get_strong_ref()),
-            Self::MergedScalar(node) => Self::MergedScalar(node.get_strong_ref()),
+            Self::MergeScalars(node) => Self::MergeScalars(node.get_strong_ref()),
             Self::Collect(node) => Self::Collect(node.get_strong_ref()),
         }
     }
@@ -64,9 +64,9 @@ impl<SP: SessionParameters> From<&Node<ScalarArgument<SP>>> for ComputeScalarArg
     }
 }
 
-impl<SP: SessionParameters> From<&Node<MergedScalar<SP>>> for ComputeScalarArg<SP> {
-    fn from(source: &Node<MergedScalar<SP>>) -> Self {
-        Self::MergedScalar(source.get_strong_ref())
+impl<SP: SessionParameters> From<&Node<MergeScalars<SP>>> for ComputeScalarArg<SP> {
+    fn from(source: &Node<MergeScalars<SP>>) -> Self {
+        Self::MergeScalars(source.get_strong_ref())
     }
 }
 

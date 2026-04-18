@@ -19,7 +19,7 @@ pub use constructors::{
     mapping_alias, receive, receive_split, scalar_alias,
 };
 pub use typed_nodes::{
-    Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, DirectMessage, MergedScalar, Node, Receive,
+    Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, DirectMessage, MergeScalars, Node, Receive,
     ScalarArgument, SerializeAndSign,
 };
 pub use unions::{

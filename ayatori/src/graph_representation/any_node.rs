@@ -13,7 +13,7 @@ use super::{
     constructors::collect,
     typed_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
-        GeneralizedNode, MergedScalar, Node, NodeId, Receive, ScalarArgument, SerializeAndSign, args_to_owned,
+        GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SerializeAndSign, args_to_owned,
     },
     unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
@@ -45,7 +45,7 @@ pub enum AnyNode<SP: SessionParameters> {
     DirectMessage(Node<DirectMessage<SP>>),
     Receive(Node<Receive<SP>>),
     ScalarArgument(Node<ScalarArgument<SP>>),
-    MergedScalar(Node<MergedScalar<SP>>),
+    MergeScalars(Node<MergeScalars<SP>>),
 }
 
 impl<SP: SessionParameters> AnyNode<SP> {
@@ -65,7 +65,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DeserializeAndCheck(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
             Self::DirectMessage(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
             Self::Receive(_) | Self::ScalarArgument(_) => Box::new(core::iter::empty()),
-            Self::MergedScalar(node) => {
+            Self::MergeScalars(node) => {
                 Box::new(one_arg_to_any_iter(&node.as_ref().left).chain(one_arg_to_any_iter(&node.as_ref().right)))
             }
         }
@@ -92,7 +92,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DirectMessage(node) => AnyTagRef::Mapping(MappingTagRef::Sent(&node.as_ref().store_in)),
             Self::Receive(node) => AnyTagRef::Mapping(MappingTagRef::RemoteSigned(&node.as_ref().store_in)),
             Self::ScalarArgument(node) => AnyTagRef::Scalar(ScalarTagRef::Argument(&node.as_ref().store_in)),
-            Self::MergedScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
+            Self::MergeScalars(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
         }
     }
 
@@ -106,7 +106,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DirectMessage(node) => &node.as_ref().dependencies,
             Self::Receive(node) => &node.as_ref().dependencies,
             Self::ScalarArgument(_node) => &[],
-            Self::MergedScalar(_node) => &[],
+            Self::MergeScalars(_node) => &[],
         }
     }
 
@@ -120,7 +120,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DirectMessage(node) => Self::DirectMessage(node.with_replacements(replacements)?),
             Self::Receive(node) => Self::Receive(node.with_replacements(replacements)?),
             Self::ScalarArgument(node) => Self::ScalarArgument(node.with_replacements(replacements)?),
-            Self::MergedScalar(node) => Self::MergedScalar(node.with_replacements(replacements)?),
+            Self::MergeScalars(node) => Self::MergeScalars(node.with_replacements(replacements)?),
         })
     }
 
@@ -134,7 +134,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DirectMessage(node) => Self::DirectMessage(node.with_added_prefix(prefix)),
             Self::Receive(node) => Self::Receive(node.with_added_prefix(prefix)),
             Self::ScalarArgument(node) => Self::ScalarArgument(node.with_added_prefix(prefix)),
-            Self::MergedScalar(node) => Self::MergedScalar(node.with_added_prefix(prefix)),
+            Self::MergeScalars(node) => Self::MergeScalars(node.with_added_prefix(prefix)),
         }
     }
 
@@ -148,7 +148,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DirectMessage(node) => Self::DirectMessage(node.without_dependencies()),
             Self::Receive(node) => Self::Receive(node.without_dependencies()),
             Self::ScalarArgument(node) => Self::ScalarArgument(node), // Does not have dependencies
-            Self::MergedScalar(node) => Self::MergedScalar(node),
+            Self::MergeScalars(node) => Self::MergeScalars(node),
         }
     }
 
@@ -209,7 +209,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
                 Self::DeserializeAndCheck(_) |
                 // TODO: or is it always NOT reproducible?
                 // Reproducible as long as its arguments are reproducible
-                Self::MergedScalar(_) |
+                Self::MergeScalars(_) |
                 // We can always reproduce the result of this, since it is an infallible `()`.
                 Self::DirectMessage(_) => {}
                 // Requires RNG and secret information (signing key), so not reproducible.
@@ -418,7 +418,7 @@ impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
             Self::DirectMessage(node) => Self::DirectMessage(node.get_strong_ref()),
             Self::Receive(node) => Self::Receive(node.get_strong_ref()),
             Self::ScalarArgument(node) => Self::ScalarArgument(node.get_strong_ref()),
-            Self::MergedScalar(node) => Self::MergedScalar(node.get_strong_ref()),
+            Self::MergeScalars(node) => Self::MergeScalars(node.get_strong_ref()),
         }
     }
 
@@ -432,7 +432,7 @@ impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
             Self::DirectMessage(node) => node.id(),
             Self::Receive(node) => node.id(),
             Self::ScalarArgument(node) => node.id(),
-            Self::MergedScalar(node) => node.id(),
+            Self::MergeScalars(node) => node.id(),
         }
     }
 }
@@ -495,7 +495,7 @@ impl<SP: SessionParameters> From<ComputeScalarArg<SP>> for AnyNode<SP> {
     fn from(source: ComputeScalarArg<SP>) -> Self {
         match source {
             ComputeScalarArg::ComputeScalar(node) => Self::ComputeScalar(node),
-            ComputeScalarArg::MergedScalar(node) => Self::MergedScalar(node),
+            ComputeScalarArg::MergeScalars(node) => Self::MergeScalars(node),
             ComputeScalarArg::ScalarArgument(node) => Self::ScalarArgument(node),
             ComputeScalarArg::Collect(node) => Self::Collect(node),
         }
@@ -688,7 +688,7 @@ impl<SP: SessionParameters> Display for AnyNode<SP> {
             Self::DirectMessage(node) => write!(f, "{node}"),
             Self::Receive(node) => write!(f, "{node}"),
             Self::ScalarArgument(node) => write!(f, "{node}"),
-            Self::MergedScalar(node) => write!(f, "{node}"),
+            Self::MergeScalars(node) => write!(f, "{node}"),
         }
     }
 }

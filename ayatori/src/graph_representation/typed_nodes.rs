@@ -635,14 +635,14 @@ impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct MergedScalar<SP: SessionParameters> {
+pub struct MergeScalars<SP: SessionParameters> {
     pub(crate) store_in: ComputedScalarTag,
     // TODO: should it be `ComputeScalarArg`?
     pub(crate) left: Node<ComputeScalar<SP>>,
     pub(crate) right: Node<ComputeScalar<SP>>,
 }
 
-impl<SP: SessionParameters> ShallowClone for MergedScalar<SP> {
+impl<SP: SessionParameters> ShallowClone for MergeScalars<SP> {
     fn shallow_clone(&self) -> Self {
         Self {
             store_in: self.store_in.clone(),
@@ -652,7 +652,7 @@ impl<SP: SessionParameters> ShallowClone for MergedScalar<SP> {
     }
 }
 
-impl<SP: SessionParameters> SpecificNode<SP> for MergedScalar<SP> {
+impl<SP: SessionParameters> SpecificNode<SP> for MergeScalars<SP> {
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -668,10 +668,10 @@ impl<SP: SessionParameters> SpecificNode<SP> for MergedScalar<SP> {
 }
 
 impl<SP: SessionParameters> core::ops::BitOr for &Node<ComputeScalar<SP>> {
-    type Output = Node<MergedScalar<SP>>;
+    type Output = Node<MergeScalars<SP>>;
 
     fn bitor(self, rhs: &Node<ComputeScalar<SP>>) -> Self::Output {
-        Node::new(MergedScalar {
+        Node::new(MergeScalars {
             store_in: ComputedScalarTag::new(&format!("merged-{}-or-{}", self.0.store_in, rhs.0.store_in)), // TODO: its own tag type?
             left: self.get_strong_ref(),
             right: rhs.get_strong_ref(),
@@ -817,7 +817,7 @@ impl<SP: SessionParameters> Display for ScalarArgument<SP> {
     }
 }
 
-impl<SP: SessionParameters> Display for MergedScalar<SP> {
+impl<SP: SessionParameters> Display for MergeScalars<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{} = <merge {} {}>", self.store_in, self.left, self.right)
     }

@@ -174,7 +174,7 @@ fn propagate_groups<SP: SessionParameters>(
 
     for node in root.flattened_roots_first() {
         match node {
-            AnyNode::ScalarArgument(_) | AnyNode::MergedScalar(_) | AnyNode::ComputeScalar(_) | AnyNode::Receive(_) => {
+            AnyNode::ScalarArgument(_) | AnyNode::MergeScalars(_) | AnyNode::ComputeScalar(_) | AnyNode::Receive(_) => {
             }
             AnyNode::ComputeMapping(node) => {
                 let ids = result
@@ -432,7 +432,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         })?;
                     expected_messages.insert(node.as_ref().message_name.clone(), possible_ids.clone());
                 }
-                AnyNode::MergedScalar(node) => {
+                AnyNode::MergeScalars(node) => {
                     let scalar_condition = ScalarCondition::from_merged_scalar(node.as_ref());
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,

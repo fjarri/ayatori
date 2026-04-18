@@ -11,7 +11,7 @@ use crate::{
     entities::{AnyTagRef, MappingTag, PartyGroup, ScalarTag},
     graph_representation::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, Dependency, DeserializeAndCheck, DirectMessage,
-        MergedScalar, SerializeAndSign,
+        MergeScalars, SerializeAndSign,
     },
     traits::{PartyId, SessionParameters},
 };
@@ -39,7 +39,7 @@ impl ScalarCondition {
         Self::And(all_of)
     }
 
-    pub fn from_merged_scalar<SP: SessionParameters>(node: &MergedScalar<SP>) -> Self {
+    pub fn from_merged_scalar<SP: SessionParameters>(node: &MergeScalars<SP>) -> Self {
         Self::Or(Some(Either {
             left: ScalarTag::Computed(node.left.as_ref().store_in.clone()),
             right: ScalarTag::Computed(node.right.as_ref().store_in.clone()),
