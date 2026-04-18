@@ -60,7 +60,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         _build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
-        let (my_x, my_y) = compute_forked_scalar("my_x", "my_y", forking_computation, &[]);
+        let (my_x, my_y) = compute_forked_scalar("x-or-y", "my_x", "my_y", forking_computation, &[]);
         let merged = merge_scalars(&my_x, &my_y);
         let output = compute_scalar("output", merging_computation, &[("x-or-y", (&merged).into())]);
         Ok(output)

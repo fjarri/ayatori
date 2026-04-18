@@ -208,26 +208,26 @@ fn fork_right<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Cl
 }
 
 pub fn compute_forked_scalar<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    fork_name: &str,
     lname: &str,
     rname: &str,
     function: impl 'static + Fn(&Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
-    let fork_name = format!("split-{lname}-or-{rname}");
-    let fork = compute_scalar(&fork_name, function, args);
+    let fork = compute_scalar(fork_name, function, args);
     let lnode = fork_left::<SP, LRet, RRet>(lname, &fork);
     let rnode = fork_right::<SP, LRet, RRet>(rname, &fork);
     (lnode, rnode)
 }
 
 pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    fork_name: &str,
     lname: &str,
     rname: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
-    let fork_name = format!("split-{lname}-or-{rname}");
-    let fork = compute_scalar_with_rng(&fork_name, function, args);
+    let fork = compute_scalar_with_rng(fork_name, function, args);
     let lnode = fork_left::<SP, LRet, RRet>(lname, &fork);
     let rnode = fork_right::<SP, LRet, RRet>(rname, &fork);
     (lnode, rnode)
