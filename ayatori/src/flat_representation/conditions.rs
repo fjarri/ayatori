@@ -8,9 +8,10 @@ use core::fmt::{self, Display};
 use itertools::Itertools;
 
 use crate::{
-    entities::{AnyTagRef, MappingTag, MappingTagRef, PartyGroup, ScalarTag},
+    entities::{AnyTagRef, MappingTag, PartyGroup, ScalarTag},
     graph_representation::{
-        ComputeMapping, ComputeMappingKind, ComputeScalar, Dependency, MergedScalar, SerializeAndSign,
+        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, Dependency, DeserializeAndCheck, DirectMessage,
+        MergedScalar, SerializeAndSign,
     },
     traits::{PartyId, SessionParameters},
 };
@@ -109,16 +110,48 @@ pub(crate) struct ElementCondition {
 }
 
 impl ElementCondition {
-    pub fn empty() -> Self {
-        Self {
-            all_of: BTreeSet::new(),
+    pub fn from_compute_mapping<SP: SessionParameters>(node: &ComputeMapping<SP>) -> Self {
+        let mut all_of = BTreeSet::new();
+        for arg in node.args.values() {
+            if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                all_of.insert(tag.to_owned());
+            }
+        }
+        match &node.kind {
+            ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
+            ComputeMappingKind::WithReveal { verification_args, .. } => {
+                for arg in verification_args.values() {
+                    if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                        all_of.insert(tag.to_owned());
+                    }
+                }
+            }
+        }
+        Self { all_of }
+    }
+
+    pub fn from_serialize_and_sign<SP: SessionParameters>(node: &SerializeAndSign<SP>) -> Self {
+        if let AnyTagRef::Mapping(tag) = node.data.store_in() {
+            Self {
+                all_of: BTreeSet::from([tag.to_owned()]),
+            }
+        } else {
+            Self {
+                all_of: BTreeSet::new(),
+            }
         }
     }
 
-    pub fn and(self, tag: MappingTagRef<'_>) -> Self {
-        let mut result = self;
-        result.all_of.insert(tag.to_owned());
-        result
+    pub fn from_deserialize_and_check<SP: SessionParameters>(node: &DeserializeAndCheck<SP>) -> Self {
+        Self {
+            all_of: BTreeSet::from([MappingTag::RemoteSigned(node.data.as_ref().store_in.clone())]),
+        }
+    }
+
+    pub fn from_direct_message<SP: SessionParameters>(node: &DirectMessage<SP>) -> Self {
+        Self {
+            all_of: BTreeSet::from([MappingTag::LocalSigned(node.data.as_ref().store_in.clone())]),
+        }
     }
 }
 
@@ -129,10 +162,10 @@ pub(crate) struct QuorumCondition<Id: PartyId> {
 }
 
 impl<Id: PartyId> QuorumCondition<Id> {
-    pub fn new(tag: MappingTagRef<'_>, group: &PartyGroup<Id>) -> Self {
+    pub fn from_collect<SP: SessionParameters<Verifier = Id>>(node: &Collect<SP>) -> Self {
         Self {
-            tag: tag.to_owned(),
-            group: group.clone(),
+            tag: node.values.store_in().to_owned(),
+            group: node.group.clone(),
         }
     }
 

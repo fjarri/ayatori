@@ -14,8 +14,8 @@ use super::conditions::{
 use crate::{
     entities::{
         AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
-        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, ReceivedTag, RemoteSignedTag, RuntimeError,
-        ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        LocalSignedTag, MappingFunction, MappingTag, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
+        ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
     graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, Reproducibility},
     traits::SessionParameters,
@@ -316,25 +316,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         })?;
 
                     let scalar_condition = ScalarCondition::from_compute_mapping(node.as_ref());
-                    let mut element_condition = ElementCondition::empty();
-                    for arg in node.as_ref().args.values() {
-                        match arg.store_in() {
-                            AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
-                            AnyTagRef::Scalar(_) => {}
-                        }
-                    }
-
-                    match &node.as_ref().kind {
-                        ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
-                        ComputeMappingKind::WithReveal { verification_args, .. } => {
-                            for arg in verification_args.values() {
-                                match arg.store_in() {
-                                    AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
-                                    AnyTagRef::Scalar(_) => {}
-                                }
-                            }
-                        }
-                    }
+                    let element_condition = ElementCondition::from_compute_mapping(node.as_ref());
 
                     let function = match &node.as_ref().kind {
                         ComputeMappingKind::Simple { function } => MappingFunction::from(function.clone()),
@@ -375,15 +357,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                         })?;
 
-                    let tag = node.as_ref().data.store_in();
-
                     let scalar_condition = ScalarCondition::from_serialize_and_sign(node.as_ref());
-                    let mut element_condition = ElementCondition::empty();
-
-                    match tag {
-                        AnyTagRef::Scalar(_) => {}
-                        AnyTagRef::Mapping(tag) => element_condition = element_condition.and(tag),
-                    }
+                    let element_condition = ElementCondition::from_serialize_and_sign(node.as_ref());
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
@@ -392,7 +367,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         kind: MappingRuleKind::SerializeAndSign {
                             store_in: node.as_ref().store_in.clone(),
                             function: node.as_ref().function.clone(),
-                            data: tag.to_owned(),
+                            data: node.as_ref().data.store_in().to_owned(),
                             message_name: node.as_ref().message_name.clone(),
                             serde_adapter: node.as_ref().serde_adapter.clone(),
                         },
@@ -407,9 +382,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     let on_error = get_on_error(&node, private_inputs);
 
-                    let tag = &node.as_ref().data.as_ref().store_in;
-
-                    let element_condition = ElementCondition::empty().and(MappingTagRef::RemoteSigned(tag));
+                    let element_condition = ElementCondition::from_deserialize_and_check(node.as_ref());
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
@@ -418,7 +391,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         kind: MappingRuleKind::Deserialize {
                             store_in: node.as_ref().store_in.clone(),
                             function: node.as_ref().function.clone(),
-                            data: tag.clone(),
+                            data: node.as_ref().data.as_ref().store_in.clone(),
                             message_name: node.as_ref().message_name.clone(),
                             serde_adapter: node.as_ref().serde_adapter.clone(),
                             on_error,
@@ -432,25 +405,23 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
                         })?;
 
-                    let tag = &node.as_ref().data.as_ref().store_in;
-                    let element_condition = ElementCondition::empty().and(MappingTagRef::LocalSigned(tag));
+                    let element_condition = ElementCondition::from_direct_message(node.as_ref());
 
                     send_rules.push(SendRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
                         element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         store_in: node.as_ref().store_in.clone(),
-                        to_send: tag.clone(),
+                        to_send: node.as_ref().data.as_ref().store_in.clone(),
                     });
                 }
                 AnyNode::Collect(node) => {
-                    let tag = node.as_ref().values.store_in();
-                    let quorum_condition = QuorumCondition::new(tag, &node.as_ref().group);
+                    let quorum_condition = QuorumCondition::from_collect(node.as_ref());
                     collect_rules.push(CollectRule {
                         dependencies_condition,
                         quorum_condition: QuorumConditionWithState::new(quorum_condition),
                         store_in: node.as_ref().store_in.clone(),
-                        values: tag.to_owned(),
+                        values: node.as_ref().values.store_in().to_owned(),
                     });
                 }
                 AnyNode::Receive(node) => {
