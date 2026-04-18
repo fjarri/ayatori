@@ -1,14 +1,8 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::collections::BTreeSet;
 
-use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
-use signature::{Keypair, rand_core::SeedableRng};
 
-use crate::{
-    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol_author_api::*,
-    protocol_user_api::*,
-};
+use ayatori::protocol_author_api::*;
 
 #[derive(Debug)]
 struct Protocol2;
@@ -58,10 +52,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
 }
 
 #[derive(Debug)]
-struct Protocol1;
+pub struct Protocol1;
 
 #[derive(Debug, Clone)]
-struct Protocol1SharedData<SP: SessionParameters> {
+pub struct Protocol1SharedData<SP: SessionParameters> {
     p1: u64,
     party_group: PartyGroup<SP::Verifier>,
 }
@@ -131,24 +125,44 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
     }
 }
 
-#[test]
-fn happy_path() {
-    let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let shared_data = Protocol1SharedData {
-        p1: 1,
-        party_group: PartyGroup::new(&ids),
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use rand_chacha::ChaCha8Rng;
+    use signature::{Keypair, rand_core::SeedableRng};
+
+    use ayatori::{
+        dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+        protocol_user_api::*,
     };
 
-    let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let session_id = SessionId::random(&mut rng);
+    use super::{Protocol1, Protocol1SharedData};
 
-    let sessions = signers
-        .into_iter()
-        .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, Protocol1>::new(session_id.clone(), signer, &(), &shared_data)
+    #[test]
+    fn happy_path() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+        let shared_data = Protocol1SharedData {
+            p1: 1,
+            party_group: PartyGroup::new(&ids),
+        };
+
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
+
+        let sessions = signers
+            .into_iter()
+            .map(|signer| {
+                Session::<TestSessionParams<BinaryFormat>, Protocol1>::new(
+                    session_id.clone(),
+                    signer,
+                    &(),
+                    &shared_data,
+                )
                 .unwrap()
-        })
-        .collect::<Vec<_>>();
-    let _results = run_sessions_sync(&mut rng, sessions).unwrap();
+            })
+            .collect::<Vec<_>>();
+        let _results = run_sessions_sync(&mut rng, sessions).unwrap();
+    }
 }

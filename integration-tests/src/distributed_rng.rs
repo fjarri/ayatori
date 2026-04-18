@@ -1,19 +1,11 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::collections::BTreeSet;
 
-use rand_chacha::ChaCha8Rng;
-use signature::{
-    Keypair,
-    rand_core::{CryptoRngCore, SeedableRng},
-};
+use signature::rand_core::CryptoRngCore;
 
-use crate::{
-    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol_author_api::*,
-    protocol_user_api::*,
-};
+use ayatori::protocol_author_api::*;
 
 #[derive(Debug)]
-struct DistributedRNG;
+pub struct TestProtocol;
 
 fn sample_value<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
@@ -54,7 +46,7 @@ fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, Unattributa
     Ok(bs.values().copied().sum())
 }
 
-impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
+impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type PrivateData = ();
     type SharedData = PartyGroup<SP::Verifier>;
     type Output = u64;
@@ -76,7 +68,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRNG {
     }
 }
 
-impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
+impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     type BuildData = PartyGroup<SP::Verifier>;
     type OutputNode = Node<ComputeScalar<SP>>;
 
@@ -117,30 +109,45 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRNG {
     }
 }
 
-#[test]
-fn happy_path() {
-    let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let party_group = PartyGroup::new(&ids);
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
 
-    let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let session_id = SessionId::random(&mut rng);
+    use rand_chacha::ChaCha8Rng;
+    use signature::{Keypair, rand_core::SeedableRng};
 
-    let sessions = signers
-        .into_iter()
-        .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, DistributedRNG>::new(
-                session_id.clone(),
-                signer,
-                &(),
-                &party_group,
-            )
-            .unwrap()
-        })
-        .collect::<Vec<_>>();
-    let results = run_sessions_sync(&mut rng, sessions).unwrap();
+    use ayatori::{
+        dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+        protocol_user_api::*,
+    };
 
-    let value = results.reports[&ids[0]].success_ref().unwrap();
-    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
-    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
+    use super::TestProtocol;
+
+    #[test]
+    fn happy_path() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+        let party_group = PartyGroup::new(&ids);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
+
+        let sessions = signers
+            .into_iter()
+            .map(|signer| {
+                Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(
+                    session_id.clone(),
+                    signer,
+                    &(),
+                    &party_group,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let results = run_sessions_sync(&mut rng, sessions).unwrap();
+
+        let value = results.reports[&ids[0]].success_ref().unwrap();
+        assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+        assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
+    }
 }

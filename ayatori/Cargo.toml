@@ -28,7 +28,6 @@ impls = "1"
 
 # These mirror the versions from the optional dependencies above.
 postcard = { version = "1", default-features = false, features = ["alloc"] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [features]
 dev = ["postcard", "serde_json"]

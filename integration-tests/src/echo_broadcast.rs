@@ -1,20 +1,8 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    vec::Vec,
-};
+use alloc::collections::{BTreeMap, BTreeSet};
 
-use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
-use signature::{
-    Keypair,
-    rand_core::{CryptoRngCore, SeedableRng},
-};
 
-use crate::{
-    dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol_author_api::*,
-    protocol_user_api::*,
-};
+use ayatori::protocol_author_api::*;
 
 fn prepare_echo_pack<SP: SessionParameters>(
     args: &Args<SP>,
@@ -206,7 +194,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
 }
 
 #[derive(Debug)]
-struct TestProtocol;
+pub struct TestProtocol;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message1<Id>(Id);
@@ -278,105 +266,124 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     }
 }
 
-type SP = TestSessionParams<BinaryFormat>;
-type S = Session<SP, TestProtocol>;
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
 
-#[test]
-fn happy_path() {
-    let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let party_group = PartyGroup::new(&ids);
+    use rand_chacha::ChaCha8Rng;
+    use signature::{
+        Keypair,
+        rand_core::{CryptoRngCore, SeedableRng},
+    };
 
-    let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let session_id = SessionId::random(&mut rng);
+    use ayatori::{
+        dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
+        protocol_author_api::{Args, RuntimeError, SerializeArgs, SignedValue, ThirdPartyAttributableError},
+        protocol_user_api::*,
+    };
 
-    let sessions = signers
-        .into_iter()
-        .map(|signer| S::new(session_id.clone(), signer, &(), &party_group).unwrap())
-        .collect::<Vec<_>>();
-    let _results = run_sessions_sync(&mut rng, sessions).unwrap();
-}
+    use super::{Message1, TestProtocol};
 
-fn serialize_replacement(
-    rng: &mut dyn CryptoRngCore,
-    orig_value: &SignedValue<SP>,
-    destination: &<SP as SessionParameters>::Verifier,
-    args: &SerializeArgs<SP>,
-) -> Result<SignedValue<SP>, RuntimeError> {
-    if destination == &TestSigner::new(2).verifying_key() {
-        let serialized_value = args.serde_adapter().serialize_typed(Message1(*destination))?;
-        SignedValue::<SP>::new(
-            rng,
-            args.signer(),
-            args.session_id(),
-            args.message_name(),
-            destination,
-            serialized_value,
-        )
-    } else {
-        Ok(orig_value.clone())
+    type SP = TestSessionParams<BinaryFormat>;
+    type S = Session<SP, TestProtocol>;
+
+    #[test]
+    fn happy_path() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+        let party_group = PartyGroup::new(&ids);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
+
+        let sessions = signers
+            .into_iter()
+            .map(|signer| S::new(session_id.clone(), signer, &(), &party_group).unwrap())
+            .collect::<Vec<_>>();
+        let _results = run_sessions_sync(&mut rng, sessions).unwrap();
     }
-}
 
-fn dummy_verification(
-    _orig_value: Result<&(), ThirdPartyAttributableError<SP>>,
-    _id: &<SP as SessionParameters>::Verifier,
-    _args: &Args<SP>,
-) -> Result<(), ThirdPartyAttributableError<SP>> {
-    Ok(())
-}
+    fn serialize_replacement(
+        rng: &mut dyn CryptoRngCore,
+        orig_value: &SignedValue<SP>,
+        destination: &<SP as SessionParameters>::Verifier,
+        args: &SerializeArgs<SP>,
+    ) -> Result<SignedValue<SP>, RuntimeError> {
+        if destination == &TestSigner::new(2).verifying_key() {
+            let serialized_value = args.serde_adapter().serialize_typed(Message1(*destination))?;
+            SignedValue::<SP>::new(
+                rng,
+                args.signer(),
+                args.session_id(),
+                args.message_name(),
+                destination,
+                serialized_value,
+            )
+        } else {
+            Ok(orig_value.clone())
+        }
+    }
 
-#[test]
-fn third_party_error() {
-    let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let party_group = PartyGroup::new(&ids);
+    fn dummy_verification(
+        _orig_value: Result<&(), ThirdPartyAttributableError<SP>>,
+        _id: &<SP as SessionParameters>::Verifier,
+        _args: &Args<SP>,
+    ) -> Result<(), ThirdPartyAttributableError<SP>> {
+        Ok(())
+    }
 
-    let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let session_id = SessionId::random(&mut rng);
+    #[test]
+    fn third_party_error() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+        let party_group = PartyGroup::new(&ids);
 
-    let sessions = signers
-        .into_iter()
-        .enumerate()
-        .map(|(idx, signer)| {
-            if idx == 0 {
-                let replacement1 = Replacement::<SP>::message(&["echo_x", "x"], serialize_replacement).unwrap();
-                let replacement2 = Replacement::<SP>::compute_mapping_third_party_attributable(
-                    &["echo_x", "echo_contents_correct"],
-                    dummy_verification,
-                )
-                .unwrap();
-                S::new_with_replacements(
-                    session_id.clone(),
-                    signer,
-                    &(),
-                    &party_group,
-                    &[&replacement1, &replacement2],
-                )
-                .unwrap()
-            } else {
-                S::new(session_id.clone(), signer, &(), &party_group).unwrap()
-            }
-        })
-        .collect::<Vec<_>>();
-    let results = run_sessions_sync(&mut rng, sessions).unwrap();
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
 
-    assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &());
-    assert!(results.reports[&ids[0]].provable_errors.is_empty());
+        let sessions = signers
+            .into_iter()
+            .enumerate()
+            .map(|(idx, signer)| {
+                if idx == 0 {
+                    let replacement1 = Replacement::<SP>::message(&["echo_x", "x"], serialize_replacement).unwrap();
+                    let replacement2 = Replacement::<SP>::compute_mapping_third_party_attributable(
+                        &["echo_x", "echo_contents_correct"],
+                        dummy_verification,
+                    )
+                    .unwrap();
+                    S::new_with_replacements(
+                        session_id.clone(),
+                        signer,
+                        &(),
+                        &party_group,
+                        &[&replacement1, &replacement2],
+                    )
+                    .unwrap()
+                } else {
+                    S::new(session_id.clone(), signer, &(), &party_group).unwrap()
+                }
+            })
+            .collect::<Vec<_>>();
+        let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    assert!(results.reports[&ids[1]].is_unfinishable());
-    assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
-    assert!(
-        results.reports[&ids[1]].provable_errors[&ids[0]]
-            .verify(&party_group)
-            .is_ok()
-    );
+        assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &());
+        assert!(results.reports[&ids[0]].provable_errors.is_empty());
 
-    assert!(results.reports[&ids[2]].is_unfinishable());
-    assert!(results.reports[&ids[2]].provable_errors.contains_key(&ids[0]));
-    assert!(
-        results.reports[&ids[2]].provable_errors[&ids[0]]
-            .verify(&party_group)
-            .is_ok()
-    );
+        assert!(results.reports[&ids[1]].is_unfinishable());
+        assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
+        assert!(
+            results.reports[&ids[1]].provable_errors[&ids[0]]
+                .verify(&party_group)
+                .is_ok()
+        );
+
+        assert!(results.reports[&ids[2]].is_unfinishable());
+        assert!(results.reports[&ids[2]].provable_errors.contains_key(&ids[0]));
+        assert!(
+            results.reports[&ids[2]].provable_errors[&ids[0]]
+                .verify(&party_group)
+                .is_ok()
+        );
+    }
 }

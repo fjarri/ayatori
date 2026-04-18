@@ -18,7 +18,7 @@ use super::{
     storage::Storage,
     task::{FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
-#[cfg(any(test, feature = "dev"))]
+#[cfg(feature = "dev")]
 use crate::dev::Replacement;
 use crate::{
     entities::{
@@ -185,7 +185,7 @@ where
         Self::new_inner(id, None, reported_by, &output_node, PrivateInputs::new(), shared_data)
     }
 
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub fn new_with_replacements(
         id: SessionId<SP>,
         signer: SP::Signer,

@@ -3,7 +3,7 @@ use core::fmt::{self, Debug};
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::digest::{self, Digest};
-#[cfg(any(test, feature = "dev"))]
+#[cfg(feature = "dev")]
 use signature::rand_core::CryptoRngCore;
 
 use crate::traits::SessionParameters;
@@ -23,7 +23,7 @@ impl<SP: SessionParameters> SessionId<SP> {
     ///
     /// **Warning:** this should generally be used for testing; creating a random session ID in a centralized way
     /// usually defeats the purpose of having a distributed protocol.
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     #[must_use]
     pub fn random(rng: &mut impl CryptoRngCore) -> Self {
         let mut buffer = digest::Output::<SP::Digest>::default();
