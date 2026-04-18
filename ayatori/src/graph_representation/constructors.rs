@@ -157,44 +157,6 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     })
 }
 
-pub fn compute_scalar_forked<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
-    lname: &str,
-    rname: &str,
-    function: impl 'static + Fn(&Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
-    args: impl Into<ComputeScalarArgs<SP>>,
-) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
-    let fork_name = format!("split-{lname}-or-{rname}");
-    let fork = compute_scalar(&fork_name, function, args);
-
-    let largs = ComputeScalarArgs::from(&[("fork", (&fork).into())]);
-    let lnode = Node::new(ComputeScalar {
-        store_in: ComputedScalarTag::new(lname),
-        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
-            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
-                OneOrBoth::Left(left) | OneOrBoth::Both { left, .. } => Ok(Some(Value::new(left.clone()))),
-                OneOrBoth::Right(_) => Ok(None),
-            }
-        })),
-        args: largs.0,
-        dependencies: Vec::new(),
-    });
-
-    let rargs = ComputeScalarArgs::from(&[("fork", (&fork).into())]);
-    let rnode = Node::new(ComputeScalar {
-        store_in: ComputedScalarTag::new(rname),
-        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
-            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
-                OneOrBoth::Right(right) | OneOrBoth::Both { right, .. } => Ok(Some(Value::new(right.clone()))),
-                OneOrBoth::Left(_) => Ok(None),
-            }
-        })),
-        args: rargs.0,
-        dependencies: Vec::new(),
-    });
-
-    (lnode, rnode)
-}
-
 pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
@@ -207,6 +169,68 @@ pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
         args: args.0,
         dependencies: Vec::new(),
     })
+}
+
+fn fork_left<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    lname: &str,
+    fork: &Node<ComputeScalar<SP>>,
+) -> Node<ComputeScalar<SP>> {
+    let largs = ComputeScalarArgs::from(&[("fork", fork.into())]);
+    Node::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(lname),
+        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
+            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
+                OneOrBoth::Left(left) | OneOrBoth::Both { left, .. } => Ok(Some(Value::new(left.clone()))),
+                OneOrBoth::Right(_) => Ok(None),
+            }
+        })),
+        args: largs.0,
+        dependencies: Vec::new(),
+    })
+}
+
+fn fork_right<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    rname: &str,
+    fork: &Node<ComputeScalar<SP>>,
+) -> Node<ComputeScalar<SP>> {
+    let rargs = ComputeScalarArgs::from(&[("fork", fork.into())]);
+    Node::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(rname),
+        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
+            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
+                OneOrBoth::Right(right) | OneOrBoth::Both { right, .. } => Ok(Some(Value::new(right.clone()))),
+                OneOrBoth::Left(_) => Ok(None),
+            }
+        })),
+        args: rargs.0,
+        dependencies: Vec::new(),
+    })
+}
+
+pub fn compute_scalar_forked<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    lname: &str,
+    rname: &str,
+    function: impl 'static + Fn(&Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
+    args: impl Into<ComputeScalarArgs<SP>>,
+) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
+    let fork_name = format!("split-{lname}-or-{rname}");
+    let fork = compute_scalar(&fork_name, function, args);
+    let lnode = fork_left::<SP, LRet, RRet>(lname, &fork);
+    let rnode = fork_right::<SP, LRet, RRet>(rname, &fork);
+    (lnode, rnode)
+}
+
+pub fn compute_scalar_forked_with_rng<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    lname: &str,
+    rname: &str,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
+    args: impl Into<ComputeScalarArgs<SP>>,
+) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
+    let fork_name = format!("split-{lname}-or-{rname}");
+    let fork = compute_scalar_with_rng(&fork_name, function, args);
+    let lnode = fork_left::<SP, LRet, RRet>(lname, &fork);
+    let rnode = fork_right::<SP, LRet, RRet>(rname, &fork);
+    (lnode, rnode)
 }
 
 pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
