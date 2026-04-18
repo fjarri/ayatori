@@ -7,10 +7,10 @@
 
 extern crate alloc;
 
-mod distributed_rng;
-mod echo_broadcast;
-mod evidence_generation;
-mod logic_fork;
-mod messages;
-mod nested_protocol;
-mod secret_reveal;
+pub mod distributed_rng;
+pub mod echo_broadcast;
+pub mod evidence_generation;
+pub mod logic_fork;
+pub mod messages;
+pub mod nested_protocol;
+pub mod secret_reveal;

@@ -1,17 +1,11 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::collections::BTreeSet;
 
-use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
-use signature::{Keypair, rand_core::SeedableRng};
 
-use ayatori::{
-    dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-    protocol_author_api::*,
-    protocol_user_api::*,
-};
+use ayatori::protocol_author_api::*;
 
 #[derive(Debug)]
-struct TestProtocol;
+pub struct TestProtocol;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message1<Id>(Id);
@@ -127,21 +121,42 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     }
 }
 
-#[test]
-fn happy_path() {
-    let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-    let party_group = PartyGroup::new(&ids);
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
 
-    let mut rng = ChaCha8Rng::seed_from_u64(123);
-    let session_id = SessionId::random(&mut rng);
+    use rand_chacha::ChaCha8Rng;
+    use signature::{Keypair, rand_core::SeedableRng};
 
-    let sessions = signers
-        .into_iter()
-        .map(|signer| {
-            Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(session_id.clone(), signer, &(), &party_group)
+    use ayatori::{
+        dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+        protocol_author_api::*,
+        protocol_user_api::*,
+    };
+
+    use super::TestProtocol;
+
+    #[test]
+    fn happy_path() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+        let party_group = PartyGroup::new(&ids);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
+
+        let sessions = signers
+            .into_iter()
+            .map(|signer| {
+                Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(
+                    session_id.clone(),
+                    signer,
+                    &(),
+                    &party_group,
+                )
                 .unwrap()
-        })
-        .collect::<Vec<_>>();
-    let _results = run_sessions_sync(&mut rng, sessions).unwrap();
+            })
+            .collect::<Vec<_>>();
+        let _results = run_sessions_sync(&mut rng, sessions).unwrap();
+    }
 }
