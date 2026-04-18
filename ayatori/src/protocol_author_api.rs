@@ -1,3 +1,5 @@
+//! The API to be used by the code that implements the protocol, or tests for it.
+
 pub use crate::{
     entities::{
         Args, AssociatedData, Erasable, EvidenceVerdict, FullName, OneOrBoth, PartyGroup, RuntimeError,

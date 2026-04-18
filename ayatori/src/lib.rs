@@ -1,11 +1,13 @@
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc = include_str!("../../README.md")]
 #![warn(
     clippy::mod_module_files,
     missing_copy_implementations,
     rust_2018_idioms,
     trivial_casts,
     trivial_numeric_casts,
+    missing_docs,
     clippy::unwrap_used,
     clippy::indexing_slicing,
     unused_qualifications,

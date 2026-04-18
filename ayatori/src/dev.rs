@@ -1,3 +1,5 @@
+//! Tools for testing protocols.
+
 mod replacements;
 mod run_sync;
 mod session_parameters;
