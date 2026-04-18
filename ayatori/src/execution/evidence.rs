@@ -17,15 +17,15 @@ use crate::{
 pub struct Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     session_id: SessionId<SP>,
     guilty_party: SP::Verifier,
-    evidence: EvidenceEnum<SP, P>,
+    kind: EvidenceKind<SP, P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
-    pub(crate) fn new(session_id: &SessionId<SP>, guilty_party: &SP::Verifier, evidence: EvidenceEnum<SP, P>) -> Self {
+    pub(crate) fn new(session_id: &SessionId<SP>, guilty_party: &SP::Verifier, kind: EvidenceKind<SP, P>) -> Self {
         Self {
             session_id: session_id.clone(),
             guilty_party: guilty_party.clone(),
-            evidence,
+            kind,
         }
     }
 
@@ -38,19 +38,19 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
     }
 
     pub fn verify(&self, shared_data: &P::SharedData) -> Result<EvidenceVerdict, RuntimeError> {
-        self.evidence.verify(&self.session_id, &self.guilty_party, shared_data)
+        self.kind.verify(&self.session_id, &self.guilty_party, shared_data)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum EvidenceEnum<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+pub(crate) enum EvidenceKind<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     SenderError(SenderErrorEvidence<SP, P>),
     SenderErrorWithReveal(SenderErrorWithRevealEvidence<SP, P>),
     ConflictingMessages(ConflictingMessagesEvidence<SP>),
     ThirdPartyError(ThirdPartyErrorEvidence<SP, P>),
 }
 
-impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceKind<SP, P> {
     pub fn verify(
         &self,
         session_id: &SessionId<SP>,

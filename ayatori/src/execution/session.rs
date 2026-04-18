@@ -12,7 +12,7 @@ use signature::Keypair;
 
 use super::{
     evidence::{
-        ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, SenderErrorWithRevealEvidence,
+        ConflictingMessagesEvidence, Evidence, EvidenceKind, SenderErrorEvidence, SenderErrorWithRevealEvidence,
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
@@ -438,7 +438,7 @@ where
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
-                    let evidence = EvidenceEnum::SenderError(SenderErrorEvidence::new(
+                    let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
                         &self.verifier,
                         &store_in,
                         signed_values,
@@ -464,7 +464,7 @@ where
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
-                    let evidence = EvidenceEnum::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
+                    let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
                         &self.verifier,
                         &store_in,
                         signed_values,
@@ -479,7 +479,7 @@ where
                 error,
             } => {
                 let evidence =
-                    EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
+                    EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
                 self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
             }
             TaskResultEnum::Preprocessed {
@@ -499,7 +499,7 @@ where
                     if typed_existing_value.metadata() != typed_received_value.metadata()
                         || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
                     {
-                        let evidence = EvidenceEnum::ConflictingMessages(ConflictingMessagesEvidence::new(
+                        let evidence = EvidenceKind::ConflictingMessages(ConflictingMessagesEvidence::new(
                             typed_existing_value,
                             typed_received_value,
                         ));
