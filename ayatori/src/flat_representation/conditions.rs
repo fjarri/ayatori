@@ -219,12 +219,13 @@ pub(crate) struct ElementConditionWithState<Id: PartyId> {
 
 impl<Id: PartyId> ElementConditionWithState<Id> {
     pub fn new(condition: ElementCondition, possible_ids: &BTreeSet<Id>) -> Self {
+        let current_conditions = possible_ids
+            .iter()
+            .map(|id| (id.clone(), condition.all_of.clone()))
+            .collect();
         Self {
-            original_condition: condition.clone(),
-            current_conditions: possible_ids
-                .iter()
-                .map(|id| (id.clone(), condition.all_of.clone()))
-                .collect(),
+            original_condition: condition,
+            current_conditions,
             triggered_for: BTreeSet::new(),
         }
     }

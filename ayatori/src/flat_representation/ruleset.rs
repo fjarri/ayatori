@@ -14,8 +14,8 @@ use super::conditions::{
 use crate::{
     entities::{
         AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
-        LocalSignedTag, MappingFunction, MappingTag, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
-        ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, ReceivedTag, RemoteSignedTag, RuntimeError,
+        ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
     graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, Reproducibility},
     traits::SessionParameters,
@@ -167,85 +167,78 @@ where
     }
 }
 
-fn propagate_groups<SP: SessionParameters>(
-    root: &AnyNode<SP>,
-) -> Result<BTreeMap<MappingTag, BTreeSet<SP::Verifier>>, RuntimeError> {
-    let mut result: BTreeMap<MappingTag, BTreeSet<SP::Verifier>> = BTreeMap::new();
+/// Contains the specific IDs for which every mapping-type node needs to be calculated for,
+/// based on collect-type nodes that consume it.
+struct PropagatedGroups<SP: SessionParameters>(BTreeMap<MappingTag, BTreeSet<SP::Verifier>>);
 
-    for node in root.flattened_roots_first() {
-        match node {
-            AnyNode::ScalarArgument(_) | AnyNode::MergeScalars(_) | AnyNode::ComputeScalar(_) | AnyNode::Receive(_) => {
-            }
-            AnyNode::ComputeMapping(node) => {
-                let ids = result
-                    .get(&MappingTag::Computed(node.as_ref().store_in.clone()))
-                    .cloned()
-                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
-                for arg in node.as_ref().args.values() {
-                    if let AnyTagRef::Mapping(tag) = arg.store_in() {
-                        result
-                            .entry(tag.to_owned())
-                            .or_insert(BTreeSet::new())
-                            .extend(ids.clone());
+impl<SP: SessionParameters> PropagatedGroups<SP> {
+    fn empty() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    fn insert(&mut self, tag: MappingTagRef<'_>, ids: BTreeSet<SP::Verifier>) {
+        self.0.entry(tag.to_owned()).or_default().extend(ids);
+    }
+
+    fn get(&self, tag: MappingTagRef<'_>) -> Result<&BTreeSet<SP::Verifier>, RuntimeError> {
+        self.0
+            .get(&tag.to_owned())
+            .ok_or_else(|| RuntimeError::expect("The required IDs were propagated to this node"))
+    }
+
+    fn new(root: &AnyNode<SP>) -> Result<Self, RuntimeError> {
+        let mut result = Self::empty();
+
+        for node in root.flattened_roots_first() {
+            match node {
+                AnyNode::ScalarArgument(_)
+                | AnyNode::MergeScalars(_)
+                | AnyNode::ComputeScalar(_)
+                | AnyNode::Receive(_) => {}
+                AnyNode::ComputeMapping(node) => {
+                    let ids = result.get(MappingTagRef::Computed(&node.as_ref().store_in))?.clone();
+                    for arg in node.as_ref().args.values() {
+                        if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                            result.insert(tag, ids.clone());
+                        }
                     }
-                }
 
-                match &node.as_ref().kind {
-                    ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
-                    ComputeMappingKind::WithReveal { verification_args, .. } => {
-                        for arg in verification_args.values() {
-                            if let AnyTagRef::Mapping(tag) = arg.store_in() {
-                                result
-                                    .entry(tag.to_owned())
-                                    .or_insert(BTreeSet::new())
-                                    .extend(ids.clone());
+                    match &node.as_ref().kind {
+                        ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
+                        ComputeMappingKind::WithReveal { verification_args, .. } => {
+                            for arg in verification_args.values() {
+                                if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                                    result.insert(tag, ids.clone());
+                                }
                             }
                         }
                     }
                 }
-            }
-            AnyNode::SerializeAndSign(node) => {
-                let ids = result
-                    .get(&MappingTag::LocalSigned(node.as_ref().store_in.clone()))
-                    .cloned()
-                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
-                if let AnyTagRef::Mapping(tag) = node.as_ref().data.store_in() {
-                    result.entry(tag.to_owned()).or_insert(BTreeSet::new()).extend(ids);
+                AnyNode::SerializeAndSign(node) => {
+                    let ids = result.get(MappingTagRef::LocalSigned(&node.as_ref().store_in))?.clone();
+                    if let AnyTagRef::Mapping(tag) = node.as_ref().data.store_in() {
+                        result.insert(tag, ids);
+                    }
+                }
+                AnyNode::DeserializeAndCheck(node) => {
+                    let ids = result.get(MappingTagRef::Received(&node.as_ref().store_in))?.clone();
+                    result.insert(MappingTagRef::RemoteSigned(&node.as_ref().data.as_ref().store_in), ids);
+                }
+                AnyNode::DirectMessage(node) => {
+                    let ids = result.get(MappingTagRef::Sent(&node.as_ref().store_in))?.clone();
+                    result.insert(MappingTagRef::LocalSigned(&node.as_ref().data.as_ref().store_in), ids);
+                }
+                AnyNode::Collect(node) => {
+                    result.insert(
+                        node.as_ref().values.store_in(),
+                        node.as_ref().group.ids().cloned().collect(),
+                    );
                 }
             }
-            AnyNode::DeserializeAndCheck(node) => {
-                let ids = result
-                    .get(&MappingTag::Received(node.as_ref().store_in.clone()))
-                    .cloned()
-                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
-                let tag = node.as_ref().data.as_ref().store_in.clone();
-                result
-                    .entry(MappingTag::RemoteSigned(tag))
-                    .or_insert(BTreeSet::new())
-                    .extend(ids);
-            }
-            AnyNode::DirectMessage(node) => {
-                let ids = result
-                    .get(&MappingTag::Sent(node.as_ref().store_in.clone()))
-                    .cloned()
-                    .ok_or_else(|| RuntimeError::expect("The node must have been already processed"))?;
-                let tag = node.as_ref().data.as_ref().store_in.clone();
-                result
-                    .entry(MappingTag::LocalSigned(tag))
-                    .or_insert(BTreeSet::new())
-                    .extend(ids);
-            }
-            AnyNode::Collect(node) => {
-                let tag = node.as_ref().values.store_in().to_owned();
-                result
-                    .entry(tag)
-                    .or_insert(BTreeSet::new())
-                    .extend(node.as_ref().group.ids().cloned());
-            }
         }
-    }
 
-    Ok(result)
+        Ok(result)
+    }
 }
 
 #[derive(Debug)]
@@ -271,7 +264,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
     pub fn new(output_node: &OutputNode<SP>, private_inputs: &BTreeSet<String>) -> Result<Self, RuntimeError> {
         let output_tag = output_node.store_in();
 
-        let propagated_ids = propagate_groups(&AnyNode::from(output_node.get_strong_ref()))?;
+        let propagated_groups = PropagatedGroups::new(&AnyNode::from(output_node.get_strong_ref()))?;
 
         let mut scalar_rules = Vec::new();
         let mut collect_rules = Vec::new();
@@ -288,37 +281,41 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 ScalarConditionWithState::new(ScalarCondition::from_dependencies(node.dependencies()));
             match node {
                 AnyNode::ScalarArgument(node) => {
-                    arguments.insert(node.as_ref().name.clone(), node.as_ref().store_in.clone());
+                    let node = node.as_ref();
+                    arguments.insert(node.name.clone(), node.store_in.clone());
                 }
                 AnyNode::ComputeScalar(node) => {
-                    let mut arg_tags = BTreeMap::new();
-                    let scalar_condition = ScalarCondition::from_compute_scalar(node.as_ref());
-                    for (name, arg) in &node.as_ref().args {
-                        let tag = arg.store_in();
-                        arg_tags.insert(name.clone(), tag.to_owned());
-                    }
+                    let node = node.as_ref();
+                    let scalar_condition = ScalarCondition::from_compute_scalar(node);
+
+                    let arg_tags = node
+                        .args
+                        .iter()
+                        .map(|(name, arg)| {
+                            let arg = arg.store_in().to_owned();
+                            (name.clone(), arg)
+                        })
+                        .collect();
+
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(scalar_condition),
                         kind: ScalarRuleKind::Compute {
-                            store_in: node.as_ref().store_in.clone(),
-                            function: node.as_ref().function.clone(),
+                            store_in: node.store_in.clone(),
+                            function: node.function.clone(),
                             args: arg_tags,
                         },
                     });
                 }
                 AnyNode::ComputeMapping(node) => {
                     let on_error = get_on_error(&node, private_inputs);
-                    let possible_ids = propagated_ids
-                        .get(&MappingTag::Computed(node.as_ref().store_in.clone()))
-                        .ok_or_else(|| {
-                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
-                        })?;
+                    let node = node.as_ref();
+                    let possible_ids = propagated_groups.get(MappingTagRef::Computed(&node.store_in))?;
 
-                    let scalar_condition = ScalarCondition::from_compute_mapping(node.as_ref());
-                    let element_condition = ElementCondition::from_compute_mapping(node.as_ref());
+                    let scalar_condition = ScalarCondition::from_compute_mapping(node);
+                    let element_condition = ElementCondition::from_compute_mapping(node);
 
-                    let function = match &node.as_ref().kind {
+                    let function = match &node.kind {
                         ComputeMappingKind::Simple { function } => MappingFunction::from(function.clone()),
                         ComputeMappingKind::WithReveal { function, .. } => {
                             MappingFunction::SenderAttributableWithReveal(function.clone())
@@ -329,7 +326,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     };
 
                     let arg_tags = node
-                        .as_ref()
                         .args
                         .iter()
                         .map(|(name, arg)| {
@@ -343,7 +339,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         scalar_condition: ScalarConditionWithState::new(scalar_condition),
                         element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         kind: MappingRuleKind::Compute {
-                            store_in: node.as_ref().store_in.clone(),
+                            store_in: node.store_in.clone(),
                             function,
                             args: arg_tags,
                             on_error: on_error.clone(),
@@ -351,96 +347,85 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     });
                 }
                 AnyNode::SerializeAndSign(node) => {
-                    let possible_ids = propagated_ids
-                        .get(&MappingTag::LocalSigned(node.as_ref().store_in.clone()))
-                        .ok_or_else(|| {
-                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
-                        })?;
+                    let node = node.as_ref();
+                    let possible_ids = propagated_groups.get(MappingTagRef::LocalSigned(&node.store_in))?;
 
-                    let scalar_condition = ScalarCondition::from_serialize_and_sign(node.as_ref());
-                    let element_condition = ElementCondition::from_serialize_and_sign(node.as_ref());
+                    let scalar_condition = ScalarCondition::from_serialize_and_sign(node);
+                    let element_condition = ElementCondition::from_serialize_and_sign(node);
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(scalar_condition),
                         element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         kind: MappingRuleKind::SerializeAndSign {
-                            store_in: node.as_ref().store_in.clone(),
-                            function: node.as_ref().function.clone(),
-                            data: node.as_ref().data.store_in().to_owned(),
-                            message_name: node.as_ref().message_name.clone(),
-                            serde_adapter: node.as_ref().serde_adapter.clone(),
+                            store_in: node.store_in.clone(),
+                            function: node.function.clone(),
+                            data: node.data.store_in().to_owned(),
+                            message_name: node.message_name.clone(),
+                            serde_adapter: node.serde_adapter.clone(),
                         },
                     });
                 }
                 AnyNode::DeserializeAndCheck(node) => {
-                    let possible_ids = propagated_ids
-                        .get(&MappingTag::Received(node.as_ref().store_in.clone()))
-                        .ok_or_else(|| {
-                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
-                        })?;
-
                     let on_error = get_on_error(&node, private_inputs);
+                    let node = node.as_ref();
+                    let possible_ids = propagated_groups.get(MappingTagRef::Received(&node.store_in))?;
 
-                    let element_condition = ElementCondition::from_deserialize_and_check(node.as_ref());
+                    let element_condition = ElementCondition::from_deserialize_and_check(node);
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
                         element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         kind: MappingRuleKind::Deserialize {
-                            store_in: node.as_ref().store_in.clone(),
-                            function: node.as_ref().function.clone(),
-                            data: node.as_ref().data.as_ref().store_in.clone(),
-                            message_name: node.as_ref().message_name.clone(),
-                            serde_adapter: node.as_ref().serde_adapter.clone(),
+                            store_in: node.store_in.clone(),
+                            function: node.function.clone(),
+                            data: node.data.as_ref().store_in.clone(),
+                            message_name: node.message_name.clone(),
+                            serde_adapter: node.serde_adapter.clone(),
                             on_error,
                         },
                     });
                 }
                 AnyNode::DirectMessage(node) => {
-                    let possible_ids = propagated_ids
-                        .get(&MappingTag::Sent(node.as_ref().store_in.clone()))
-                        .ok_or_else(|| {
-                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
-                        })?;
+                    let node = node.as_ref();
+                    let possible_ids = propagated_groups.get(MappingTagRef::Sent(&node.store_in))?;
 
-                    let element_condition = ElementCondition::from_direct_message(node.as_ref());
+                    let element_condition = ElementCondition::from_direct_message(node);
 
                     send_rules.push(SendRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
                         element_condition: ElementConditionWithState::new(element_condition, possible_ids),
-                        store_in: node.as_ref().store_in.clone(),
-                        to_send: node.as_ref().data.as_ref().store_in.clone(),
+                        store_in: node.store_in.clone(),
+                        to_send: node.data.as_ref().store_in.clone(),
                     });
                 }
                 AnyNode::Collect(node) => {
-                    let quorum_condition = QuorumCondition::from_collect(node.as_ref());
+                    let node = node.as_ref();
+                    let quorum_condition = QuorumCondition::from_collect(node);
                     collect_rules.push(CollectRule {
                         dependencies_condition,
                         quorum_condition: QuorumConditionWithState::new(quorum_condition),
-                        store_in: node.as_ref().store_in.clone(),
-                        values: node.as_ref().values.store_in().to_owned(),
+                        store_in: node.store_in.clone(),
+                        values: node.values.store_in().to_owned(),
                     });
                 }
                 AnyNode::Receive(node) => {
-                    let possible_ids = propagated_ids
-                        .get(&MappingTag::RemoteSigned(node.as_ref().store_in.clone()))
-                        .ok_or_else(|| {
-                            RuntimeError::expect("The required IDs were propagated to all nodes in the tree")
-                        })?;
-                    expected_messages.insert(node.as_ref().message_name.clone(), possible_ids.clone());
+                    let node = node.as_ref();
+                    let possible_ids = propagated_groups.get(MappingTagRef::RemoteSigned(&node.store_in))?;
+                    expected_messages.insert(node.message_name.clone(), possible_ids.clone());
                 }
                 AnyNode::MergeScalars(node) => {
-                    let scalar_condition = ScalarCondition::from_merged_scalar(node.as_ref());
+                    let node = node.as_ref();
+                    let scalar_condition = ScalarCondition::from_merged_scalar(node);
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(scalar_condition),
                         kind: ScalarRuleKind::Merge {
-                            store_in: node.as_ref().store_in.clone(),
-                            left: ScalarTag::Computed(node.as_ref().left.as_ref().store_in.clone()),
-                            right: ScalarTag::Computed(node.as_ref().right.as_ref().store_in.clone()),
+                            store_in: node.store_in.clone(),
+                            left: ScalarTag::Computed(node.left.as_ref().store_in.clone()),
+                            right: ScalarTag::Computed(node.right.as_ref().store_in.clone()),
                         },
                     });
                 }
