@@ -5,7 +5,7 @@ use alloc::{
 };
 
 use crate::{
-    entities::{AnyTag, MappingTag, RuntimeError, ScalarTag, Value},
+    entities::{AnyTag, MappingTag, OneOrBoth, RuntimeError, ScalarTag, Value},
     traits::PartyId,
 };
 
@@ -57,6 +57,22 @@ impl<Id: PartyId> Storage<Id> {
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         Ok(Value::new(filtered_dict))
+    }
+
+    pub fn get_one_or_both_as_value(&self, left: &ScalarTag, right: &ScalarTag) -> Result<Value, RuntimeError> {
+        let maybe_left = self.scalars.get(left).cloned();
+        let maybe_right = self.scalars.get(right).cloned();
+        let result = match (maybe_left, maybe_right) {
+            (None, None) => {
+                return Err(RuntimeError::expect(format!(
+                    "Expected either {left} or {right} to be in storage"
+                )));
+            }
+            (Some(left), None) => OneOrBoth::Left(left),
+            (None, Some(right)) => OneOrBoth::Right(right),
+            (Some(left), Some(right)) => OneOrBoth::Both { left, right },
+        };
+        Ok(Value::new(result))
     }
 
     pub fn get_elem(&self, tag: &MappingTag, id: &Id) -> Result<Value, RuntimeError> {
