@@ -393,7 +393,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         })
     }
 
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub(crate) fn with_replaced_subnode(&self, old_subnode: &Self, new_subnode: &Self) -> Self {
         self.mutated_tree(|node| {
             Ok(if node.id() == old_subnode.id() {

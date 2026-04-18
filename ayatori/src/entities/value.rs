@@ -215,12 +215,29 @@ impl SerializedValue {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
+    use alloc::{boxed::Box, string::ToString, sync::Arc};
 
     use serde::{Deserialize, Serialize};
 
     use super::{SerdeAdapter, Value};
-    use crate::dev::BinaryFormat;
+    use crate::{entities::RuntimeError, traits::WireFormat};
+
+    #[derive(Debug, Clone, Copy)]
+    struct BinaryFormat;
+
+    impl WireFormat for BinaryFormat {
+        fn serialize<T: Serialize>(value: T) -> Result<Box<[u8]>, RuntimeError> {
+            postcard::to_allocvec(&value)
+                .map(Into::into)
+                .map_err(|err| RuntimeError::new(err.to_string()))
+        }
+
+        type DeError = postcard::Error;
+
+        fn deserialize<'de, T: Deserialize<'de>>(bytes: &'de [u8]) -> Result<T, Self::DeError> {
+            postcard::from_bytes(bytes)
+        }
+    }
 
     #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
     struct Serializable {

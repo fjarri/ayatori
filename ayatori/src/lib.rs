@@ -24,5 +24,5 @@ mod traits;
 pub mod protocol_author_api;
 pub mod protocol_user_api;
 
-#[cfg(any(test, feature = "dev"))]
+#[cfg(feature = "dev")]
 pub mod dev;

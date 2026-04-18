@@ -6,7 +6,7 @@ use core::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(test, feature = "dev"))]
+#[cfg(feature = "dev")]
 use super::errors::RuntimeError;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -23,7 +23,7 @@ impl FullName {
         }
     }
 
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub(crate) fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, RuntimeError> {
         let mut names = prefix_and_name.iter().map(ToString::to_string).collect::<Vec<String>>();
         let name = names
@@ -64,7 +64,7 @@ impl ComputedScalarTag {
         Self(FullName::new(name))
     }
 
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub fn new_with_full_name(full_name: FullName) -> Self {
         Self(full_name)
     }
@@ -126,7 +126,7 @@ impl ComputedMappingTag {
         Self(FullName::new(name))
     }
 
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub fn new_with_full_name(full_name: FullName) -> Self {
         Self(full_name)
     }
@@ -174,7 +174,7 @@ impl LocalSignedTag {
         Self(FullName::new(name))
     }
 
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub fn new_with_full_name(full_name: FullName) -> Self {
         Self(full_name)
     }
@@ -226,7 +226,7 @@ pub(crate) enum ScalarTag {
 }
 
 impl ScalarTag {
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub fn as_ref(&self) -> ScalarTagRef<'_> {
         match self {
             Self::Computed(tag) => ScalarTagRef::Computed(tag),
@@ -354,7 +354,7 @@ pub(crate) enum AnyTag {
 }
 
 impl AnyTag {
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(feature = "dev")]
     pub fn as_ref(&self) -> AnyTagRef<'_> {
         match self {
             Self::Scalar(tag) => AnyTagRef::Scalar(tag.as_ref()),

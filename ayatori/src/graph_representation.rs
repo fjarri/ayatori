@@ -7,7 +7,7 @@ mod unions;
 pub(crate) use any_node::Reproducibility;
 pub(crate) use typed_nodes::{ComputeMappingKind, GeneralizedNode};
 
-#[cfg(any(test, feature = "dev"))]
+#[cfg(feature = "dev")]
 pub(crate) use typed_nodes::ShallowClone;
 
 pub use any_node::AnyNode;
