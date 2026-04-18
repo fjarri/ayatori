@@ -207,7 +207,7 @@ fn fork_right<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Cl
     })
 }
 
-pub fn compute_scalar_forked<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+pub fn compute_forked_scalar<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
     lname: &str,
     rname: &str,
     function: impl 'static + Fn(&Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
@@ -220,7 +220,7 @@ pub fn compute_scalar_forked<SP: SessionParameters, LRet: Erasable + Clone, RRet
     (lnode, rnode)
 }
 
-pub fn compute_scalar_forked_with_rng<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
     lname: &str,
     rname: &str,
     function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
