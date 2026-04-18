@@ -207,8 +207,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
                 }
                 // This is essentially a subtype of compute-mapping with a reproducible function.
                 Self::DeserializeAndCheck(_) |
-                // TODO: or is it always NOT reproducible?
-                // Reproducible as long as its arguments are reproducible
+                // Reproducible as long as both of its arguments are reproducible
                 Self::MergeScalars(_) |
                 // We can always reproduce the result of this, since it is an infallible `()`.
                 Self::DirectMessage(_) => {}

@@ -21,9 +21,6 @@ use crate::{
     traits::SessionParameters,
 };
 
-// TODO: can we merge Scalar/Merge/Collect into a single rule?
-// Or if we have a single condition type, MappingRule can be merged in as well
-
 #[derive_where::derive_where(Debug)]
 struct ScalarRule<SP: SessionParameters> {
     dependencies_condition: ScalarConditionWithState,

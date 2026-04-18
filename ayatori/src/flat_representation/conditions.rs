@@ -231,7 +231,6 @@ impl<Id: PartyId> ElementConditionWithState<Id> {
     }
 
     pub fn update_with_element_ready(&mut self, tag: &MappingTag, id: &Id) {
-        // TODO: check if `id` is in `triggered_for` already?
         self.current_conditions.get_mut(id).map(|tags| tags.remove(tag));
     }
 

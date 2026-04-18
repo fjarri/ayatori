@@ -23,8 +23,8 @@ use crate::dev::Replacement;
 use crate::{
     entities::{
         AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
-        ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
+        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
+        SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
