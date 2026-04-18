@@ -19,9 +19,10 @@ use super::{
 use crate::{
     entities::{
         CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, EvidenceVerificationFunction,
-        FullName, LocalSignedTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
-        ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter, SerializeAndSignFunction,
-        SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
+        FullName, LocalSignedTag, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError,
+        ScalarArgumentTag, ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
+        SerializeAndSignFunction, SimpleMappingFunction, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction,
     },
     traits::SessionParameters,
 };
@@ -634,6 +635,38 @@ impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
     }
 }
 
+#[derive_where::derive_where(Debug)]
+pub struct MergeScalars<SP: SessionParameters> {
+    pub(crate) store_in: MergedScalarTag,
+    pub(crate) left: ComputeScalarArg<SP>,
+    pub(crate) right: ComputeScalarArg<SP>,
+}
+
+impl<SP: SessionParameters> ShallowClone for MergeScalars<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            left: self.left.get_strong_ref(),
+            right: self.right.get_strong_ref(),
+        }
+    }
+}
+
+impl<SP: SessionParameters> SpecificNode<SP> for MergeScalars<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node
+    }
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        replace_in_node(&mut node.left, replacements)?;
+        replace_in_node(&mut node.right, replacements)?;
+        Ok(node)
+    }
+}
+
 fn display_args<SP, T>(args: &BTreeMap<String, T>) -> String
 where
     SP: SessionParameters,
@@ -712,7 +745,7 @@ impl<SP: SessionParameters> Display for Collect<SP> {
             f,
             "{} = collect({}){}",
             self.store_in,
-            AnyNode::from(self.values.get_strong_ref()).store_in(),
+            self.values.store_in(),
             display_dependencies(&self.dependencies)
         )
     }
@@ -724,7 +757,7 @@ impl<SP: SessionParameters> Display for SerializeAndSign<SP> {
             f,
             "{}[*] = <serialize_and_sign>(*, {}){}",
             self.store_in,
-            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            self.data.store_in(),
             display_dependencies(&self.dependencies)
         )
     }
@@ -736,7 +769,7 @@ impl<SP: SessionParameters> Display for DeserializeAndCheck<SP> {
             f,
             "{}[*] = <deserialize_and_check>(*, {}){}",
             self.store_in,
-            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            self.data.as_ref().store_in,
             display_dependencies(&self.dependencies)
         )
     }
@@ -748,7 +781,7 @@ impl<SP: SessionParameters> Display for DirectMessage<SP> {
             f,
             "{}[*] = <send>(*, {}){}",
             self.store_in,
-            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            self.data.as_ref().store_in,
             display_dependencies(&self.dependencies)
         )
     }
@@ -768,7 +801,19 @@ impl<SP: SessionParameters> Display for Receive<SP> {
 
 impl<SP: SessionParameters> Display for ScalarArgument<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{} = <argument {}>", self.store_in, self.name,)
+        write!(f, "{} = <argument {}>", self.store_in, self.name)
+    }
+}
+
+impl<SP: SessionParameters> Display for MergeScalars<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{} = <merge {} {}>",
+            self.store_in,
+            self.left.store_in(),
+            self.right.store_in()
+        )
     }
 }
 

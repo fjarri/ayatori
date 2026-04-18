@@ -13,8 +13,8 @@ use crate::{
         SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SentTag,
         SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableError,
         ThirdPartyAttributableErrorEnum, ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError,
-        UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableScalarFunction,
-        UnattributableScalarFunctionWithRng, Value, VerificationError,
+        UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
+        UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value, VerificationError,
     },
     flat_representation::OnError,
     traits::SessionParameters,
@@ -25,6 +25,11 @@ enum ComputeTaskEnum<SP: SessionParameters> {
     ScalarUnattributable {
         store_in: ComputedScalarTag,
         function: UnattributableScalarFunction<SP>,
+        args: Args<SP>,
+    },
+    ScalarUnattributableOptional {
+        store_in: ComputedScalarTag,
+        function: UnattributableOptionalScalarFunction<SP>,
         args: Args<SP>,
     },
     MappingElementUnattributable {
@@ -79,6 +84,21 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 let store_in = ScalarTag::Computed(store_in);
                 let result = function.call(&args)?;
                 Ok(TaskResult(TaskResultEnum::ComputedScalar { store_in, result }))
+            }
+            ComputeTaskEnum::ScalarUnattributableOptional {
+                store_in,
+                function,
+                args,
+            } => {
+                let store_in = ScalarTag::Computed(store_in);
+                let result = function.call(&args)?;
+                Ok(TaskResult(match result {
+                    Some(value) => TaskResultEnum::ComputedScalar {
+                        store_in,
+                        result: value,
+                    },
+                    None => TaskResultEnum::Success,
+                }))
             }
             ComputeTaskEnum::MappingElementUnattributable {
                 store_in,
@@ -350,7 +370,7 @@ impl<SP: SessionParameters> Task<SP> {
         })
     }
 
-    pub(crate) fn compute_scalar_infallible(
+    pub(crate) fn compute_scalar_unattributable(
         store_in: ComputedScalarTag,
         function: UnattributableScalarFunction<SP>,
         args: Args<SP>,
@@ -362,7 +382,19 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_scalar_infallible_with_rng(
+    pub(crate) fn compute_scalar_unattributable_optional(
+        store_in: ComputedScalarTag,
+        function: UnattributableOptionalScalarFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self::Compute(ComputeTask(ComputeTaskEnum::ScalarUnattributableOptional {
+            store_in,
+            function,
+            args,
+        }))
+    }
+
+    pub(crate) fn compute_scalar_unattributable_with_rng(
         store_in: ComputedScalarTag,
         function: UnattributableScalarFunctionWithRng<SP>,
         args: Args<SP>,
@@ -374,7 +406,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_mapping_elem_infallible(
+    pub(crate) fn compute_mapping_elem_unattributable(
         store_in: ComputedMappingTag,
         source: SP::Verifier,
         function: UnattributableMappingFunction<SP>,
@@ -388,7 +420,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_mapping_elem_infallible_with_rng(
+    pub(crate) fn compute_mapping_elem_unattributable_with_rng(
         store_in: ComputedMappingTag,
         source: SP::Verifier,
         function: UnattributableMappingFunctionWithRng<SP>,
@@ -494,6 +526,7 @@ impl<SP: SessionParameters> TaskResult<SP> {
 
 #[derive(Debug)]
 pub(crate) enum TaskResultEnum<SP: SessionParameters> {
+    Success,
     Sent {
         store_in: MappingTag,
         destination: SP::Verifier,

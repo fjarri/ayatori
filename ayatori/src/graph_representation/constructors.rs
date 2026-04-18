@@ -14,20 +14,21 @@ use super::{
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
     typed_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
-        GeneralizedNode, Node, Receive, ScalarArgument, SerializeAndSign,
+        GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SerializeAndSign,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
 };
 use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, PartyGroup, RemoteSignedTag,
-        RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError, SenderAttributableErrorWithReveal,
-        SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SerdeAdapter,
-        SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue, SimpleMappingFunction,
-        ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
-        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
-        UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
+        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MergedScalarTag, OneOrBoth,
+        PartyGroup, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError,
+        SenderAttributableErrorWithReveal, SenderAttributableMappingFunction,
+        SenderAttributableWithRevealMappingFunction, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId,
+        SignedValue, SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction, UnattributableError, UnattributableMappingFunction,
+        UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
+        UnattributableScalarFunctionWithRng, Value,
     },
     traits::{ComposableProtocol, SessionParameters},
 };
@@ -168,6 +169,68 @@ pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
         args: args.0,
         dependencies: Vec::new(),
     })
+}
+
+fn fork_left<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    lname: &str,
+    fork: &Node<ComputeScalar<SP>>,
+) -> Node<ComputeScalar<SP>> {
+    let largs = ComputeScalarArgs::from(&[("fork", fork.into())]);
+    Node::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(lname),
+        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
+            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
+                OneOrBoth::Left(left) | OneOrBoth::Both { left, .. } => Ok(Some(Value::new(left.clone()))),
+                OneOrBoth::Right(_) => Ok(None),
+            }
+        })),
+        args: largs.0,
+        dependencies: Vec::new(),
+    })
+}
+
+fn fork_right<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    rname: &str,
+    fork: &Node<ComputeScalar<SP>>,
+) -> Node<ComputeScalar<SP>> {
+    let rargs = ComputeScalarArgs::from(&[("fork", fork.into())]);
+    Node::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(rname),
+        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
+            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
+                OneOrBoth::Right(right) | OneOrBoth::Both { right, .. } => Ok(Some(Value::new(right.clone()))),
+                OneOrBoth::Left(_) => Ok(None),
+            }
+        })),
+        args: rargs.0,
+        dependencies: Vec::new(),
+    })
+}
+
+pub fn compute_forked_scalar<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    fork_name: &str,
+    lname: &str,
+    rname: &str,
+    function: impl 'static + Fn(&Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
+    args: impl Into<ComputeScalarArgs<SP>>,
+) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
+    let fork = compute_scalar(fork_name, function, args);
+    let lnode = fork_left::<SP, LRet, RRet>(lname, &fork);
+    let rnode = fork_right::<SP, LRet, RRet>(rname, &fork);
+    (lnode, rnode)
+}
+
+pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clone>(
+    fork_name: &str,
+    lname: &str,
+    rname: &str,
+    function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
+    args: impl Into<ComputeScalarArgs<SP>>,
+) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
+    let fork = compute_scalar_with_rng(fork_name, function, args);
+    let lnode = fork_left::<SP, LRet, RRet>(lname, &fork);
+    let rnode = fork_right::<SP, LRet, RRet>(rname, &fork);
+    (lnode, rnode)
 }
 
 pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
@@ -389,13 +452,24 @@ pub fn collect<SP: SessionParameters>(
     group: &PartyGroup<SP::Verifier>,
 ) -> Node<Collect<SP>> {
     let values = values.into();
-    let store_in = values.store_in();
+    let store_in = values.store_in().to_collected();
     Node::new(Collect {
-        store_in: store_in.to_collected(),
+        store_in,
         values,
         group: group.clone(),
         dependencies: Vec::new(),
     })
+}
+
+pub fn merge_scalars<SP: SessionParameters>(
+    left: impl Into<ComputeScalarArg<SP>>,
+    right: impl Into<ComputeScalarArg<SP>>,
+) -> Node<MergeScalars<SP>> {
+    let left: ComputeScalarArg<SP> = left.into();
+    let right: ComputeScalarArg<SP> = right.into();
+    let tag_name = format!("{}-or-{}", left.store_in(), right.store_in());
+    let store_in = MergedScalarTag::new(&tag_name);
+    Node::new(MergeScalars { store_in, left, right })
 }
 
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(

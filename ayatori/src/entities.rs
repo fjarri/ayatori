@@ -15,16 +15,16 @@ pub(crate) use function::{
     DeserializeFunction, EvidenceVerificationFunction, MappingFunction, ScalarFunction,
     SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
     SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
-    UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableScalarFunction,
-    UnattributableScalarFunctionWithRng,
+    UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
+    UnattributableScalarFunction, UnattributableScalarFunctionWithRng,
 };
 pub(crate) use tag::{
     AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedTag, MappingTag, MappingTagRef,
-    ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarTag, ScalarTagRef, SentTag,
+    MergedScalarTag, ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarTag, ScalarTagRef, SentTag,
 };
 pub(crate) use value::Value;
 
-pub use args::{Args, DeserializeArgs, SerializeArgs};
+pub use args::{Args, DeserializeArgs, OneOrBoth, SerializeArgs};
 pub use errors::{
     AssociatedData, RuntimeError, SenderAttributableError, SenderAttributableErrorWithReveal, SpuriousError,
     ThirdPartyAttributableError, UnattributableError,

@@ -142,4 +142,25 @@ impl<SP: SessionParameters> Args<SP> {
             .map(|(id, value)| value.downcast_ref::<T>().map(|value_ref| (id, value_ref)))
             .collect()
     }
+
+    pub fn get_merged<L: Clone + Erasable, R: Clone + Erasable>(
+        &self,
+        name: &str,
+    ) -> Result<OneOrBoth<&L, &R>, RuntimeError> {
+        Ok(match self.get::<OneOrBoth<Value, Value>>(name)? {
+            OneOrBoth::Left(left) => OneOrBoth::Left(left.downcast_ref::<L>()?),
+            OneOrBoth::Right(right) => OneOrBoth::Right(right.downcast_ref::<R>()?),
+            OneOrBoth::Both { left, right } => OneOrBoth::Both {
+                left: left.downcast_ref::<L>()?,
+                right: right.downcast_ref::<R>()?,
+            },
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum OneOrBoth<L, R> {
+    Left(L),
+    Right(R),
+    Both { left: L, right: R },
 }

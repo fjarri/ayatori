@@ -74,6 +74,21 @@ impl ComputedScalarTag {
     }
 }
 
+/// Two merged scalar values; can contain either one or both of them.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("merged({0})")]
+pub(crate) struct MergedScalarTag(pub(crate) FullName);
+
+impl MergedScalarTag {
+    pub fn new(name: &str) -> Self {
+        Self(FullName::new(name))
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("arg({0})")]
 pub(crate) struct ScalarArgumentTag(pub(crate) FullName);
@@ -203,6 +218,8 @@ pub(crate) enum ScalarTag {
     #[displaydoc("{0}")]
     Computed(ComputedScalarTag),
     #[displaydoc("{0}")]
+    Merged(MergedScalarTag),
+    #[displaydoc("{0}")]
     Argument(ScalarArgumentTag),
     #[displaydoc("{0}")]
     Collected(CollectedTag),
@@ -213,6 +230,7 @@ impl ScalarTag {
     pub fn as_ref(&self) -> ScalarTagRef<'_> {
         match self {
             Self::Computed(tag) => ScalarTagRef::Computed(tag),
+            Self::Merged(tag) => ScalarTagRef::Merged(tag),
             Self::Argument(tag) => ScalarTagRef::Argument(tag),
             Self::Collected(tag) => ScalarTagRef::Collected(tag),
         }
@@ -262,6 +280,8 @@ pub(crate) enum ScalarTagRef<'a> {
     #[displaydoc("{0}")]
     Computed(&'a ComputedScalarTag),
     #[displaydoc("{0}")]
+    Merged(&'a MergedScalarTag),
+    #[displaydoc("{0}")]
     Argument(&'a ScalarArgumentTag),
     #[displaydoc("{0}")]
     Collected(&'a CollectedTag),
@@ -271,6 +291,7 @@ impl ScalarTagRef<'_> {
     pub fn to_owned(self) -> ScalarTag {
         match self {
             Self::Computed(tag) => ScalarTag::Computed((*tag).clone()),
+            Self::Merged(tag) => ScalarTag::Merged((*tag).clone()),
             Self::Argument(tag) => ScalarTag::Argument((*tag).clone()),
             Self::Collected(tag) => ScalarTag::Collected((*tag).clone()),
         }
