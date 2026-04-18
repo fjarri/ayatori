@@ -14,7 +14,7 @@ use super::{
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
     typed_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
-        GeneralizedNode, Node, Receive, ScalarArgument, SerializeAndSign,
+        GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SerializeAndSign,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
 };
@@ -434,6 +434,19 @@ pub fn collect<SP: SessionParameters>(
         values,
         group: group.clone(),
         dependencies: Vec::new(),
+    })
+}
+
+pub fn merge_scalars<SP: SessionParameters>(
+    left: impl Into<ComputeScalarArg<SP>>,
+    right: impl Into<ComputeScalarArg<SP>>,
+) -> Node<MergeScalars<SP>> {
+    let left: ComputeScalarArg<SP> = left.into();
+    let right: ComputeScalarArg<SP> = right.into();
+    Node::new(MergeScalars {
+        store_in: ComputedScalarTag::new(&format!("merged-{}-or-{}", left.store_in(), right.store_in())), // TODO: its own tag type?
+        left,
+        right,
     })
 }
 

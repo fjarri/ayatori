@@ -637,9 +637,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
 #[derive_where::derive_where(Debug)]
 pub struct MergeScalars<SP: SessionParameters> {
     pub(crate) store_in: ComputedScalarTag,
-    // TODO: should it be `ComputeScalarArg`?
-    pub(crate) left: Node<ComputeScalar<SP>>,
-    pub(crate) right: Node<ComputeScalar<SP>>,
+    pub(crate) left: ComputeScalarArg<SP>,
+    pub(crate) right: ComputeScalarArg<SP>,
 }
 
 impl<SP: SessionParameters> ShallowClone for MergeScalars<SP> {
@@ -664,18 +663,6 @@ impl<SP: SessionParameters> SpecificNode<SP> for MergeScalars<SP> {
         replace_in_node(&mut node.left, replacements)?;
         replace_in_node(&mut node.right, replacements)?;
         Ok(node)
-    }
-}
-
-impl<SP: SessionParameters> core::ops::BitOr for &Node<ComputeScalar<SP>> {
-    type Output = Node<MergeScalars<SP>>;
-
-    fn bitor(self, rhs: &Node<ComputeScalar<SP>>) -> Self::Output {
-        Node::new(MergeScalars {
-            store_in: ComputedScalarTag::new(&format!("merged-{}-or-{}", self.0.store_in, rhs.0.store_in)), // TODO: its own tag type?
-            left: self.get_strong_ref(),
-            right: rhs.get_strong_ref(),
-        })
     }
 }
 
@@ -757,7 +744,7 @@ impl<SP: SessionParameters> Display for Collect<SP> {
             f,
             "{} = collect({}){}",
             self.store_in,
-            AnyNode::from(self.values.get_strong_ref()).store_in(),
+            self.values.store_in(),
             display_dependencies(&self.dependencies)
         )
     }
@@ -769,7 +756,7 @@ impl<SP: SessionParameters> Display for SerializeAndSign<SP> {
             f,
             "{}[*] = <serialize_and_sign>(*, {}){}",
             self.store_in,
-            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            self.data.store_in(),
             display_dependencies(&self.dependencies)
         )
     }
@@ -781,7 +768,7 @@ impl<SP: SessionParameters> Display for DeserializeAndCheck<SP> {
             f,
             "{}[*] = <deserialize_and_check>(*, {}){}",
             self.store_in,
-            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            self.data.as_ref().store_in,
             display_dependencies(&self.dependencies)
         )
     }
@@ -793,7 +780,7 @@ impl<SP: SessionParameters> Display for DirectMessage<SP> {
             f,
             "{}[*] = <send>(*, {}){}",
             self.store_in,
-            AnyNode::from(self.data.get_strong_ref()).store_in(),
+            self.data.as_ref().store_in,
             display_dependencies(&self.dependencies)
         )
     }
@@ -819,7 +806,13 @@ impl<SP: SessionParameters> Display for ScalarArgument<SP> {
 
 impl<SP: SessionParameters> Display for MergeScalars<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "{} = <merge {} {}>", self.store_in, self.left, self.right)
+        write!(
+            f,
+            "{} = <merge {} {}>",
+            self.store_in,
+            self.left.store_in(),
+            self.right.store_in()
+        )
     }
 }
 

@@ -41,8 +41,8 @@ impl ScalarCondition {
 
     pub fn from_merged_scalar<SP: SessionParameters>(node: &MergeScalars<SP>) -> Self {
         Self::Or(Some(Either {
-            left: ScalarTag::Computed(node.left.as_ref().store_in.clone()),
-            right: ScalarTag::Computed(node.right.as_ref().store_in.clone()),
+            left: node.left.store_in().to_owned(),
+            right: node.right.store_in().to_owned(),
         }))
     }
 

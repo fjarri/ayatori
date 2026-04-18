@@ -12,7 +12,8 @@ pub use crate::{
         PublicInputs, Receive, ScalarArgument, SerializeAndSign, UnionCastError, broadcast, call_protocol, collect,
         compute_mapping, compute_mapping_sender_fallible, compute_mapping_sender_fallible_with_reveal,
         compute_mapping_third_party_fallible, compute_mapping_with_rng, compute_scalar, compute_scalar_forked,
-        compute_scalar_with_rng, constant, direct_message, mapping_alias, receive, receive_split, scalar_alias,
+        compute_scalar_with_rng, constant, direct_message, mapping_alias, merge_scalars, receive, receive_split,
+        scalar_alias,
     },
     traits::{ComposableProtocol, ExecutableProtocol, PartyId, SessionParameters, WireFormat},
 };

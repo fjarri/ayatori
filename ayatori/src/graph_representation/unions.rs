@@ -83,6 +83,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for ComputeScalarArg<SP> {
         match source {
             AnyNode::ComputeScalar(node) => Ok(Self::ComputeScalar(node)),
             AnyNode::ScalarArgument(node) => Ok(Self::ScalarArgument(node)),
+            AnyNode::MergeScalars(node) => Ok(Self::MergeScalars(node)),
             AnyNode::Collect(node) => Ok(Self::Collect(node)),
             _ => Err(UnionCastError),
         }

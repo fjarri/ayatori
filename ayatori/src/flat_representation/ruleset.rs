@@ -424,8 +424,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         scalar_condition: ScalarConditionWithState::new(scalar_condition),
                         kind: ScalarRuleKind::Merge {
                             store_in: node.store_in.clone(),
-                            left: ScalarTag::Computed(node.left.as_ref().store_in.clone()),
-                            right: ScalarTag::Computed(node.right.as_ref().store_in.clone()),
+                            left: node.left.store_in().to_owned(),
+                            right: node.right.store_in().to_owned(),
                         },
                     });
                 }
