@@ -397,7 +397,7 @@ where
                         (None, Some(right)) => OneOrBoth::Right(right),
                         (Some(left), Some(right)) => OneOrBoth::Both { left, right },
                     };
-                    self.add_scalar(&ScalarTag::Computed(store_in.clone()), Value::new(result))?;
+                    self.add_scalar(&ScalarTag::Merged(store_in.clone()), Value::new(result))?;
                 }
                 Action::Collect {
                     store_in,

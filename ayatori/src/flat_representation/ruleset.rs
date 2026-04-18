@@ -14,8 +14,8 @@ use super::conditions::{
 use crate::{
     entities::{
         AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
-        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, ReceivedTag, RemoteSignedTag, RuntimeError,
-        ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, MergedScalarTag, ReceivedTag, RemoteSignedTag,
+        RuntimeError, ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
     graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, Reproducibility},
     traits::SessionParameters,
@@ -39,7 +39,7 @@ enum ScalarRuleKind<SP: SessionParameters> {
         args: BTreeMap<String, ScalarTag>,
     },
     Merge {
-        store_in: ComputedScalarTag,
+        store_in: MergedScalarTag,
         left: ScalarTag,
         right: ScalarTag,
     },
@@ -143,7 +143,7 @@ pub(crate) enum Action<SP: SessionParameters> {
         indices: BTreeSet<SP::Verifier>,
     },
     MergeScalar {
-        store_in: ComputedScalarTag,
+        store_in: MergedScalarTag,
         left: ScalarTag,
         right: ScalarTag,
     },

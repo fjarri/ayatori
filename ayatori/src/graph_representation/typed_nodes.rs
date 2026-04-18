@@ -19,9 +19,10 @@ use super::{
 use crate::{
     entities::{
         CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, EvidenceVerificationFunction,
-        FullName, LocalSignedTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
-        ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter, SerializeAndSignFunction,
-        SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
+        FullName, LocalSignedTag, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError,
+        ScalarArgumentTag, ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
+        SerializeAndSignFunction, SimpleMappingFunction, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableVerificationFunction,
     },
     traits::SessionParameters,
 };
@@ -636,7 +637,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub struct MergeScalars<SP: SessionParameters> {
-    pub(crate) store_in: ComputedScalarTag,
+    pub(crate) store_in: MergedScalarTag,
     pub(crate) left: ComputeScalarArg<SP>,
     pub(crate) right: ComputeScalarArg<SP>,
 }

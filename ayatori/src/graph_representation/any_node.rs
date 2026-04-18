@@ -92,7 +92,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::DirectMessage(node) => AnyTagRef::Mapping(MappingTagRef::Sent(&node.as_ref().store_in)),
             Self::Receive(node) => AnyTagRef::Mapping(MappingTagRef::RemoteSigned(&node.as_ref().store_in)),
             Self::ScalarArgument(node) => AnyTagRef::Scalar(ScalarTagRef::Argument(&node.as_ref().store_in)),
-            Self::MergeScalars(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
+            Self::MergeScalars(node) => AnyTagRef::Scalar(ScalarTagRef::Merged(&node.as_ref().store_in)),
         }
     }
 

@@ -21,8 +21,8 @@ use super::{
 use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, OneOrBoth, PartyGroup,
-        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError,
+        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MergedScalarTag, OneOrBoth,
+        PartyGroup, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError,
         SenderAttributableErrorWithReveal, SenderAttributableMappingFunction,
         SenderAttributableWithRevealMappingFunction, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId,
         SignedValue, SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction,
@@ -428,9 +428,9 @@ pub fn collect<SP: SessionParameters>(
     group: &PartyGroup<SP::Verifier>,
 ) -> Node<Collect<SP>> {
     let values = values.into();
-    let store_in = values.store_in();
+    let store_in = values.store_in().to_collected();
     Node::new(Collect {
-        store_in: store_in.to_collected(),
+        store_in,
         values,
         group: group.clone(),
         dependencies: Vec::new(),
@@ -443,11 +443,9 @@ pub fn merge_scalars<SP: SessionParameters>(
 ) -> Node<MergeScalars<SP>> {
     let left: ComputeScalarArg<SP> = left.into();
     let right: ComputeScalarArg<SP> = right.into();
-    Node::new(MergeScalars {
-        store_in: ComputedScalarTag::new(&format!("merged-{}-or-{}", left.store_in(), right.store_in())), // TODO: its own tag type?
-        left,
-        right,
-    })
+    let tag_name = format!("{}-or-{}", left.store_in(), right.store_in());
+    let store_in = MergedScalarTag::new(&tag_name);
+    Node::new(MergeScalars { store_in, left, right })
 }
 
 pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(

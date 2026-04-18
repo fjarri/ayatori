@@ -20,7 +20,7 @@ pub(crate) use function::{
 };
 pub(crate) use tag::{
     AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedTag, MappingTag, MappingTagRef,
-    ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarTag, ScalarTagRef, SentTag,
+    MergedScalarTag, ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarTag, ScalarTagRef, SentTag,
 };
 pub(crate) use value::Value;
 

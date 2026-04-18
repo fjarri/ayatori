@@ -26,7 +26,7 @@ impl<SP: SessionParameters> ComputeScalarArg<SP> {
         match self {
             Self::ComputeScalar(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
             Self::ScalarArgument(node) => ScalarTagRef::Argument(&node.as_ref().store_in),
-            Self::MergeScalars(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
+            Self::MergeScalars(node) => ScalarTagRef::Merged(&node.as_ref().store_in),
             Self::Collect(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
         }
     }
