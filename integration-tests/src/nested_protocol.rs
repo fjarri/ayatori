@@ -4,7 +4,7 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 use signature::{Keypair, rand_core::SeedableRng};
 
-use crate::{
+use ayatori::{
     dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
     protocol_author_api::*,
     protocol_user_api::*,

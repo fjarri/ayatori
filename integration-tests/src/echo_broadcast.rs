@@ -10,7 +10,7 @@ use signature::{
     rand_core::{CryptoRngCore, SeedableRng},
 };
 
-use crate::{
+use ayatori::{
     dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
     protocol_author_api::*,
     protocol_user_api::*,
