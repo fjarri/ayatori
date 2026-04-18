@@ -304,13 +304,13 @@ where
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         ScalarFunction::Unattributable(function) => {
-                            Task::compute_scalar_infallible(store_in, function, args)
+                            Task::compute_scalar_unattributable(store_in, function, args)
                         }
                         ScalarFunction::UnattributableOptional(function) => {
-                            Task::compute_scalar_infallible_optional(store_in, function, args)
+                            Task::compute_scalar_unattributable_optional(store_in, function, args)
                         }
                         ScalarFunction::UnattributableWithRng(function) => {
-                            Task::compute_scalar_infallible_with_rng(store_in, function, args)
+                            Task::compute_scalar_unattributable_with_rng(store_in, function, args)
                         }
                     }));
                 }
@@ -325,10 +325,10 @@ where
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         MappingFunction::Unattributable(function) => {
-                            Task::compute_mapping_elem_infallible(store_in, index, function, args)
+                            Task::compute_mapping_elem_unattributable(store_in, index, function, args)
                         }
                         MappingFunction::UnattributableWithRng(function) => {
-                            Task::compute_mapping_elem_infallible_with_rng(store_in, index, function, args)
+                            Task::compute_mapping_elem_unattributable_with_rng(store_in, index, function, args)
                         }
                         MappingFunction::SenderAttributable(function) => {
                             Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)

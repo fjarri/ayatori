@@ -370,7 +370,7 @@ impl<SP: SessionParameters> Task<SP> {
         })
     }
 
-    pub(crate) fn compute_scalar_infallible(
+    pub(crate) fn compute_scalar_unattributable(
         store_in: ComputedScalarTag,
         function: UnattributableScalarFunction<SP>,
         args: Args<SP>,
@@ -382,7 +382,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_scalar_infallible_optional(
+    pub(crate) fn compute_scalar_unattributable_optional(
         store_in: ComputedScalarTag,
         function: UnattributableOptionalScalarFunction<SP>,
         args: Args<SP>,
@@ -394,7 +394,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_scalar_infallible_with_rng(
+    pub(crate) fn compute_scalar_unattributable_with_rng(
         store_in: ComputedScalarTag,
         function: UnattributableScalarFunctionWithRng<SP>,
         args: Args<SP>,
@@ -406,7 +406,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_mapping_elem_infallible(
+    pub(crate) fn compute_mapping_elem_unattributable(
         store_in: ComputedMappingTag,
         source: SP::Verifier,
         function: UnattributableMappingFunction<SP>,
@@ -420,7 +420,7 @@ impl<SP: SessionParameters> Task<SP> {
         }))
     }
 
-    pub(crate) fn compute_mapping_elem_infallible_with_rng(
+    pub(crate) fn compute_mapping_elem_unattributable_with_rng(
         store_in: ComputedMappingTag,
         source: SP::Verifier,
         function: UnattributableMappingFunctionWithRng<SP>,
