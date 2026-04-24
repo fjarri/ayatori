@@ -1,0 +1,212 @@
+use alloc::collections::BTreeSet;
+use ayatori::protocol_author_api::*;
+
+// ANCHOR: composable
+#[derive(Debug)]
+pub struct DistributedRng;
+
+impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
+    // ANCHOR_END: composable
+
+    // ANCHOR: composable-build-data
+    type BuildData = PartyGroup<SP::Verifier>;
+    // ANCHOR_END: composable-build-data
+
+    // ANCHOR: composable-output-node
+    type OutputNode = Node<ComputeScalar<SP>>;
+    // ANCHOR_END: composable-output-node
+
+    // ANCHOR: composable-signature
+    fn signature() -> ProtocolSignature {
+        ProtocolSignature::new().input("x").input("y")
+    }
+    // ANCHOR_END: composable-signature
+
+    // ANCHOR: composable-build
+    fn build(
+        _party_build_data: &PartyBuildData<SP>,
+        build_data: &Self::BuildData,
+        inputs: ArgNodes<SP>,
+    ) -> Result<Self::OutputNode, RuntimeError> {
+        // ANCHOR_END: composable-build
+
+        // ANCHOR: build-inputs
+        let all_parties = build_data;
+        let x = inputs.get("x")?;
+        let y = inputs.get("y")?;
+        // ANCHOR_END: build-inputs
+
+        // ANCHOR: build-b
+        let my_b = compute_scalar_with_rng(
+            "my_b",
+            |rng, args| {
+                let x = args.get::<u32>("x")?;
+                Ok(rng.next_u32() % x)
+            },
+            &[("x", x.into())],
+        );
+        // ANCHOR_END: build-b
+
+        // ANCHOR: build-r
+        let my_r = compute_scalar_with_rng(
+            "my_r",
+            |rng, args| {
+                let y = args.get::<u32>("y")?;
+                Ok(rng.next_u32() % y)
+            },
+            &[("y", y.into())],
+        );
+        // ANCHOR_END: build-r
+
+        // ANCHOR: build-c
+        let my_c = compute_scalar(
+            "my_c",
+            |args| {
+                let b = args.get::<u32>("b")?;
+                let r = args.get::<u32>("r")?;
+                Ok(b + r)
+            },
+            &[("b", (&my_b).into()), ("r", (&my_r).into())],
+        );
+        // ANCHOR_END: build-c
+
+        // ANCHOR: build-send-c
+        let message_c = ProtocolMessage::new::<u32>("c");
+        let c_broadcasted = broadcast(&message_c, &my_c, all_parties);
+        let c = receive(&message_c);
+        // ANCHOR_END: build-send-c
+
+        // ANCHOR: build-collect-c
+        let all_c = collect(&c, all_parties).with_dependency(&c_broadcasted);
+        // ANCHOR_END: build-collect-c
+
+        // ANCHOR: build-send-b-r
+        let message_b = ProtocolMessage::new::<u32>("b");
+        let b_broadcasted =
+            broadcast(&message_b, &my_b, all_parties).with_dependency(&all_c);
+        let b = receive(&message_b);
+
+        let message_r = ProtocolMessage::new::<u32>("r");
+        let r_broadcasted =
+            broadcast(&message_r, &my_r, all_parties).with_dependency(&all_c);
+        let r = receive(&message_r);
+        // ANCHOR_END: build-send-b-r
+
+        // ANCHOR: build-check-commitment
+        let commitment_correct = compute_mapping_sender_fallible(
+            "commitment_correct",
+            |_id, args| {
+                let b = args.get::<u32>("b")?;
+                let r = args.get::<u32>("r")?;
+                let c = args.get::<u32>("c")?;
+                if b + r == *c {
+                    Ok(())
+                } else {
+                    Err(SenderAttributableError::new("b + r != c"))
+                }
+            },
+            &[("c", (&c).into()), ("b", (&b).into()), ("r", (&r).into())],
+        );
+        // ANCHOR_END: build-check-commitment
+
+        // ANCHOR: build-finalize
+        let all_commitments_correct = collect(&commitment_correct, all_parties)
+            .with_dependency(&b_broadcasted)
+            .with_dependency(&r_broadcasted);
+        let all_b = collect(&b, all_parties).with_dependency(&b_broadcasted);
+        let output = compute_scalar(
+            "output",
+            |args| {
+                let bs = args.get_map::<u32>("b")?;
+                let x = args.get::<u32>("x")?;
+                Ok(bs.values().copied().sum::<u32>() % x)
+            },
+            &[("b", (&all_b).into()), ("x", x.into())],
+        )
+        .with_dependency(&all_commitments_correct);
+        Ok(output)
+        // ANCHOR_END: build-finalize
+    }
+}
+
+// ANCHOR: executable-private-data
+impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRng {
+    type PrivateData = u32;
+
+    fn make_private_inputs(private_data: &Self::PrivateData) -> PrivateInputs {
+        PrivateInputs::new().input("y", *private_data)
+    }
+    // ANCHOR_END: executable-private-data
+
+    // ANCHOR: executable-shared-data
+    type SharedData = (u32, PartyGroup<SP::Verifier>);
+
+    fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs {
+        PublicInputs::new().input("x", shared_data.0)
+    }
+    // ANCHOR_END: executable-shared-data
+
+    // ANCHOR: executable-build-data
+    fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
+        shared_data.1.clone()
+    }
+    // ANCHOR_END: executable-build-data
+
+    // ANCHOR: executable-participants
+    fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
+        shared_data.1.ids().cloned().collect()
+    }
+    // ANCHOR_END: executable-participants
+
+    // ANCHOR: executable-output
+    type Output = u32;
+    // ANCHOR_END: executable-output
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use rand_chacha::ChaCha8Rng;
+    use signature::{Keypair, rand_core::SeedableRng};
+
+    use ayatori::{
+        dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+        protocol_user_api::*,
+    };
+
+    use super::DistributedRng;
+
+    #[test]
+    fn happy_path() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers
+            .iter()
+            .map(Keypair::verifying_key)
+            .collect::<Vec<_>>();
+
+        let private_data = 999;
+        let shared_data = (1001, PartyGroup::new(&ids));
+
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
+
+        let sessions = signers
+            .into_iter()
+            .map(|signer| {
+                Session::<TestSessionParams<BinaryFormat>, DistributedRng>::new(
+                    session_id.clone(),
+                    signer,
+                    &private_data,
+                    &shared_data,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let results = run_sessions_sync(&mut rng, sessions).unwrap();
+
+        let value = results.reports[&ids[0]].success_ref().unwrap();
+        assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+        assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
+    }
+}
