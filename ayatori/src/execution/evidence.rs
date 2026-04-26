@@ -141,7 +141,7 @@ pub(crate) struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtoc
     failed_at: MappingTag,
     signed_values: Vec<SignedValue<SP>>,
     error: SenderError,
-    phantom: PhantomData<P>,
+    phantom: PhantomData<fn() -> P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P> {
@@ -185,7 +185,7 @@ pub(crate) struct SenderErrorWithRevealEvidence<SP: SessionParameters, P: Execut
     failed_at: MappingTag,
     signed_values: Vec<SignedValue<SP>>,
     error: SenderErrorWithReveal<SP>,
-    phantom: PhantomData<P>,
+    phantom: PhantomData<fn() -> P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvidence<SP, P> {
@@ -297,7 +297,7 @@ pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutablePr
     reported_by: SP::Verifier,
     failed_at: MappingTag,
     error: ThirdPartyError<SP>,
-    phantom: PhantomData<(SP, P)>,
+    phantom: PhantomData<fn() -> (SP, P)>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {

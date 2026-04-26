@@ -47,7 +47,7 @@ macro_rules! define_function_type_common {
         #[derive_where::derive_where(Clone)]
         pub(crate) struct $type_name<$SP: SessionParameters> {
             #[allow(clippy::type_complexity)]
-            function: Arc<dyn Fn($($arg_type),*) -> Result<$return_type, $error_type>>,
+            function: Arc<dyn Fn($($arg_type),*) -> Result<$return_type, $error_type> + Send + Sync>,
             name: String,
         }
 
@@ -66,7 +66,7 @@ macro_rules! define_function_type_common {
         impl<$SP: SessionParameters> $type_name<$SP> {
             pub fn new_with_name(
                 name: impl Into<String>,
-                function: impl 'static + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
+                function: impl 'static + Send + Sync + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
             ) -> Self {
                 let wrapped = Arc::new(function);
                 Self {
@@ -90,7 +90,7 @@ macro_rules! define_erased_function_type {
 
         impl<$SP: SessionParameters> $type_name<$SP> {
             pub fn new(
-                function: impl 'static + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
+                function: impl 'static + Send + Sync + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
             ) -> Self {
                 let name = core::any::type_name_of_val(&function).to_string();
                 Self::new_with_name(name, function)
@@ -106,7 +106,7 @@ macro_rules! define_typed_function_type {
 
         impl<$SP: SessionParameters> $type_name<$SP> {
             pub fn new_erased<Ret: Erasable>(
-                function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>
+                function: impl 'static + Send + Sync + Fn($($arg_type),*) -> Result<Ret, $error_type>
             ) -> Self {
                 let name = core::any::type_name_of_val(&function).to_string();
                 Self::new_with_name(

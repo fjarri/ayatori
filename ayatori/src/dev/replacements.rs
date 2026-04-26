@@ -41,23 +41,27 @@ impl<SP: SessionParameters> Debug for Replacement<SP> {
 #[allow(clippy::type_complexity)]
 enum ReplacementEnum<SP: SessionParameters> {
     ComputeScalar {
-        function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, UnattributableError>>,
+        function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, UnattributableError> + Send + Sync>,
     },
     ComputeMapping {
-        function: Arc<dyn Fn(Value, &SP::Verifier, &Args<SP>) -> Result<Value, UnattributableError>>,
+        function: Arc<dyn Fn(Value, &SP::Verifier, &Args<SP>) -> Result<Value, UnattributableError> + Send + Sync>,
     },
     ComputeMappingThirdPartyAttributable {
         function: Arc<
             dyn Fn(
-                Result<Value, ThirdPartyAttributableError<SP>>,
-                &SP::Verifier,
-                &Args<SP>,
-            ) -> Result<Value, ThirdPartyAttributableError<SP>>,
+                    Result<Value, ThirdPartyAttributableError<SP>>,
+                    &SP::Verifier,
+                    &Args<SP>,
+                ) -> Result<Value, ThirdPartyAttributableError<SP>>
+                + Send
+                + Sync,
         >,
     },
     Message {
         function: Arc<
-            dyn Fn(&mut dyn CryptoRngCore, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, RuntimeError>,
+            dyn Fn(&mut dyn CryptoRngCore, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, RuntimeError>
+                + Send
+                + Sync,
         >,
     },
 }
@@ -67,7 +71,7 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub fn compute_scalar<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
-        F: 'static + Fn(&Ret, &Args<SP>) -> Result<Ret, UnattributableError>,
+        F: 'static + Send + Sync + Fn(&Ret, &Args<SP>) -> Result<Ret, UnattributableError>,
     {
         let tag = ComputedScalarTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
@@ -86,7 +90,7 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub fn compute_mapping<F, Ret>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         Ret: Erasable,
-        F: 'static + Fn(&Ret, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
+        F: 'static + Send + Sync + Fn(&Ret, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     {
         let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
         Ok(Self {
@@ -106,6 +110,8 @@ impl<SP: SessionParameters> Replacement<SP> {
     where
         Ret: Erasable,
         F: 'static
+            + Send
+            + Sync
             + Fn(
                 Result<&Ret, ThirdPartyAttributableError<SP>>,
                 &SP::Verifier,
@@ -134,6 +140,8 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub fn serialize_and_check<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         F: 'static
+            + Send
+            + Sync
             + Fn(
                 &mut dyn CryptoRngCore,
                 &SignedValue<SP>,

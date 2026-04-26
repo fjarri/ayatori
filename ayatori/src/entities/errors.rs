@@ -127,7 +127,7 @@ impl SenderAttributableError {
 #[derive_where::derive_where(Clone)]
 pub struct AssociatedData<SP: SessionParameters> {
     serialized_value: SerializedValue,
-    phantom: PhantomData<SP>,
+    phantom: PhantomData<fn() -> SP>,
 }
 
 impl<SP: SessionParameters> AssociatedData<SP> {

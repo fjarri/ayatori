@@ -138,7 +138,7 @@ impl DeserializationError {
     }
 }
 
-trait DynAdapter<F: WireFormat> {
+trait DynAdapter<F: WireFormat>: Send + Sync {
     fn serialize(&self, value: &Value) -> Result<SerializedValue, RuntimeError>;
     fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError>;
     fn clone_boxed(&self) -> Box<dyn DynAdapter<F>>;
@@ -166,7 +166,7 @@ impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdap
     }
 }
 
-struct DynAdapterHolder<F, T>(PhantomData<(F, T)>);
+struct DynAdapterHolder<F, T>(PhantomData<fn() -> (F, T)>);
 
 /// An adapter that encapsulates the wire format used by the session
 /// and can be used to (de)serialize a value.

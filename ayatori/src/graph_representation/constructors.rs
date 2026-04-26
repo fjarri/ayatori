@@ -157,7 +157,7 @@ impl<SP: SessionParameters, const N: usize> From<&[(&str, ComputeMappingArg<SP>)
 /// Calls `function` and saves the result to the scalar slot `name`.
 pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&Args<SP>) -> Result<Ret, UnattributableError>,
+    function: impl 'static + Send + Sync + Fn(&Args<SP>) -> Result<Ret, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> Node<ComputeScalar<SP>> {
     let args: ComputeScalarArgs<SP> = args.into();
@@ -172,7 +172,7 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
 /// Same as [`compute_scalar`], but `function` may use an RNG.
 pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
+    function: impl 'static + Send + Sync + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> Node<ComputeScalar<SP>> {
     let args: ComputeScalarArgs<SP> = args.into();
@@ -228,7 +228,7 @@ pub fn compute_forked_scalar<SP: SessionParameters, LRet: Erasable + Clone, RRet
     fork_name: &str,
     lname: &str,
     rname: &str,
-    function: impl 'static + Fn(&Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
+    function: impl 'static + Send + Sync + Fn(&Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
     let fork = compute_scalar(fork_name, function, args);
@@ -242,7 +242,10 @@ pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Cl
     fork_name: &str,
     lname: &str,
     rname: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
+    function: impl 'static
+    + Send
+    + Sync
+    + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
     let fork = compute_scalar_with_rng(fork_name, function, args);
@@ -256,7 +259,7 @@ pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Cl
 /// The set of IDs it is called for is defined by the [`collect`] nodes downstream.
 pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
+    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();
@@ -274,7 +277,7 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
 /// caused by the data provided by the party with the ID it is called for.
 pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
+    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
     args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();
@@ -293,7 +296,10 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
 /// Same as [`compute_mapping`], but `function` may use an RNG.
 pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
+    function: impl 'static
+    + Send
+    + Sync
+    + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();
@@ -313,9 +319,11 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
 /// (that is, not the one which whose ID it is called).
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyAttributableError<SP>>,
+    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyAttributableError<SP>>,
     args: impl Into<ComputeMappingArgs<SP>>,
     verification: impl 'static
+    + Send
+    + Sync
     + Fn(&SP::Verifier, &SessionId<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();
@@ -334,9 +342,15 @@ pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable
 /// it needs to reveal some additional piece of data to be attached to the evidence.
 pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
+    function: impl 'static
+    + Send
+    + Sync
+    + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
     args: impl Into<ComputeMappingArgs<SP>>,
-    verification: impl 'static + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
+    verification: impl 'static
+    + Send
+    + Sync
+    + Fn(&SP::Verifier, &Args<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
     verification_args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();

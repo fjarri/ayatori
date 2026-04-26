@@ -56,7 +56,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
     preprocessing_tasks: Vec<PreprocessingTask<SP>>,
-    phantom: PhantomData<P>,
+    phantom: PhantomData<fn() -> P>,
 }
 
 fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<OutputNode<SP>, RuntimeError>
