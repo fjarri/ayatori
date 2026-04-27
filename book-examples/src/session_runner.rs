@@ -1,83 +1,82 @@
-use alloc::format;
-
 use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::*;
 
+// ANCHOR: signature
 pub async fn run_session<SP, P>(
     rng: &mut impl CryptoRngCore,
     tx: &mpsc::Sender<Message<SP>>,
     rx: &mut mpsc::Receiver<Message<SP>>,
     cancellation: CancellationToken,
-    session: Session<SP, P>,
+    mut session: Session<SP, P>,
 ) -> Result<SessionReport<SP, P>, UnattributableError>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
 {
-    let mut session = session;
+    // ANCHOR_END: signature
 
+    // ANCHOR: event_loop
     loop {
-        while let Some(task) = session.make_task()? {
+        while let Some(task) = session.make_task().unwrap() {
             let task_result = match task {
+                // ANCHOR_END: event_loop
+
+                // ANCHOR: task_compute
                 Task::Compute(task) => {
-                    let result = task.compute()?;
+                    let result = task.compute().unwrap();
                     session.add_result(result)
                 }
+                // ANCHOR_END: task_compute
+
+                // ANCHOR: task_compute_rng
                 Task::ComputeWithRng(task) => {
-                    let result = task.compute(rng)?;
+                    let result = task.compute(rng).unwrap();
                     session.add_result(result)
                 }
+                // ANCHOR_END: task_compute_rng
+
+                // ANCHOR: task_send
                 Task::Send(task) => {
-                    let (message, result) = task.compute()?;
-                    tx.send(message).await.map_err(|err| {
-                        UnattributableError::runtime(format!(
-                            "Failed to send a message: {err}"
-                        ))
-                    })?;
+                    let (message, result) = task.compute().unwrap();
+                    tx.send(message).await.unwrap();
                     session.add_result(result)
                 }
+                // ANCHOR_END: task_send
+
+                // ANCHOR: task_finalize_with_success
                 Task::FinalizeWithSuccess(token) => {
-                    return Ok(session.finalize_with_success(token)?);
+                    return Ok(session.finalize_with_success(token).unwrap());
                 }
+                // ANCHOR_END: task_finalize_with_success
+
+                // ANCHOR: task_finalize_with_stalled
                 Task::FinalizeWithStalled(token) => {
                     return Ok(session.finalize_with_stalled(token));
-                }
+                } // ANCHOR_END: task_finalize_with_stalled
             };
 
+            // ANCHOR: task_result
             match task_result {
                 Ok(()) => {}
-                Err(TaskError::Unattributable(error)) => return Err(error),
-                Err(TaskError::InvalidMessage(error)) => {
-                    return Err(UnattributableError::runtime(format!(
-                        "Invalid message: {error:?}"
-                    )));
-                }
-                Err(TaskError::DuplicateMessages(error)) => {
-                    return Err(UnattributableError::runtime(format!(
-                        "Duplicate messages: {error:?}"
-                    )));
-                }
+                Err(TaskError::Unattributable(_error)) => panic!(),
+                Err(TaskError::InvalidMessage(_error)) => panic!(),
+                Err(TaskError::DuplicateMessages(_error)) => panic!(),
             }
+            // ANCHOR_END: task_result
         }
 
+        // ANCHOR: get_message
         let message_in = tokio::select! {
-            message_in = rx.recv() => {
-                message_in.ok_or_else(|| {
-                    UnattributableError::runtime(
-                        "The incoming message channel was closed unexpectedly"
-                    )
-                })?
-            },
-            () = cancellation.cancelled() => {
-                return Ok(session.terminate());
-            }
+            message_in = rx.recv() => message_in.unwrap(),
+            () = cancellation.cancelled() => return Ok(session.terminate()),
         };
 
         let message_id = MessageId::random(rng);
         session.add_message(&message_id, message_in);
+        // ANCHOR_END: get_message
     }
 }
 
