@@ -1,12 +1,12 @@
 use alloc::{collections::BTreeMap, format, sync::Arc, vec::Vec};
 
-use signature::{Keypair, rand_core::CryptoRngCore};
+use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::run_sync::ExecutionResult;
 use crate::{
-    entities::{Message, RuntimeError, SessionId, UnattributableError},
+    entities::{Message, RuntimeError, UnattributableError},
     execution::{Session, SessionReport},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -106,42 +106,34 @@ where
     }
 }
 
-/// Execute sessions for multiple nodes concurrently within a `tokio` runtime,
-/// given a vector of the signer and the private data for each node.
+/// Executes the given sessions concurrently within a `tokio` runtime.
 pub async fn run_async<SP, P, F, R>(
     rng: &mut R,
-    shared_data: P::SharedData,
-    private_data: Vec<(SP::Signer, P::PrivateData)>,
+    sessions: Vec<Session<SP, P>>,
     session_runner: F,
 ) -> Result<ExecutionResult<SP, P>, UnattributableError>
 where
     R: 'static + CryptoRngCore + Clone + Send,
     SP: SessionParameters,
-    SP::Signer: Send + Sync, // TODO: why Send?
+    SP::Signer: Send + Sync,
     P: ExecutableProtocol<SP>,
     F: for<'a> SessionRunner<'a, SP, P, R>,
 {
-    let num_parties = private_data.len();
-    let session_id = SessionId::random(rng);
+    let num_parties = sessions.len();
 
     let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<Message<SP>>(100);
 
     let channels = (0..num_parties).map(|_| mpsc::channel::<Message<SP>>(100));
     let (txs, rxs): (Vec<_>, Vec<_>) = channels.unzip();
-    let tx_map = private_data
+    let tx_map = sessions
         .iter()
-        .map(|(signer, _private_data)| signer.verifying_key())
+        .map(|session| session.verifier().clone())
         .zip(txs)
         .collect();
 
     let dispatcher_task = message_dispatcher(rng.clone(), tx_map, dispatcher_rx);
     let dispatcher = tokio::spawn(dispatcher_task);
     let cancellation = CancellationToken::new();
-
-    let sessions = private_data
-        .into_iter()
-        .map(|(signer, private_data)| Session::<SP, P>::new(session_id.clone(), signer, &private_data, &shared_data))
-        .collect::<Result<Vec<_>, _>>()?;
 
     let session_runner = Arc::new(session_runner);
 

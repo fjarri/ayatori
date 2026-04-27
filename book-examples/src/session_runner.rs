@@ -106,20 +106,29 @@ mod tests {
             .map(Keypair::verifying_key)
             .collect::<Vec<_>>();
 
-        let group = PartyGroup::new(&ids);
-        let private_data = signers.into_iter().map(|signer| (signer, 999u32)).collect();
-        let shared_data = (1001, group);
+        let private_data = 999;
+        let shared_data = (1001, PartyGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
 
-        let results = run_async::<SP, P, _, ChaCha8Rng>(
-            &mut rng,
-            shared_data,
-            private_data,
-            run_session::<SP, P>,
-        )
-        .await
-        .unwrap();
+        let sessions = signers
+            .into_iter()
+            .map(|signer| {
+                Session::<TestSessionParams<BinaryFormat>, DistributedRng>::new(
+                    session_id.clone(),
+                    signer,
+                    &private_data,
+                    &shared_data,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let results =
+            run_async::<SP, P, _, ChaCha8Rng>(&mut rng, sessions, run_session::<SP, P>)
+                .await
+                .unwrap();
 
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);

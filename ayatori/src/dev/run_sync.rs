@@ -8,7 +8,7 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-/// Execute the given sessions without offloading tasks to separate threads.
+/// Executes the given sessions without offloading tasks to separate threads.
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
