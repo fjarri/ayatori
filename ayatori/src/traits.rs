@@ -95,7 +95,7 @@ pub trait ExecutableProtocol<SP: SessionParameters>: ComposableProtocol<SP, Outp
 }
 
 /// Defines a protocol that can be called as a subprotocol via [`call_protocol`].
-pub trait ComposableProtocol<SP: SessionParameters> {
+pub trait ComposableProtocol<SP: SessionParameters>: 'static {
     /// Public shared data available at graph build time.
     type BuildData;
 

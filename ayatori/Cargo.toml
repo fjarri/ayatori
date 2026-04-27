@@ -21,6 +21,8 @@ hex = { version = "0.4", default-features = false }
 
 postcard = { version = "1", default-features = false, features = ["alloc"], optional = true }
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
+tokio = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time"], optional = true }
+tokio-util = { version = "0.7", default-features = false, optional = true }
 
 [dev-dependencies]
 rand_chacha = { version = "0.3", default-features = false }
@@ -30,7 +32,9 @@ impls = "1"
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 
 [features]
+default = ["dev"]
 dev = ["postcard", "serde_json"]
+tokio = ["dep:tokio", "tokio-util"]
 
 [package.metadata.docs.rs]
 all-features = true
