@@ -2,13 +2,17 @@ use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use ayatori::protocol_user_api::*;
+use ayatori::protocol_user_api::{
+    ExecutableProtocol, Session, SessionParameters, SessionReport, Task, TaskError,
+    UnattributableError,
+    tokio::{MessageIn, MessageOut},
+};
 
 // ANCHOR: signature
 pub async fn run_session<SP, P>(
     rng: &mut impl CryptoRngCore,
-    tx: &mpsc::Sender<Message<SP>>,
-    rx: &mut mpsc::Receiver<Message<SP>>,
+    tx: &mpsc::Sender<MessageOut<SP>>,
+    rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
 ) -> Result<SessionReport<SP, P>, UnattributableError>
@@ -41,7 +45,7 @@ where
                 // ANCHOR: task_send
                 Task::Send(task) => {
                     let (message, result) = task.compute().unwrap();
-                    tx.send(message).await.unwrap();
+                    tx.send(MessageOut::Message(message)).await.unwrap();
                     session.add_result(result)
                 }
                 // ANCHOR_END: task_send
@@ -62,8 +66,12 @@ where
             match task_result {
                 Ok(()) => {}
                 Err(TaskError::Unattributable(_error)) => panic!(),
-                Err(TaskError::InvalidMessage(_error)) => panic!(),
-                Err(TaskError::DuplicateMessages(_error)) => panic!(),
+                Err(TaskError::InvalidMessage(error)) => {
+                    tx.send(MessageOut::InvalidMessage(error)).await.unwrap();
+                }
+                Err(TaskError::DuplicateMessages(error)) => {
+                    tx.send(MessageOut::DuplicateMessages(error)).await.unwrap();
+                }
             }
             // ANCHOR_END: task_result
         }
@@ -74,8 +82,7 @@ where
             () = cancellation.cancelled() => return Ok(session.terminate()),
         };
 
-        let message_id = MessageId::random(rng);
-        session.add_message(&message_id, message_in);
+        session.add_message(&message_in.id, message_in.message);
         // ANCHOR_END: get_message
     }
 }
@@ -85,8 +92,8 @@ mod tests {
     use alloc::vec::Vec;
 
     use ayatori::{
-        dev::{BinaryFormat, TestSessionParams, TestSigner, run_async},
-        protocol_user_api::*,
+        dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_async},
+        protocol_user_api::{PartyGroup, Session, SessionId},
     };
     use rand_chacha::ChaCha8Rng;
     use signature::{Keypair, rand_core::SeedableRng};

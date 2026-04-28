@@ -1,3 +1,5 @@
+//! `tokio`-specific tools for testing sessions.
+
 use alloc::{collections::BTreeMap, format, sync::Arc, vec::Vec};
 
 use signature::rand_core::CryptoRngCore;
@@ -6,15 +8,18 @@ use tokio_util::sync::CancellationToken;
 
 use super::run_sync::ExecutionResult;
 use crate::{
-    entities::{Message, RuntimeError, UnattributableError},
-    execution::{Session, SessionReport},
+    entities::{Message, MessageId, RuntimeError, UnattributableError},
+    execution::{
+        Session, SessionReport,
+        tokio::{MessageIn, MessageOut, SessionRunner},
+    },
     traits::{ExecutableProtocol, SessionParameters},
 };
 
 async fn message_dispatcher<SP>(
     rng: impl CryptoRngCore,
-    txs: BTreeMap<SP::Verifier, mpsc::Sender<Message<SP>>>,
-    rx: mpsc::Receiver<Message<SP>>,
+    txs: BTreeMap<SP::Verifier, mpsc::Sender<MessageIn<SP>>>,
+    rx: mpsc::Receiver<MessageOut<SP>>,
 ) -> Result<(), RuntimeError>
 where
     SP: SessionParameters,
@@ -24,11 +29,27 @@ where
     let mut rx = rx;
     let mut messages = Vec::<Message<SP>>::new();
     loop {
-        let Some(msg) = rx.recv().await else { return Ok(()) };
-        messages.push(msg);
+        let mut messages_out = Vec::<MessageOut<SP>>::new();
 
-        while let Ok(msg) = rx.try_recv() {
-            messages.push(msg);
+        // Wait for a message to appear in the channel, or the channel to be closed.
+        let Some(msg_out) = rx.recv().await else {
+            return Ok(());
+        };
+        messages_out.push(msg_out);
+
+        // Fetch all the messages currently in the channel.
+        while let Ok(msg_out) = rx.try_recv() {
+            messages_out.push(msg_out);
+        }
+
+        for msg_out in messages_out {
+            let message = match msg_out {
+                MessageOut::Message(message) => message,
+                MessageOut::InvalidMessage(error) => return Err(RuntimeError::new(format!("{error}"))),
+                MessageOut::DuplicateMessages(error) => return Err(RuntimeError::new(format!("{error}"))),
+            };
+
+            messages.push(message);
         }
 
         while !messages.is_empty() {
@@ -37,43 +58,27 @@ where
             let message_idx = (rng.next_u32() as usize) % messages.len();
             let outgoing = messages.swap_remove(message_idx);
 
-            txs.get(outgoing.destination())
-                .ok_or_else(|| {
-                    RuntimeError::new(format!(
-                        "Destination ({:?}) is missing in the map of channels",
-                        outgoing.destination()
-                    ))
-                })?
-                .send(outgoing)
+            let tx = txs.get(outgoing.destination()).ok_or_else(|| {
+                RuntimeError::new(format!(
+                    "Destination ({:?}) is missing in the map of channels",
+                    outgoing.destination()
+                ))
+            })?;
+
+            let message_id = MessageId::random(&mut rng);
+            let msg_in = MessageIn {
+                message: outgoing,
+                id: message_id,
+            };
+
+            tx.send(msg_in)
                 .await
                 .map_err(|err| RuntimeError::new(format!("Could not sent an outgoing message: {err}")))?;
 
             // Give up execution so that the tasks could process messages.
             tokio::time::sleep(tokio::time::Duration::from_millis(0)).await;
-
-            if let Ok(msg) = rx.try_recv() {
-                messages.push(msg);
-            }
         }
     }
-}
-
-/// A trait defined for `async fn`s that execute a single session.
-pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>, R: CryptoRngCore>:
-    'static + Send + Sync
-{
-    /// The returned future.
-    type Fut: Future<Output = Result<SessionReport<SP, P>, UnattributableError>> + 'a + Send;
-
-    /// Calls the function returning the future.
-    fn call(
-        &self,
-        rng: &'a mut R,
-        tx: &'a mpsc::Sender<Message<SP>>,
-        rx: &'a mut mpsc::Receiver<Message<SP>>,
-        cancellation: CancellationToken,
-        session: Session<SP, P>,
-    ) -> Self::Fut;
 }
 
 impl<'a, SP, P, F, Fut, R> SessionRunner<'a, SP, P, R> for F
@@ -86,8 +91,8 @@ where
         + Sync
         + Fn(
             &'a mut R,
-            &'a mpsc::Sender<Message<SP>>,
-            &'a mut mpsc::Receiver<Message<SP>>,
+            &'a mpsc::Sender<MessageOut<SP>>,
+            &'a mut mpsc::Receiver<MessageIn<SP>>,
             CancellationToken,
             Session<SP, P>,
         ) -> Fut,
@@ -97,8 +102,8 @@ where
     fn call(
         &self,
         rng: &'a mut R,
-        tx: &'a mpsc::Sender<Message<SP>>,
-        rx: &'a mut mpsc::Receiver<Message<SP>>,
+        tx: &'a mpsc::Sender<MessageOut<SP>>,
+        rx: &'a mut mpsc::Receiver<MessageIn<SP>>,
         cancellation: CancellationToken,
         session: Session<SP, P>,
     ) -> Self::Fut {
@@ -121,9 +126,9 @@ where
 {
     let num_parties = sessions.len();
 
-    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<Message<SP>>(100);
+    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<MessageOut<SP>>(100);
 
-    let channels = (0..num_parties).map(|_| mpsc::channel::<Message<SP>>(100));
+    let channels = (0..num_parties).map(|_| mpsc::channel::<MessageIn<SP>>(100));
     let (txs, rxs): (Vec<_>, Vec<_>) = channels.unzip();
     let tx_map = sessions
         .iter()

@@ -560,6 +560,8 @@ pub enum TaskError<SP: SessionParameters> {
 
 /// A registered message was found to be invalid.
 #[derive_where::derive_where(Debug)]
+#[derive(displaydoc::Display)]
+#[displaydoc("Invalid message with ID {message_id:?}: {description}")]
 pub struct InvalidMessageError<SP: SessionParameters> {
     /// The message's ID.
     ///
@@ -578,6 +580,8 @@ impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
 
 /// A registered message was found to be a duplicate of a previously registered message.
 #[derive_where::derive_where(Debug)]
+#[derive(displaydoc::Display)]
+#[displaydoc("Duplicate data in messages with IDs {first:?} and {second:?}")]
 pub struct DuplicateMessagesError<SP: SessionParameters> {
     /// The first message's ID.
     ///

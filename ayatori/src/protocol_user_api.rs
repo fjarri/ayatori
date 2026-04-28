@@ -2,6 +2,9 @@
 
 pub use crate::{
     entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, UnattributableError},
-    execution::{Evidence, Session, SessionReport, Task, TaskError},
+    execution::{DuplicateMessagesError, Evidence, InvalidMessageError, Session, SessionReport, Task, TaskError},
     traits::{ExecutableProtocol, SessionParameters},
 };
+
+#[cfg(feature = "tokio")]
+pub use crate::execution::tokio;
