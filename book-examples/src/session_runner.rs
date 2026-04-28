@@ -31,23 +31,19 @@ where
             let task_result = match task {
                 // ANCHOR_END: task_loop
                 // ANCHOR: task_compute
-                Task::Compute(task) => {
-                    let result = task.compute()?;
-                    session.add_result(result)
-                }
+                Task::Compute(task) => session.add_result(task.compute()),
                 // ANCHOR_END: task_compute
 
                 // ANCHOR: task_compute_rng
-                Task::ComputeWithRng(task) => {
-                    let result = task.compute(rng)?;
-                    session.add_result(result)
-                }
+                Task::ComputeWithRng(task) => session.add_result(task.compute(rng)),
                 // ANCHOR_END: task_compute_rng
 
                 // ANCHOR: task_send
                 Task::Send(task) => {
-                    let (message, result) = task.compute()?;
-                    tx.send(MessageOut::Message(message)).await.unwrap();
+                    let (message, result) = task.compute();
+                    if let Some(message) = message {
+                        tx.send(MessageOut::Message(message)).await.unwrap();
+                    }
                     session.add_result(result)
                 } // ANCHOR_END: task_send
             };

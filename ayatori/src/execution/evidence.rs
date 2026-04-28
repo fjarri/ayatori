@@ -10,7 +10,7 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
-        SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError, VerifiedValue,
+        SessionId, SignedValue, ThirdPartyError, VerificationError, VerifiedValue,
     },
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
     traits::{ExecutableProtocol, SessionParameters},
@@ -248,33 +248,15 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 
     while let Some(task) = session.make_task()? {
         let task_result = match task {
-            Task::Compute(task) => {
-                let result = match task.compute() {
-                    Ok(result) => result,
-                    Err(UnattributableError::Spurious(error)) => {
-                        return Ok(EvidenceVerdict::invalid(format!(
-                            "Unexpected spurious error when reproducing the failure: {error}"
-                        )));
-                    }
-                    Err(UnattributableError::Runtime(error)) => return Err(error),
-                };
-                session.add_result(result)
-            }
+            Task::Compute(task) => session.add_result(task.compute()),
             Task::ComputeWithRng(_task) => {
                 return Ok(EvidenceVerdict::invalid(
                     "Unexpected RNG-based computation when reproducing the failure",
                 ));
             }
             Task::Send(task) => {
-                let (_message, result) = match task.compute() {
-                    Ok(result) => result,
-                    Err(UnattributableError::Spurious(error)) => {
-                        return Ok(EvidenceVerdict::invalid(format!(
-                            "Unexpected spurious error when reproducing the failure: {error}"
-                        )));
-                    }
-                    Err(UnattributableError::Runtime(error)) => return Err(error),
-                };
+                let (_message, result) = task.compute();
+                // TODO: is that an error if we're in this branch?
                 session.add_result(result)
             }
         };

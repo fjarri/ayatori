@@ -73,11 +73,15 @@ enum ComputeTaskEnum<SP: SessionParameters> {
     },
 }
 
+fn unattributable_error_to_result<SP: SessionParameters>(error: impl Into<UnattributableError>) -> TaskResult<SP> {
+    TaskResult(TaskResultEnum::UnattributableError { error: error.into() })
+}
+
 #[derive_where::derive_where(Debug)]
 pub struct ComputeTask<SP: SessionParameters>(ComputeTaskEnum<SP>);
 
 impl<SP: SessionParameters> ComputeTask<SP> {
-    pub fn compute(self) -> Result<TaskResult<SP>, UnattributableError> {
+    pub fn compute(self) -> TaskResult<SP> {
         match self.0 {
             ComputeTaskEnum::ScalarUnattributable {
                 store_in,
@@ -85,8 +89,10 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 args,
             } => {
                 let store_in = ScalarTag::Computed(store_in);
-                let result = function.call(&args)?;
-                Ok(TaskResult(TaskResultEnum::ComputedScalar { store_in, result }))
+                match function.call(&args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
+                    Err(error) => unattributable_error_to_result(error),
+                }
             }
             ComputeTaskEnum::ScalarUnattributableOptional {
                 store_in,
@@ -94,14 +100,16 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 args,
             } => {
                 let store_in = ScalarTag::Computed(store_in);
-                let result = function.call(&args)?;
-                Ok(TaskResult(match result {
-                    Some(value) => TaskResultEnum::ComputedScalar {
-                        store_in,
-                        result: value,
-                    },
-                    None => TaskResultEnum::Success,
-                }))
+                match function.call(&args) {
+                    Ok(result) => TaskResult(match result {
+                        Some(value) => TaskResultEnum::ComputedScalar {
+                            store_in,
+                            result: value,
+                        },
+                        None => TaskResultEnum::Success,
+                    }),
+                    Err(error) => unattributable_error_to_result(error),
+                }
             }
             ComputeTaskEnum::MappingElementUnattributable {
                 store_in,
@@ -110,12 +118,14 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 args,
             } => {
                 let store_in = MappingTag::Computed(store_in);
-                let result = function.call(&source, &args)?;
-                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
-                    store_in,
-                    source,
-                    result,
-                }))
+                match function.call(&source, &args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                        store_in,
+                        source,
+                        result,
+                    }),
+                    Err(error) => unattributable_error_to_result(error),
+                }
             }
             ComputeTaskEnum::MappingElementSenderAttributable {
                 store_in,
@@ -125,25 +135,24 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 on_error,
             } => {
                 let store_in = MappingTag::Computed(store_in);
-                let result = match function.call(&source, &args) {
-                    Ok(result) => result,
+                match function.call(&source, &args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                        store_in,
+                        source,
+                        result,
+                    }),
                     Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
-                        return Err(error);
+                        unattributable_error_to_result(error)
                     }
                     Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable(error))) => {
-                        return Ok(TaskResult(TaskResultEnum::SenderError {
+                        TaskResult(TaskResultEnum::SenderError {
                             store_in,
                             guilty_party: source,
                             error,
                             on_error,
-                        }));
+                        })
                     }
-                };
-                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
-                    store_in,
-                    source,
-                    result,
-                }))
+                }
             }
             ComputeTaskEnum::MappingElementSenderAttributableWithReveal {
                 store_in,
@@ -153,27 +162,24 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 on_error,
             } => {
                 let store_in = MappingTag::Computed(store_in);
-                let result = match function.call(&source, &args) {
-                    Ok(result) => result,
+                match function.call(&source, &args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                        store_in,
+                        source,
+                        result,
+                    }),
                     Err(SenderAttributableErrorWithReveal(SenderAttributableErrorWithRevealEnum::Unattributable(
                         error,
-                    ))) => return Err(error),
+                    ))) => unattributable_error_to_result(error),
                     Err(SenderAttributableErrorWithReveal(SenderAttributableErrorWithRevealEnum::Attributable(
                         error,
-                    ))) => {
-                        return Ok(TaskResult(TaskResultEnum::SenderErrorWithReveal {
-                            store_in,
-                            guilty_party: source,
-                            error,
-                            on_error,
-                        }));
-                    }
-                };
-                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
-                    store_in,
-                    source,
-                    result,
-                }))
+                    ))) => TaskResult(TaskResultEnum::SenderErrorWithReveal {
+                        store_in,
+                        guilty_party: source,
+                        error,
+                        on_error,
+                    }),
+                }
             }
             ComputeTaskEnum::MappingElementThirdPartyAttributable {
                 store_in,
@@ -182,27 +188,24 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 args,
             } => {
                 let store_in = MappingTag::Computed(store_in);
-                let result = match function.call(&source, &args) {
-                    Ok(result) => result,
+                match function.call(&source, &args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                        store_in,
+                        source,
+                        result,
+                    }),
                     Err(ThirdPartyAttributableError(ThirdPartyAttributableErrorEnum::Unattributable(error))) => {
-                        return Err(error);
+                        unattributable_error_to_result(error)
                     }
                     Err(ThirdPartyAttributableError(ThirdPartyAttributableErrorEnum::Attributable {
                         guilty_party,
                         error,
-                    })) => {
-                        return Ok(TaskResult(TaskResultEnum::ThirdPartyError {
-                            store_in,
-                            guilty_party,
-                            error,
-                        }));
-                    }
-                };
-                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
-                    store_in,
-                    source,
-                    result,
-                }))
+                    })) => TaskResult(TaskResultEnum::ThirdPartyError {
+                        store_in,
+                        guilty_party,
+                        error,
+                    }),
+                }
             }
             ComputeTaskEnum::DeserializeElement {
                 store_in,
@@ -212,27 +215,29 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 on_error,
             } => {
                 let store_in = MappingTag::Received(store_in);
-                let result = match function.call(&args) {
-                    Ok(result) => result,
+                match function.call(&args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                        store_in,
+                        source,
+                        result,
+                    }),
                     Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
-                        return Err(error);
+                        unattributable_error_to_result(error)
                     }
                     Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable(error))) => {
-                        return Ok(TaskResult(TaskResultEnum::SenderError {
+                        TaskResult(TaskResultEnum::SenderError {
                             store_in,
                             guilty_party: source,
                             error,
                             on_error,
-                        }));
+                        })
                     }
-                };
-                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
-                    store_in,
-                    source,
-                    result,
-                }))
+                }
             }
-            ComputeTaskEnum::PreprocessMessage { task } => Ok(task.execute()?),
+            ComputeTaskEnum::PreprocessMessage { task } => match task.execute() {
+                Ok(result) => result,
+                Err(error) => unattributable_error_to_result(error),
+            },
         }
     }
 }
@@ -262,7 +267,7 @@ enum ComputeWithRngTaskEnum<SP: SessionParameters> {
 pub struct ComputeWithRngTask<SP: SessionParameters>(ComputeWithRngTaskEnum<SP>);
 
 impl<SP: SessionParameters> ComputeWithRngTask<SP> {
-    pub fn compute(self, rng: &mut impl CryptoRngCore) -> Result<TaskResult<SP>, UnattributableError> {
+    pub fn compute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
         match self.0 {
             ComputeWithRngTaskEnum::ScalarUnattributable {
                 store_in,
@@ -270,8 +275,10 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 args,
             } => {
                 let store_in = ScalarTag::Computed(store_in);
-                let result = function.call(rng, &args)?;
-                Ok(TaskResult(TaskResultEnum::ComputedScalar { store_in, result }))
+                match function.call(rng, &args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
+                    Err(error) => unattributable_error_to_result(error),
+                }
             }
             ComputeWithRngTaskEnum::MappingElementUnattributable {
                 store_in,
@@ -280,12 +287,14 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 args,
             } => {
                 let store_in = MappingTag::Computed(store_in);
-                let result = function.call(rng, &source, &args)?;
-                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
-                    store_in,
-                    source,
-                    result,
-                }))
+                match function.call(rng, &source, &args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                        store_in,
+                        source,
+                        result,
+                    }),
+                    Err(error) => unattributable_error_to_result(error),
+                }
             }
             ComputeWithRngTaskEnum::SerializeAndSignElement {
                 store_in,
@@ -294,12 +303,14 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 args,
             } => {
                 let store_in = MappingTag::LocalSigned(store_in);
-                let result = function.call(rng, &source, &args)?;
-                Ok(TaskResult(TaskResultEnum::ComputedMappingElement {
-                    store_in,
-                    source,
-                    result,
-                }))
+                match function.call(rng, &source, &args) {
+                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                        store_in,
+                        source,
+                        result,
+                    }),
+                    Err(error) => unattributable_error_to_result(error),
+                }
             }
         }
     }
@@ -313,15 +324,18 @@ pub struct SendTask<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
-    pub fn compute(self) -> Result<(Message<SP>, TaskResult<SP>), UnattributableError> {
-        let signed_value = self.signed_value.downcast::<SignedValue<SP>>()?;
+    pub fn compute(self) -> (Option<Message<SP>>, TaskResult<SP>) {
+        let signed_value = match self.signed_value.downcast::<SignedValue<SP>>() {
+            Ok(value) => value,
+            Err(error) => return (None, unattributable_error_to_result(error)),
+        };
         let signed_values = vec![signed_value];
         let message = Message::new(self.destination.clone(), signed_values);
         let result = TaskResult(TaskResultEnum::Sent {
             store_in: MappingTag::Sent(self.store_in.clone()),
             destination: self.destination.clone(),
         });
-        Ok((message, result))
+        (Some(message), result)
     }
 }
 
@@ -518,6 +532,9 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
         store_in: MappingTag,
         source: SP::Verifier,
         result: Value,
+    },
+    UnattributableError {
+        error: UnattributableError,
     },
     SenderError {
         store_in: MappingTag,

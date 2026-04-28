@@ -41,23 +41,21 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 
             while let Some(task) = session.make_task()? {
                 let task_result = match task {
-                    Task::Compute(task) => {
-                        let result = task.compute()?;
-                        session.add_result(result)
-                    }
-                    Task::ComputeWithRng(task) => {
-                        let result = task.compute(rng)?;
-                        session.add_result(result)
-                    }
+                    Task::Compute(task) => session.add_result(task.compute()),
+                    Task::ComputeWithRng(task) => session.add_result(task.compute(rng)),
                     Task::Send(task) => {
-                        let (message, result) = task.compute()?;
-                        let destination = message.destination().clone();
-                        messages
-                            .get_mut(&destination)
-                            .ok_or_else(|| {
-                                UnattributableError::runtime(format!("{id:?} not found in the map of message queues"))
-                            })?
-                            .push(message);
+                        let (message, result) = task.compute();
+                        if let Some(message) = message {
+                            let destination = message.destination().clone();
+                            messages
+                                .get_mut(&destination)
+                                .ok_or_else(|| {
+                                    UnattributableError::runtime(format!(
+                                        "{id:?} not found in the map of message queues"
+                                    ))
+                                })?
+                                .push(message);
+                        }
                         session.add_result(result)
                     }
                 };

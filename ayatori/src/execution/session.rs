@@ -430,6 +430,7 @@ where
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
             TaskResultEnum::Success => {}
+            TaskResultEnum::UnattributableError { error } => return Err(TaskError::Unattributable(error)),
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
             }
