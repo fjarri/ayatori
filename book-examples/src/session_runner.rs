@@ -3,8 +3,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
-    ExecutableProtocol, Session, SessionParameters, SessionReport, Task, TaskError,
-    UnattributableError,
+    ExecutableProtocol, Session, SessionParameters, SessionReport, SessionState, Task,
+    TaskError, UnattributableError,
     tokio::{MessageIn, MessageOut},
 };
 
@@ -24,10 +24,12 @@ where
 
     // ANCHOR: event_loop
     loop {
+        // ANCHOR_END: event_loop
+
+        // ANCHOR: task_loop
         while let Some(task) = session.make_task()? {
             let task_result = match task {
-                // ANCHOR_END: event_loop
-
+                // ANCHOR_END: task_loop
                 // ANCHOR: task_compute
                 Task::Compute(task) => {
                     let result = task.compute()?;
@@ -47,19 +49,7 @@ where
                     let (message, result) = task.compute()?;
                     tx.send(MessageOut::Message(message)).await.unwrap();
                     session.add_result(result)
-                }
-                // ANCHOR_END: task_send
-
-                // ANCHOR: task_finalize_with_success
-                Task::FinalizeWithSuccess(token) => {
-                    return Ok(session.finalize_with_success(token)?);
-                }
-                // ANCHOR_END: task_finalize_with_success
-
-                // ANCHOR: task_finalize_with_stalled
-                Task::FinalizeWithStalled(token) => {
-                    return Ok(session.finalize_with_stalled(token));
-                } // ANCHOR_END: task_finalize_with_stalled
+                } // ANCHOR_END: task_send
             };
 
             // ANCHOR: task_result
@@ -72,6 +62,20 @@ where
             }
             // ANCHOR_END: task_result
         }
+
+        // ANCHOR: try_finalize
+        session = match session.try_finalize() {
+            // ANCHOR_END: try_finalize
+            // ANCHOR: try_finalize_in_progress
+            SessionState::InProgress(session) => session,
+            // ANCHOR_END: try_finalize_in_progress
+            // ANCHOR: try_finalize_reached_output
+            SessionState::ReachedOutput(success) => return Ok(success.finalize()?),
+            // ANCHOR_END: try_finalize_reached_output
+            // ANCHOR: try_finalize_stalled
+            SessionState::Stalled(stalled) => return Ok(stalled.finalize()),
+            // ANCHOR_END: try_finalize_stalled
+        };
 
         // ANCHOR: get_message
         let message_in = tokio::select! {

@@ -6,15 +6,15 @@ use signature::rand_core::CryptoRngCore;
 use super::session::SessionData;
 use crate::{
     entities::{
-        Args, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction,
-        LocalSignedTag, MappingTag, Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag,
-        SenderAttributableError, SenderAttributableErrorEnum, SenderAttributableErrorWithReveal,
-        SenderAttributableErrorWithRevealEnum, SenderAttributableMappingFunction,
-        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SentTag,
-        SerializeAndSignFunction, SerializeArgs, SignedValue, ThirdPartyAttributableError,
-        ThirdPartyAttributableErrorEnum, ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError,
-        UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
-        UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value, VerificationError,
+        Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedTag, MappingTag,
+        Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag, SenderAttributableError,
+        SenderAttributableErrorEnum, SenderAttributableErrorWithReveal, SenderAttributableErrorWithRevealEnum,
+        SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SenderError,
+        SenderErrorWithReveal, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
+        ThirdPartyAttributableError, ThirdPartyAttributableErrorEnum, ThirdPartyAttributableMappingFunction,
+        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
+        VerificationError,
     },
     flat_representation::OnError,
     traits::SessionParameters,
@@ -325,24 +325,6 @@ impl<SP: SessionParameters> SendTask<SP> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FinalizeWithSuccessTask(ComputedScalarTag);
-
-impl FinalizeWithSuccessTask {
-    pub(crate) fn output_tag(self) -> ComputedScalarTag {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FinalizeWithStalledTask(CollectedTag);
-
-impl FinalizeWithStalledTask {
-    pub(crate) fn stalled_tag(self) -> CollectedTag {
-        self.0
-    }
-}
-
 /// A session task to be executed.
 #[derive_where::derive_where(Debug)]
 pub enum Task<SP: SessionParameters> {
@@ -352,25 +334,11 @@ pub enum Task<SP: SessionParameters> {
     Compute(ComputeTask<SP>),
     /// Perform a computation that needs access to an RNG.
     ComputeWithRng(ComputeWithRngTask<SP>),
-    /// The protocol reached the output, and the session may now be finalized
-    /// (using [`Session::finalize_with_success`]).
-    FinalizeWithSuccess(FinalizeWithSuccessTask),
-    /// The protocol cannot reach the output, and the session may now be finalized
-    /// (using [`Session::finalize_with_stalled`]).
-    FinalizeWithStalled(FinalizeWithStalledTask),
 }
 
 impl<SP: SessionParameters> Task<SP> {
     pub(crate) fn preprocess_message(task: PreprocessingTask<SP>) -> Self {
         Self::Compute(ComputeTask(ComputeTaskEnum::PreprocessMessage { task }))
-    }
-
-    pub(crate) fn finalize_with_success(tag: ComputedScalarTag) -> Self {
-        Self::FinalizeWithSuccess(FinalizeWithSuccessTask(tag))
-    }
-
-    pub(crate) fn finalize_with_stall(tag: CollectedTag) -> Self {
-        Self::FinalizeWithStalled(FinalizeWithStalledTask(tag))
     }
 
     pub(crate) fn direct_message(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {

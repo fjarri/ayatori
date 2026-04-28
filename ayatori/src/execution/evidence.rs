@@ -3,7 +3,10 @@ use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use super::{session::Session, task::Task};
+use super::{
+    session::{Session, SessionState},
+    task::Task,
+};
 use crate::{
     entities::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
@@ -274,12 +277,6 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
                 };
                 session.add_result(result)
             }
-            Task::FinalizeWithSuccess(task) => {
-                return session.finalize_with_evidence_verdict(task);
-            }
-            Task::FinalizeWithStalled(_task) => {
-                return Ok(EvidenceVerdict::invalid("Unexpected finalization with stall task"));
-            }
         };
 
         if let Some(error) = task_result.err() {
@@ -287,9 +284,11 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
         }
     }
 
-    Ok(EvidenceVerdict::invalid(
-        "The execution did not encounter the expected error",
-    ))
+    match session.try_finalize() {
+        SessionState::InProgress(_session) => Ok(EvidenceVerdict::invalid("The execution did not finish")),
+        SessionState::ReachedOutput(success) => success.finalize_with_evidence_verdict(),
+        SessionState::Stalled(_stalled) => Ok(EvidenceVerdict::invalid("The execution was stalled")),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

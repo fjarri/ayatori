@@ -16,17 +16,17 @@ use super::{
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
-    task::{FinalizeWithStalledTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
+    task::{PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
 #[cfg(feature = "dev")]
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
+        FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
+        ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
-    flat_representation::{Action, OnError, Ruleset},
+    flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -251,33 +251,37 @@ where
         }
     }
 
-    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: ComputedScalarTag) -> Result<T, RuntimeError> {
-        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag))?;
+    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
+        // TODO: use ScalarTagRef
+        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
         value.downcast::<T>()
     }
 
-    pub(crate) fn finalize_with_evidence_verdict(
-        self,
-        task: FinalizeWithSuccessTask,
-    ) -> Result<EvidenceVerdict, RuntimeError> {
-        let verdict = self.get_output::<EvidenceVerdict>(task.output_tag())?;
+    pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
+        let verdict = self.get_output::<EvidenceVerdict>(self.ruleset.output_tag())?;
         Ok(verdict)
     }
 
-    /// Destroys the session and returns the report containing the output
-    /// and recorded failures of remote parties (if any).
-    pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, RuntimeError> {
-        let result = self.get_output::<P::Output>(task.output_tag())?;
+    fn finalize_with_success(self) -> Result<SessionReport<SP, P>, RuntimeError> {
+        let result = self.get_output::<P::Output>(self.ruleset.output_tag())?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
 
-    /// Destroys the session and returns the report containing the output
-    /// and recorded failures of remote parties (if any).
-    pub fn finalize_with_stalled(self, task: FinalizeWithStalledTask) -> SessionReport<SP, P> {
-        self.make_report(SessionOutcome::Unfinishable(format!(
-            "Stalled at {}",
-            task.stalled_tag()
-        )))
+    fn finalize_with_stalled(self, tag: &CollectedTag) -> SessionReport<SP, P> {
+        self.make_report(SessionOutcome::Unfinishable(format!("Stalled at {tag}")))
+    }
+
+    /// Attempts to finalize the session.
+    pub fn try_finalize(self) -> SessionState<SP, P> {
+        let state = self.ruleset.state().clone();
+        match state {
+            RulesetState::InProgress => SessionState::InProgress(self),
+            RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
+            RulesetState::StalledAt(stalled_at) => SessionState::Stalled(StalledSession {
+                session: self,
+                stalled_at,
+            }),
+        }
     }
 
     /// Terminates the session and returns the report containing the recorded failures of remote parties (if any).
@@ -304,12 +308,6 @@ where
 
         while let Some(action) = self.ruleset.pop_action()? {
             match action {
-                Action::ReturnOutput(tag) => {
-                    return Ok(Some(Task::finalize_with_success(tag)));
-                }
-                Action::Terminate(tag) => {
-                    return Ok(Some(Task::finalize_with_stall(tag)));
-                }
                 Action::DirectMessage {
                     store_in,
                     to_send,
@@ -559,6 +557,92 @@ where
         }
         Ok(())
     }
+}
+
+/// A wrapper for a session that has reached the output.
+#[derive(Debug)]
+pub struct ReachedOutputSession<SP: SessionParameters, P: ExecutableProtocol<SP>>(Session<SP, P>);
+
+impl<SP, P> ReachedOutputSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    /// Destroys the session and returns the report containing the output
+    /// and recorded failures of remote parties (if any).
+    pub fn finalize(self) -> Result<SessionReport<SP, P>, RuntimeError> {
+        self.0.finalize_with_success()
+    }
+
+    pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
+        self.0.finalize_with_evidence_verdict()
+    }
+
+    /// Returns the contained session allowing to continue with the event loop.
+    ///
+    /// Can be used to accumulate more shares for protocols with threshold conditions.
+    pub fn continue_execution(self) -> Session<SP, P> {
+        self.0
+    }
+}
+
+impl<SP, P> AsRef<Session<SP, P>> for ReachedOutputSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    fn as_ref(&self) -> &Session<SP, P> {
+        &self.0
+    }
+}
+
+/// A wrapper for a session that is unfinishable.
+#[derive(Debug)]
+pub struct StalledSession<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    session: Session<SP, P>,
+    stalled_at: CollectedTag,
+}
+
+impl<SP, P> StalledSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    /// Destroys the session and returns the report containing
+    /// recorded failures of remote parties (if any).
+    pub fn finalize(self) -> SessionReport<SP, P> {
+        self.session.finalize_with_stalled(&self.stalled_at)
+    }
+
+    /// Returns the contained session allowing to continue with the event loop.
+    ///
+    /// Can be used to accumulate more reports of malicious actions.
+    pub fn continue_execution(self) -> Session<SP, P> {
+        self.session
+    }
+}
+
+impl<SP, P> AsRef<Session<SP, P>> for StalledSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    fn as_ref(&self) -> &Session<SP, P> {
+        &self.session
+    }
+}
+
+/// Possible results of attempting to finalize a session.
+#[derive(Debug)]
+pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    /// The session is in progress.
+    ///
+    /// Continue working with the returned session object.
+    InProgress(Session<SP, P>),
+    /// The session has reached the output.
+    ReachedOutput(ReachedOutputSession<SP, P>),
+    /// The session is unfinishable due to some nodes having been banned.
+    Stalled(StalledSession<SP, P>),
 }
 
 /// A possible error when registering a task's result.

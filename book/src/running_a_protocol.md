@@ -10,7 +10,7 @@ In this chapter we will write a simple async session runner using `tokio` to ill
 The full executable code can be found in `book-examples/src/session_runner.rs`.
 
 
-## Session ID
+### Session runner
 
 The signature of the runner will be a little overcomplicated because we need to comply to the requirements of [`run_async`](dev::tokio::run_async) which we will use to execute multiple sessions concurrently using our runner.
 ```rust,ignore
@@ -25,11 +25,22 @@ The rest of the parameters we do need: an RNG, a queue for outgoing messages (`t
 The result is a [`SessionReport`](protocol_user_api::SessionReport) object containing the actual outcome, and the attributable and provable errors registered along the way.
 
 The whole body of the function is an event loop.
-As outlined above, we will be checking if there is a task, processing it, checking if there is a message, processing it, repeat.
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:event_loop}}
 ```
-Here we pop a task from the session, and process it depending on the specific enum variant.
+In it, we will repeatedly perform the following actions:
+- Drain all the available tasks and execute them;
+- Check if the session is finalizable (if it is, exit the loop);
+- Get incoming messages from the channel and pass them to the session.
+
+
+### Processing tasks
+
+In an inner loop, we will get tasks from the session until there are any.
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:task_loop}}
+```
+Depending on the task, we need to perform certain actions.
 
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_compute}}
@@ -52,23 +63,43 @@ The destination can be obtained from [`Message::destination()`](protocol_user_ap
 Note that the destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
 We are also pushing to the channel not a [`Message`](protocol_user_api::Message) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
 
-```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:task_finalize_with_success}}
-```
-This task signals that the execution successfully reached the result node and can be finalized.
-The session will emit all ready to send messages before emitting the finalization task, so the user does not need to worry about that.
-
-```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:task_finalize_with_stalled}}
-```
-This signals that the session must be finalized because it cannot possibly reach the result (generally, because some nodes committed malicious actions and were banned, making some collect nodes unreachable).
-
 Incorporating the result of a task back into the session may result in a message-attributable error, which we report to the same outgoing channel:
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_result}}
 ```
 The error contains IDs of offending messages which the calling code may use to identify offending parties, if the chosen transport method allows it.
 Message IDs are sent with incoming messages, as shown in the next snippet.
+
+
+### Attempting to finalize
+
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:try_finalize}}
+```
+Here we attempt to finalize the session.
+Note that the method consumes the session object.
+
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:try_finalize_in_progress}}
+```
+If the session is in progress, we will receive back the session object.
+This means we continue on with the event loop.
+
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:try_finalize_reached_output}}
+```
+This means that the output slot has been filled.
+We can now [`finalize()`](protocol_user_api::ReachedOutputSession::finalize) returning the output, but it is also possible to continue on with the loop, accumulating more information.
+This can be important for protocols with threshold conditions, and it is a decision the calling code must make.
+
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:try_finalize_stalled}}
+```
+This signals that the session cannot possibly reach the result (generally, because some nodes committed malicious actions and were banned, making some collect nodes unreachable), and can thus be finalized.
+Again, the calling code can make the decision to continue on with the loop, potentially accumulating more reports of malicious actions of other nodes.
+
+
+### Receiving messages
 
 When all the available tasks are popped, we stand by waiting for messages (or an external cancellation).
 ```rust,ignore
