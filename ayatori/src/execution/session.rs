@@ -55,6 +55,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     data: Arc<SessionData<SP>>,
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
+    external_bans: BTreeMap<SP::Verifier, String>,
     preprocessing_tasks: Vec<PreprocessingTask<SP>>,
     phantom: PhantomData<fn() -> P>,
 }
@@ -106,6 +107,7 @@ where
             data,
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
+            external_bans: BTreeMap::new(),
             preprocessing_tasks: Vec::new(),
             phantom: PhantomData,
         };
@@ -233,11 +235,19 @@ where
             .insert(guilty_party, format!("Error when calculating {tag}"));
     }
 
+    /// Bans a party internally, resulting in all of its messages and values calculated from them being discarded,
+    /// and new messages ignored.
+    pub fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
+        self.ruleset.update_with_banned_party(&guilty_party);
+        self.external_bans.insert(guilty_party, reason);
+    }
+
     fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
         SessionReport::<SP, P> {
             outcome,
             provable_errors: self.provable_errors,
             attributable_errors: self.attributable_errors,
+            external_bans: self.external_bans,
         }
     }
 
@@ -618,6 +628,8 @@ pub struct SessionReport<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     /// The unprovable attributable errors registered during the execution.
     pub attributable_errors: BTreeMap<SP::Verifier, String>,
+    /// The bans requested by the user explicitly.
+    pub external_bans: BTreeMap<SP::Verifier, String>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {

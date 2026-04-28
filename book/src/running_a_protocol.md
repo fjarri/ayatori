@@ -74,9 +74,9 @@ When all the available tasks are popped, we stand by waiting for messages (or an
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:get_message}}
 ```
-Again, we are receiving not a [`Message`](protocol_user_api::Message) itself, but a [`MessageIn`](protocol_user_api::tokio::MessageIn) wrapper, which also contains the message ID.
+Again, we are receiving not a [`Message`](protocol_user_api::Message) itself, but a [`MessageIn`](protocol_user_api::tokio::MessageIn) wrapper, which may contain other external commands besides actual messages.
 
-The intended process is the following.
+The intended process with message IDs is the following.
 When receiving a [`Message`](protocol_user_api::Message), the user generates a random [`MessageId`](protocol_user_api::MessageId) and associates it with the transport address of the sender.
 The message ID is passed to the session along with the message itself via [`Session::add_message`](protocol_user_api::Session::add_message).
 If some error happens that cannot be attributed to a party, but can be attributed to the message itself (in the simplest case, a malformed message), the message ID is reported in the error.

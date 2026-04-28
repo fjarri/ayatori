@@ -1,5 +1,7 @@
 //! `tokio`-specific tools for running sessions.
 
+use alloc::string::String;
+
 use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -10,18 +12,28 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-/// A container for incoming messages.
+/// A container for incoming commands to a session runner.
 #[derive(Debug)]
-pub struct MessageIn<SP: SessionParameters> {
-    /// The message itself.
-    pub message: Message<SP>,
-    /// The ID associated with it.
-    ///
-    /// Will be used to identify the message if there is a problem with it that cannot be attributed to a party ID.
-    pub id: MessageId<SP>,
+pub enum MessageIn<SP: SessionParameters> {
+    /// An incoming message.
+    Message {
+        /// The message itself.
+        message: Message<SP>,
+        /// The ID associated with the message.
+        ///
+        /// Will be used to identify the message if there is a problem with it that cannot be attributed to a party ID.
+        id: MessageId<SP>,
+    },
+    /// A request to ban the specified party.
+    Ban {
+        /// The party id to ban.
+        id: SP::Verifier,
+        /// The ban reason.
+        reason: String,
+    },
 }
 
-/// A container for outgoing messages or non-fatal errors.
+/// A container for outgoing information from a session runner.
 #[derive(Debug)]
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.

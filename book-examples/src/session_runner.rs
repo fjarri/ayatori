@@ -24,27 +24,27 @@ where
 
     // ANCHOR: event_loop
     loop {
-        while let Some(task) = session.make_task().unwrap() {
+        while let Some(task) = session.make_task()? {
             let task_result = match task {
                 // ANCHOR_END: event_loop
 
                 // ANCHOR: task_compute
                 Task::Compute(task) => {
-                    let result = task.compute().unwrap();
+                    let result = task.compute()?;
                     session.add_result(result)
                 }
                 // ANCHOR_END: task_compute
 
                 // ANCHOR: task_compute_rng
                 Task::ComputeWithRng(task) => {
-                    let result = task.compute(rng).unwrap();
+                    let result = task.compute(rng)?;
                     session.add_result(result)
                 }
                 // ANCHOR_END: task_compute_rng
 
                 // ANCHOR: task_send
                 Task::Send(task) => {
-                    let (message, result) = task.compute().unwrap();
+                    let (message, result) = task.compute()?;
                     tx.send(MessageOut::Message(message)).await.unwrap();
                     session.add_result(result)
                 }
@@ -52,7 +52,7 @@ where
 
                 // ANCHOR: task_finalize_with_success
                 Task::FinalizeWithSuccess(token) => {
-                    return Ok(session.finalize_with_success(token).unwrap());
+                    return Ok(session.finalize_with_success(token)?);
                 }
                 // ANCHOR_END: task_finalize_with_success
 
@@ -65,7 +65,7 @@ where
             // ANCHOR: task_result
             match task_result {
                 Ok(()) => {}
-                Err(TaskError::Unattributable(_error)) => panic!(),
+                Err(TaskError::Unattributable(error)) => return Err(error),
                 Err(TaskError::MessageAttributable(error)) => {
                     tx.send(MessageOut::Error(error)).await.unwrap();
                 }
@@ -79,7 +79,10 @@ where
             () = cancellation.cancelled() => return Ok(session.terminate()),
         };
 
-        session.add_message(&message_in.id, message_in.message);
+        match message_in {
+            MessageIn::Message { message, id } => session.add_message(&id, message),
+            MessageIn::Ban { id, reason } => session.register_banned_party(id, reason),
+        }
         // ANCHOR_END: get_message
     }
 }

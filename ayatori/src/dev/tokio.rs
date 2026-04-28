@@ -65,7 +65,7 @@ where
             })?;
 
             let message_id = MessageId::random(&mut rng);
-            let msg_in = MessageIn {
+            let msg_in = MessageIn::Message {
                 message: outgoing,
                 id: message_id,
             };
