@@ -12,7 +12,7 @@ The full executable code can be found in `book-examples/src/session_runner.rs`.
 
 ## Session ID
 
-The signature of the runner will be a little overcomplicated because we need to comply to the requirements of [`run_async`](dev::run_async) which we will use to execute multiple sessions concurrently using our runner.
+The signature of the runner will be a little overcomplicated because we need to comply to the requirements of [`run_async`](dev::tokio::run_async) which we will use to execute multiple sessions concurrently using our runner.
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:signature}}
 ```
@@ -50,6 +50,7 @@ We extract these tasks to their own variant because offloading such tasks to ano
 This tasks requests that the user sends the message in the task.
 The destination can be obtained from [`Message::destination()`](protocol_user_api::Message::destination) method.
 Note that the destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
+We are also pushing to the channel not a [`Message`](protocol_user_api::Message) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
 
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_finalize_with_success}}
@@ -62,23 +63,23 @@ The session will emit all ready to send messages before emitting the finalizatio
 ```
 This signals that the session must be finalized because it cannot possibly reach the result (generally, because some nodes committed malicious actions and were banned, making some collect nodes unreachable).
 
-Incorporating the result of a task back into the session may result in some special errors:
+Incorporating the result of a task back into the session may result in a message-attributable error, which we report to the same outgoing channel:
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_result}}
 ```
-The last two variants may occur specifically when an incoming message failed some checks.
+The error contains IDs of offending messages which the calling code may use to identify offending parties, if the chosen transport method allows it.
+Message IDs are sent with incoming messages, as shown in the next snippet.
 
 When all the available tasks are popped, we stand by waiting for messages (or an external cancellation).
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:get_message}}
 ```
+Again, we are receiving not a [`Message`](protocol_user_api::Message) itself, but a [`MessageIn`](protocol_user_api::tokio::MessageIn) wrapper, which also contains the message ID.
 
 The intended process is the following.
 When receiving a [`Message`](protocol_user_api::Message), the user generates a random [`MessageId`](protocol_user_api::MessageId) and associates it with the transport address of the sender.
-The message ID is passed to the session along with the message itself in [`Session::add_message`](protocol_user_api::Session::add_message).
+The message ID is passed to the session along with the message itself via [`Session::add_message`](protocol_user_api::Session::add_message).
 If some error happens that cannot be attributed to a party, but can be attributed to the message itself (in the simplest case, a malformed message), the message ID is reported in the error.
 In other words, the error is escalated to the user, for them to deal with according to the context.
 If they maintain a mapping of transport addresses to party IDs, they can ban the offending party.
 If the transport layer has its own message authentication machinery, the fault may be provable.
-
-In this example we just create a random message ID since we have no intention of processing errors.
