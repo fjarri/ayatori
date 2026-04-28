@@ -45,8 +45,7 @@ where
         for msg_out in messages_out {
             let message = match msg_out {
                 MessageOut::Message(message) => message,
-                MessageOut::InvalidMessage(error) => return Err(RuntimeError::new(format!("{error}"))),
-                MessageOut::DuplicateMessages(error) => return Err(RuntimeError::new(format!("{error}"))),
+                MessageOut::Error(error) => return Err(RuntimeError::new(format!("{error}"))),
             };
 
             messages.push(message);

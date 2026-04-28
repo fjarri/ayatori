@@ -7,5 +7,7 @@ mod task;
 pub mod tokio;
 
 pub use evidence::Evidence;
-pub use session::{DuplicateMessagesError, InvalidMessageError, Session, SessionReport, TaskError};
+pub use session::{
+    DuplicateMessagesError, InvalidMessageError, MessageAttributableError, Session, SessionReport, TaskError,
+};
 pub use task::Task;

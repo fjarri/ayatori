@@ -525,10 +525,12 @@ where
                     // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
                     // For now we can only report both message IDs that delivered these values,
                     // and let the user deal with it, if possible.
-                    return Err(TaskError::DuplicateMessages(DuplicateMessagesError {
-                        first: typed_existing_value.message_id().clone(),
-                        second: typed_existing_value.message_id().clone(),
-                    }));
+                    return Err(TaskError::MessageAttributable(
+                        MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
+                            first: typed_existing_value.message_id().clone(),
+                            second: typed_existing_value.message_id().clone(),
+                        }),
+                    ));
                 }
 
                 self.add_element(&store_in, &source, value)?;
@@ -537,10 +539,12 @@ where
                 message_id,
                 description,
             } => {
-                return Err(TaskError::InvalidMessage(InvalidMessageError {
-                    message_id,
-                    description,
-                }));
+                return Err(TaskError::MessageAttributable(
+                    MessageAttributableError::InvalidMessage(InvalidMessageError {
+                        message_id,
+                        description,
+                    }),
+                ));
             }
         }
         Ok(())
@@ -550,11 +554,27 @@ where
 /// A possible error when registering a task's result.
 #[derive_where::derive_where(Debug)]
 pub enum TaskError<SP: SessionParameters> {
-    /// An error that is not attributable to a specific party.
+    /// An error that is not attributable to a specific party or message.
     Unattributable(UnattributableError),
+    /// An error that is attributable to a specific message, but not to a specific party.
+    MessageAttributable(MessageAttributableError<SP>),
+}
+
+impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
+    fn from(source: RuntimeError) -> Self {
+        Self::Unattributable(source.into())
+    }
+}
+
+/// An error that is attributable to a specific message, but not to a specific party.
+#[derive_where::derive_where(Debug)]
+#[derive(displaydoc::Display)]
+pub enum MessageAttributableError<SP: SessionParameters> {
     /// A registered message was found to be invalid.
+    #[displaydoc("{0}")]
     InvalidMessage(InvalidMessageError<SP>),
     /// A registered message was found to be a duplicate of a previously registered message.
+    #[displaydoc("{0}")]
     DuplicateMessages(DuplicateMessagesError<SP>),
 }
 
@@ -570,12 +590,6 @@ pub struct InvalidMessageError<SP: SessionParameters> {
     pub message_id: MessageId<SP>,
     /// The description of the error.
     pub description: String,
-}
-
-impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
-    fn from(source: RuntimeError) -> Self {
-        Self::Unattributable(source.into())
-    }
 }
 
 /// A registered message was found to be a duplicate of a previously registered message.

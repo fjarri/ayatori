@@ -66,11 +66,8 @@ where
             match task_result {
                 Ok(()) => {}
                 Err(TaskError::Unattributable(_error)) => panic!(),
-                Err(TaskError::InvalidMessage(error)) => {
-                    tx.send(MessageOut::InvalidMessage(error)).await.unwrap();
-                }
-                Err(TaskError::DuplicateMessages(error)) => {
-                    tx.send(MessageOut::DuplicateMessages(error)).await.unwrap();
+                Err(TaskError::MessageAttributable(error)) => {
+                    tx.send(MessageOut::Error(error)).await.unwrap();
                 }
             }
             // ANCHOR_END: task_result

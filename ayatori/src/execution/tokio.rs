@@ -4,7 +4,7 @@ use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::session::{DuplicateMessagesError, InvalidMessageError, Session, SessionReport};
+use super::session::{MessageAttributableError, Session, SessionReport};
 use crate::{
     entities::{Message, MessageId, UnattributableError},
     traits::{ExecutableProtocol, SessionParameters},
@@ -26,11 +26,8 @@ pub struct MessageIn<SP: SessionParameters> {
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.
     Message(Message<SP>),
-    // TODO: do we really need to distinguish these two?
-    /// An incoming message was malformed or had invalid metadata.
-    InvalidMessage(InvalidMessageError<SP>),
-    /// An incoming message contained data that we have received previously.
-    DuplicateMessages(DuplicateMessagesError<SP>),
+    /// A non-fatal problem attributable to message(s) but not to a specific party.
+    Error(MessageAttributableError<SP>),
 }
 
 /// A trait defined for `async fn`s that execute a single session.

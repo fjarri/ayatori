@@ -2,7 +2,10 @@
 
 pub use crate::{
     entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, UnattributableError},
-    execution::{DuplicateMessagesError, Evidence, InvalidMessageError, Session, SessionReport, Task, TaskError},
+    execution::{
+        DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError, Session, SessionReport, Task,
+        TaskError,
+    },
     traits::{ExecutableProtocol, SessionParameters},
 };
 

@@ -73,11 +73,10 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 match task_result {
                     Ok(()) => {}
                     Err(TaskError::Unattributable(error)) => return Err(error),
-                    Err(TaskError::InvalidMessage(error)) => {
-                        return Err(UnattributableError::runtime(format!("Invalid message: {error:?}")));
-                    }
-                    Err(TaskError::DuplicateMessages(error)) => {
-                        return Err(UnattributableError::runtime(format!("Duplicate messages: {error:?}")));
+                    Err(TaskError::MessageAttributable(error)) => {
+                        return Err(UnattributableError::runtime(format!(
+                            "Message-attributable error: {error:?}"
+                        )));
                     }
                 }
             }
