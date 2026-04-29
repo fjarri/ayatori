@@ -149,6 +149,7 @@ dependencies = [
  "rand_chacha",
  "serde",
  "signature",
+ "tokio",
 ]
 
 [[package]]

@@ -597,21 +597,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
         None
     }
 
-    pub fn pop_action(&mut self) -> Result<Option<Action<SP>>, RuntimeError> {
-        if matches!(self.state, RulesetState::InProgress)
-            && self.collect_rules.is_empty()
-            && self.scalar_rules.is_empty()
-        {
-            return Err(RuntimeError::new(
-                "No rules to apply, and the output value has not been set",
-            ));
-        }
-
-        Ok(self
-            .pop_scalar_action()
+    pub fn pop_action(&mut self) -> Option<Action<SP>> {
+        self.pop_scalar_action()
             .or_else(|| self.pop_collect_action())
             .or_else(|| self.pop_mapping_action())
-            .or_else(|| self.pop_send_action()))
+            .or_else(|| self.pop_send_action())
     }
 
     pub fn expected_messages(&self) -> &BTreeMap<FullName, BTreeSet<SP::Verifier>> {

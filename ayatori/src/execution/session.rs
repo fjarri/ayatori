@@ -306,7 +306,7 @@ where
             return Ok(Some(Task::preprocess_message(task)));
         }
 
-        while let Some(action) = self.ruleset.pop_action()? {
+        while let Some(action) = self.ruleset.pop_action() {
             match action {
                 Action::DirectMessage {
                     store_in,
@@ -395,10 +395,9 @@ where
                     on_error,
                 } => {
                     let value = self.storage.get_elem(&MappingTag::RemoteSigned(data), &index)?;
-                    let expected_senders = self
-                        .data
-                        .expected_senders(&message_name)
-                        .ok_or_else(|| RuntimeError::expect(format!("{message_name} has expected senders")))?;
+                    let expected_senders = self.data.expected_senders(&message_name).ok_or_else(|| {
+                        RuntimeError::expect(format!("{message_name} does not have expected senders"))
+                    })?;
                     let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
                     return Ok(Some(Task::compute_deserialize_elem(
                         store_in, index, function, args, on_error,

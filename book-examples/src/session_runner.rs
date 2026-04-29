@@ -121,7 +121,7 @@ mod tests {
         let sessions = signers
             .into_iter()
             .map(|signer| {
-                Session::<TestSessionParams<BinaryFormat>, DistributedRng>::new(
+                Session::<SP, P>::new(
                     session_id.clone(),
                     signer,
                     &private_data,

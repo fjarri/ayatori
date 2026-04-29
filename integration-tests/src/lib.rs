@@ -14,3 +14,4 @@ pub mod logic_fork;
 pub mod messages;
 pub mod nested_protocol;
 pub mod secret_reveal;
+pub mod tokio;
