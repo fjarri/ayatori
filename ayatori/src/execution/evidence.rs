@@ -4,13 +4,13 @@ use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    session::{Session, SessionState},
+    session::{Session, SessionState, TaskError},
     task::Task,
 };
 use crate::{
     entities::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
-        SessionId, SignedValue, ThirdPartyError, VerificationError, VerifiedValue,
+        SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError, VerifiedValue,
     },
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
     traits::{ExecutableProtocol, SessionParameters},
@@ -254,15 +254,27 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
                     "Unexpected RNG-based computation when reproducing the failure",
                 ));
             }
-            Task::Send(task) => {
-                let (_message, result) = task.compute();
-                // TODO: is that an error if we're in this branch?
-                session.add_result(result)
+            Task::Send(_task) => {
+                // TODO (#82): is that an error if we're in this branch? For now we assume it is.
+                return Ok(EvidenceVerdict::invalid(
+                    "Unexpected outgoing message node encountered when reproducing the failure",
+                ));
             }
         };
 
-        if let Some(error) = task_result.err() {
-            return Ok(EvidenceVerdict::invalid(format!("Unexpected task error: {error:?}")));
+        match task_result {
+            Ok(()) => {}
+            Err(TaskError::Unattributable(UnattributableError::Runtime(error))) => return Err(error),
+            Err(TaskError::Unattributable(UnattributableError::Spurious(error))) => {
+                return Ok(EvidenceVerdict::invalid(format!(
+                    "Unexpected spurious error: {error:?}"
+                )));
+            }
+            Err(TaskError::MessageAttributable(error)) => {
+                return Ok(EvidenceVerdict::invalid(format!(
+                    "Unexpected message-attributable error: {error:?}"
+                )));
+            }
         }
     }
 
