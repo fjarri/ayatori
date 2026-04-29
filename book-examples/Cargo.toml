@@ -8,5 +8,5 @@ ayatori = { path = "../ayatori", features = ["dev", "tokio"] }
 signature = { version = "2", default-features = false, features = ["digest", "rand_core"] }
 rand_chacha = { version = "0.3", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
-tokio = { version = "1", default-features = false, features = ["sync", "rt", "macros", "time"] }
+tokio = { version = "1", default-features = false }
 tokio-util = { version = "0.7", default-features = false }
