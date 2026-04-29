@@ -252,7 +252,6 @@ where
     }
 
     pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
-        // TODO: use ScalarTagRef
         let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
         value.downcast::<T>()
     }
