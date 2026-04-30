@@ -95,7 +95,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         // ANCHOR: build-check-commitment
         let commitment_correct = compute_mapping_sender_fallible(
             "commitment_correct",
-            |_id, args| {
+            |id, args| {
+                // TODO (#9): since we're sending a message to ourself too,
+                // we can skip the verification in the message is ours.
+                if id == args.my_id() {
+                    return Ok(());
+                }
                 let b = args.get::<u32>("b")?;
                 let r = args.get::<u32>("r")?;
                 let c = args.get::<u32>("c")?;
@@ -171,7 +176,9 @@ mod tests {
     use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
-        dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+        dev::{
+            BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync,
+        },
         protocol_user_api::*,
     };
 
@@ -209,4 +216,74 @@ mod tests {
         assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
     }
     // ANCHOR_END: happy_path
+
+    #[test]
+    fn provable_error() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers
+            .iter()
+            .map(Keypair::verifying_key)
+            .collect::<Vec<_>>();
+
+        let private_data = 999;
+        let shared_data = (1001, PartyGroup::new(&ids));
+
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng);
+
+        // ANCHOR: replace_node
+        let sessions = signers
+            .into_iter()
+            .enumerate()
+            .map(|(idx, signer)| {
+                if idx == 0 {
+                    let replacement = Replacement::<SP>::compute_scalar(
+                        &["my_c"],
+                        |orig_value: &u32, _args| Ok(*orig_value + 1),
+                    )
+                    .unwrap();
+                    S::new_with_replacements(
+                        session_id.clone(),
+                        signer,
+                        &private_data,
+                        &shared_data,
+                        &[&replacement],
+                    )
+                    .unwrap()
+                } else {
+                    S::new(session_id.clone(), signer, &private_data, &shared_data)
+                        .unwrap()
+                }
+            })
+            .collect::<Vec<_>>();
+        // ANCHOR_END: replace_node
+
+        let results = run_sessions_sync(&mut rng, sessions).unwrap();
+
+        let report1 = &results.reports[&ids[0]];
+        assert!(report1.success_ref().is_some());
+        assert!(report1.provable_errors.is_empty());
+
+        // ANCHOR: test_report
+        let report2 = &results.reports[&ids[1]];
+        assert!(report2.is_unfinishable());
+        let evidence = &report2.provable_errors[&ids[0]];
+        assert!(
+            evidence
+                .description()
+                .ends_with("and party TestVerifier(1): Sender error: b + r != c")
+        );
+        assert!(evidence.verify(&shared_data).is_ok());
+        // ANCHOR_END: test_report
+
+        let report3 = &results.reports[&ids[1]];
+        assert!(report3.is_unfinishable());
+        let evidence = &report3.provable_errors[&ids[0]];
+        assert!(
+            evidence
+                .description()
+                .ends_with("and party TestVerifier(1): Sender error: b + r != c")
+        );
+        assert!(evidence.verify(&shared_data).is_ok());
+    }
 }

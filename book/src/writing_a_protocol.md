@@ -1,11 +1,9 @@
 # Writing a protocol
 
-(*Note:* The full executable example for this chapter is located in `book-examples/src/distributed_rng.rs`.
-Here we review it in parts.)
-
 Let us build a slightly more sophisticated distributed RNG protocol based on the example from the previous chapter.
 We will also add a private and a shared input for illustrative purposes.
-
+The full executable example for this chapter is located in `book-examples/src/distributed_rng.rs`.
+Here we review it in parts.
 
 ## Graph notation
 

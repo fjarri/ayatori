@@ -17,6 +17,9 @@ The messages sessions send to each other are internally shuffled to ensure a mor
 
 Also available is an async executor for `tokio` runtime: [`run_sessions_async`](dev::tokio::run_sessions_async), but it is mainly intended for testing async session runners (such as provided [`tokio::run_session`](protocol_user_api::tokio::run_session) and [`tokio::par_run_session`](protocol_user_api::tokio::par_run_session)) rather than protocols themselves.
 
+
+## Happy path
+
 This is how we would write a test for the protocol described in [the previous chapter](writing_a_protocol.md), checking that the happy path finished with the expected result (all protocols are successful, the results are equal):
 ```rust,ignore
 {{#include ../../book-examples/src/distributed_rng.rs:happy_path}}
@@ -32,3 +35,14 @@ This is done by using [`Session::new_with_replacements`](protocol_user_api::Sess
 [`Replacement`](dev::Replacement) works by finding a node by its slot name and replacing its associated function.
 In our protocol we have a possible sender-attributable failure when computing `commitment_correct`; let us test that it actually triggers on an invalid message.
 
+First, we amend the test above to have party 1 send an incorrect commitment:
+```rust,ignore
+{{#include ../../book-examples/src/distributed_rng.rs:replace_node}}
+```
+To do that, we replace the node with the slot `my_c` and make it add 1 to the value returned by the original node.
+
+Now we run the sessions as above, but this time we expect parties 2 and 3 to fail the `commitment_correct` check.
+We see if the returned [`SessionReport`](protocol_user_api::SessionReport) contains a provable errors entry for party 1, and the evidence is verifiable.
+```rust,ignore
+{{#include ../../book-examples/src/distributed_rng.rs:test_report}}
+```
