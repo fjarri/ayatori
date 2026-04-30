@@ -171,11 +171,19 @@ impl<SP: SessionParameters> TaskScope<SP> {
     async fn shutdown(&mut self) -> Result<(), RuntimeError> {
         self.0.abort_all();
         let mut errors = Vec::new();
-        while let Some(result) = self.join_next().await {
-            if let Err(error) = result {
-                errors.push(error);
+        while let Some(result) = self.0.join_next().await {
+            match result {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => errors.push(error),
+                // Skip the expected errors due to cancellation, but report all the rest.
+                Err(error) => {
+                    if !error.is_cancelled() {
+                        errors.push(RuntimeError::new(format!("Unexpected JoinError: {error}")));
+                    }
+                }
             }
         }
+
         if errors.is_empty() {
             Ok(())
         } else {
