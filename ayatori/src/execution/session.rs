@@ -134,27 +134,28 @@ where
             )));
         }
 
-        let all_names = public_names.union(&private_names).copied().collect::<BTreeSet<_>>();
-        if all_names != arguments.keys().collect() {
+        let arguments_given = public_names.union(&private_names).copied().collect::<BTreeSet<_>>();
+        let arguments_required = arguments.keys().collect::<BTreeSet<_>>();
+
+        // Note: we are allowing some arguments to be unused.
+
+        if !arguments_required.is_subset(&arguments_given) {
+            let missing_args = arguments_required.difference(&arguments_given).join(", ");
             return Err(RuntimeError::new(format!(
-                "Public and private argument names ({}) differ from the protocol signature ({})",
-                all_names.iter().join(", "),
-                arguments.keys().join(", "),
+                "Some arguments required by the graph are not given: {missing_args}",
             )));
         }
 
         for (name, value) in public_values {
-            let store_in = arguments.get(&name).ok_or_else(|| {
-                RuntimeError::new(format!("Public argument {name} not found in the protocol signature"))
-            })?;
-            self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            if let Some(store_in) = arguments.get(&name) {
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            }
         }
 
         for (name, value) in private_values {
-            let store_in = arguments.get(&name).ok_or_else(|| {
-                RuntimeError::new(format!("Private argument {name} not found in the protocol signature"))
-            })?;
-            self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            if let Some(store_in) = arguments.get(&name) {
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            }
         }
 
         Ok(())
