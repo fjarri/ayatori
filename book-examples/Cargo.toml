@@ -1,5 +1,5 @@
 [package]
-name = "integration-tests"
+name = "book-examples"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,3 +9,4 @@ signature = { version = "2", default-features = false, features = ["digest", "ra
 rand_chacha = { version = "0.3", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }

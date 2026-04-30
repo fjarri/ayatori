@@ -16,6 +16,13 @@ use super::{
 };
 use crate::traits::SessionParameters;
 
+#[cfg(doc)]
+use crate::protocol_author_api::{
+    Collect, ComposableProtocol, ComputeMapping, ComputeScalar, MergeScalars, SerializeAndSign, compute_forked_scalar,
+    compute_forked_scalar_with_rng,
+};
+
+/// Arguments for the function in [`SerializeAndSign`] node.
 #[derive_where::derive_where(Debug)]
 pub struct SerializeArgs<SP: SessionParameters> {
     signer: Arc<SP::Signer>,
@@ -42,18 +49,22 @@ impl<SP: SessionParameters> SerializeArgs<SP> {
         }
     }
 
+    /// Returns the session signer.
     pub fn signer(&self) -> &SP::Signer {
         &self.signer
     }
 
+    /// Returns the session ID.
     pub fn session_id(&self) -> &SessionId<SP> {
         &self.session_id
     }
 
+    /// Returns the name of the protocol message that will contain the serialized value.
     pub fn message_name(&self) -> &FullName {
         &self.message_name
     }
 
+    /// Returns the `serde` adapter that needs to be used to serialize the value.
     pub fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
         &self.serde_adapter
     }
@@ -98,6 +109,7 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
     }
 }
 
+/// Arguments for the function in a [`ComputeScalar`] or a [`ComputeMapping`] node.
 #[derive_where::derive_where(Debug)]
 pub struct Args<SP: SessionParameters> {
     session_id: SessionId<SP>,
@@ -114,10 +126,12 @@ impl<SP: SessionParameters> Args<SP> {
         }
     }
 
+    /// Returns the ID for the party performing the computation.
     pub fn my_id(&self) -> &SP::Verifier {
         &self.my_id
     }
 
+    /// Returns the session ID.
     pub fn session_id(&self) -> &SessionId<SP> {
         &self.session_id
     }
@@ -131,10 +145,20 @@ impl<SP: SessionParameters> Args<SP> {
         })
     }
 
+    /// Returns the value from the storage slot that was declared as the argument for this computation
+    /// during [`ComposableProtocol::build`].
+    ///
+    /// Fails if `name` was not present in the argument list, or the type of the stored value is not `T`.
     pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, RuntimeError> {
         self.get_value(name)?.downcast_ref::<T>()
     }
 
+    /// Returns the value from the storage slot that was declared as the argument for this computation
+    /// during [`ComposableProtocol::build`].
+    ///
+    /// Intended to be used only for storage slots of [`Collect`] nodes.
+    /// Fails if `name` was not present in the argument list, or the stored value was not collected
+    /// from a mapping of values of type `T`.
     pub fn get_map<T: Clone + Erasable>(&self, name: &str) -> Result<BTreeMap<&SP::Verifier, &T>, RuntimeError> {
         let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name)?;
         value_map
@@ -143,6 +167,12 @@ impl<SP: SessionParameters> Args<SP> {
             .collect()
     }
 
+    /// Returns the value from the storage slot that was declared as the argument for this computation
+    /// during [`ComposableProtocol::build`].
+    ///
+    /// Intended to be used only for storage slots of [`MergeScalars`] nodes.
+    /// Fails if `name` was not present in the argument list, or the stored value was not merged
+    /// from values of type `L` and `R`.
     pub fn get_merged<L: Clone + Erasable, R: Clone + Erasable>(
         &self,
         name: &str,
@@ -158,9 +188,19 @@ impl<SP: SessionParameters> Args<SP> {
     }
 }
 
+/// A type used as the return value of functions in fork nodes
+/// (see [`compute_forked_scalar`] and [`compute_forked_scalar_with_rng`]).
 #[derive(Debug)]
 pub enum OneOrBoth<L, R> {
+    /// Only the first option is returned and stored.
     Left(L),
+    /// Only the second option is returned and stored.
     Right(R),
-    Both { left: L, right: R },
+    /// Both options are returned and stored.
+    Both {
+        /// First option.
+        left: L,
+        /// Second option.
+        right: R,
+    },
 }

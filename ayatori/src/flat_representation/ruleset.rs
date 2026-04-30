@@ -144,8 +144,6 @@ pub(crate) enum Action<SP: SessionParameters> {
         left: ScalarTag,
         right: ScalarTag,
     },
-    ReturnOutput(ComputedScalarTag),
-    Terminate(CollectedTag),
 }
 
 fn get_on_error<SP: SessionParameters, T>(node: &T, private_inputs: &BTreeSet<String>) -> OnError
@@ -238,8 +236,8 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
     }
 }
 
-#[derive(Debug)]
-enum State {
+#[derive(Debug, Clone)]
+pub(crate) enum RulesetState {
     InProgress,
     ReachedOutput,
     StalledAt(CollectedTag),
@@ -254,7 +252,7 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     send_rules: Vec<SendRule<SP>>,
     expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
     arguments: BTreeMap<String, ScalarArgumentTag>,
-    state: State,
+    state: RulesetState,
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
@@ -437,7 +435,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             send_rules,
             expected_messages,
             arguments,
-            state: State::InProgress,
+            state: RulesetState::InProgress,
         })
     }
 
@@ -445,7 +443,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
         for rule in &mut self.collect_rules {
             rule.quorum_condition.update_with_banned_party(id);
             if !rule.quorum_condition.is_satisfiable() {
-                self.state = State::StalledAt(rule.store_in.clone());
+                self.state = RulesetState::StalledAt(rule.store_in.clone());
             }
         }
     }
@@ -454,7 +452,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
         if let ScalarTag::Computed(computed_tag) = tag
             && computed_tag == &self.output_tag
         {
-            self.state = State::ReachedOutput;
+            self.state = RulesetState::ReachedOutput;
         }
 
         for rule in &mut self.scalar_rules {
@@ -599,31 +597,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
         None
     }
 
-    pub fn pop_action(&mut self) -> Result<Option<Action<SP>>, RuntimeError> {
-        if matches!(self.state, State::InProgress) && self.collect_rules.is_empty() && self.scalar_rules.is_empty() {
-            return Err(RuntimeError::new(
-                "No rules to apply, and the output value has not been set",
-            ));
-        }
-
-        Ok(match &self.state {
-            // Regular operation: first pop all locally computable actions
-            // to have as many values ready to send as possible.
-            State::InProgress => self
-                .pop_scalar_action()
-                .or_else(|| self.pop_collect_action())
-                .or_else(|| self.pop_mapping_action())
-                .or_else(|| self.pop_send_action()),
-            // If we are ready to terminate, pop all send actions first so that we don't stall other nodes,
-            // then return the terminating action.
-            State::ReachedOutput => self
-                .pop_send_action()
-                .or_else(|| Some(Action::ReturnOutput(self.output_tag.clone()))),
-            State::StalledAt(tag) => {
-                let tag = tag.clone();
-                self.pop_send_action().or_else(move || Some(Action::Terminate(tag)))
-            }
-        })
+    pub fn pop_action(&mut self) -> Option<Action<SP>> {
+        self.pop_scalar_action()
+            .or_else(|| self.pop_collect_action())
+            .or_else(|| self.pop_mapping_action())
+            .or_else(|| self.pop_send_action())
     }
 
     pub fn expected_messages(&self) -> &BTreeMap<FullName, BTreeSet<SP::Verifier>> {
@@ -632,6 +610,14 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     pub fn arguments(&self) -> &BTreeMap<String, ScalarArgumentTag> {
         &self.arguments
+    }
+
+    pub fn state(&self) -> &RulesetState {
+        &self.state
+    }
+
+    pub fn output_tag(&self) -> &ComputedScalarTag {
+        &self.output_tag
     }
 }
 

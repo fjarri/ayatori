@@ -14,6 +14,10 @@ use crate::{
     traits::SessionParameters,
 };
 
+#[cfg(doc)]
+use crate::protocol_author_api::{ComposableProtocol, ExecutableProtocol, call_protocol};
+
+/// Party-specific data available during the build stage of the protocol.
 #[derive(Debug, Clone)]
 pub struct PartyBuildData<SP: SessionParameters> {
     id: SP::Verifier,
@@ -26,20 +30,29 @@ impl<SP: SessionParameters> PartyBuildData<SP> {
         Self { id: id.clone() }
     }
 
+    /// The ID of the party for which the protocol is being built.
     pub fn id(&self) -> &SP::Verifier {
         &self.id
     }
 }
 
+/// Private party-specific inputs to the protocol (see [`ExecutableProtocol::make_private_inputs`]).
+///
+/// These inputs cannot be used to verify evidence of malicious behavior,
+/// so a failure of a node that has these inputs as its leaves is unprovable.
 #[derive(Debug, Default)]
 pub struct PrivateInputs(BTreeMap<String, Value>);
 
 impl PrivateInputs {
+    /// Creates a new inputs structure.
     #[must_use]
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
+    /// Adds an input to the list.
+    ///
+    /// The name should be one of those mentioned in [`ComposableProtocol::signature`].
     #[must_use]
     pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
         let mut args = self.0;
@@ -48,7 +61,7 @@ impl PrivateInputs {
     }
 
     #[must_use]
-    pub fn names(&self) -> BTreeSet<String> {
+    pub(crate) fn names(&self) -> BTreeSet<String> {
         self.0.keys().cloned().collect()
     }
 
@@ -57,15 +70,20 @@ impl PrivateInputs {
     }
 }
 
+/// Shared public inputs to the protocol (see [`ExecutableProtocol::make_public_inputs`]).
 #[derive(Debug, Default)]
 pub struct PublicInputs(BTreeMap<String, Value>);
 
 impl PublicInputs {
+    /// Creates a new inputs structure.
     #[must_use]
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
+    /// Adds an input to the list.
+    ///
+    /// The name should be one of those mentioned in [`ComposableProtocol::signature`].
     #[must_use]
     pub fn input<T: Erasable>(self, name: &str, value: T) -> Self {
         let mut args = self.0;
@@ -78,6 +96,8 @@ impl PublicInputs {
     }
 }
 
+/// A structure containing [`ScalarArgument`] nodes corresponding to the inputs
+/// declared in [`PrivateInputs`] and [`PublicInputs`].
 #[derive(Debug, Default)]
 pub struct ArgNodes<SP: SessionParameters>(BTreeMap<String, Node<ScalarArgument<SP>>>);
 
@@ -92,6 +112,7 @@ impl<SP: SessionParameters> ArgNodes<SP> {
         )
     }
 
+    /// Returns the node corresponding to the input named `name`.
     pub fn get(&self, name: &str) -> Result<&Node<ScalarArgument<SP>>, RuntimeError> {
         self.0
             .get(name)
@@ -99,15 +120,20 @@ impl<SP: SessionParameters> ArgNodes<SP> {
     }
 }
 
+/// A structure used to define inputs to a sub-protocol (see [`call_protocol`]).
 #[derive(Debug, Default)]
 pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, AnyNode<SP>>);
 
 impl<SP: SessionParameters> ProtocolArgs<SP> {
+    /// Creates a new inputs structure.
     #[must_use]
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
 
+    /// Adds an input to the list.
+    ///
+    /// The name should be one of those mentioned in [`ComposableProtocol::signature`].
     #[must_use]
     pub fn input(self, name: &str, value: impl Into<AnyNode<SP>>) -> Self {
         let mut args = self.0;
@@ -116,15 +142,18 @@ impl<SP: SessionParameters> ProtocolArgs<SP> {
     }
 }
 
+/// A structure used to define the protocol signature in [`ComposableProtocol::signature`].
 #[derive(Debug, Default)]
 pub struct ProtocolSignature(BTreeSet<String>);
 
 impl ProtocolSignature {
+    /// Creates an empty structure.
     #[must_use]
     pub fn new() -> Self {
         Self(BTreeSet::new())
     }
 
+    /// Adds an input to the list.
     #[must_use]
     pub fn input(self, name: &str) -> Self {
         let mut args = self.0;

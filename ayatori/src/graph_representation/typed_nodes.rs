@@ -18,15 +18,16 @@ use super::{
 };
 use crate::{
     entities::{
-        CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, EvidenceVerificationFunction,
-        FullName, LocalSignedTag, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError,
-        ScalarArgumentTag, ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
+        CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedTag,
+        MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction,
+        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
         SerializeAndSignFunction, SimpleMappingFunction, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction,
     },
     traits::SessionParameters,
 };
 
+/// A container for typed graph nodes.
 #[derive(Debug)]
 pub struct Node<T>(Arc<T>);
 
@@ -85,6 +86,9 @@ impl<T> Node<T> {
         self.mutated(|inner| inner.with_added_prefix(prefix))
     }
 
+    /// Adds a dependency to the node.
+    ///
+    /// The node will not be evaluated before all its dependencies are evaluated.
     #[must_use]
     pub fn with_dependency<SP>(self, dependency: impl Into<Dependency<SP>>) -> Self
     where
@@ -151,6 +155,7 @@ impl<T> GeneralizedNode for Node<T> {
     }
 }
 
+/// A node that executes a user-provided function to compute a scalar value.
 #[derive_where::derive_where(Debug)]
 pub struct ComputeScalar<SP: SessionParameters> {
     pub(crate) store_in: ComputedScalarTag,
@@ -211,6 +216,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeScalar<SP>> {
     }
 }
 
+/// A node that collects mapping value elements into a scalar value.
 #[derive_where::derive_where(Debug)]
 pub struct Collect<SP: SessionParameters> {
     pub(crate) store_in: CollectedTag,
@@ -267,7 +273,7 @@ pub(crate) enum ComputeMappingKind<SP: SessionParameters> {
     },
     WithReveal {
         function: SenderAttributableWithRevealMappingFunction<SP>,
-        verification: EvidenceVerificationFunction<SP>,
+        verification: SenderAttributableVerificationFunction<SP>,
         verification_args: BTreeMap<String, ComputeMappingArg<SP>>,
     },
     ThirdPartyAttributable {
@@ -310,6 +316,7 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
     }
 }
 
+/// A node that executes a user-provided function to compute elements of a mapping value.
 #[derive_where::derive_where(Debug)]
 pub struct ComputeMapping<SP: SessionParameters> {
     pub(crate) store_in: ComputedMappingTag,
@@ -371,6 +378,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeMapping<SP>> {
     }
 }
 
+/// A subtype of mapping computation node that serializes and signs values before sending them to other parties.
 #[derive_where::derive_where(Debug)]
 pub struct SerializeAndSign<SP: SessionParameters> {
     pub(crate) store_in: LocalSignedTag,
@@ -436,6 +444,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SerializeAndSign<SP>> 
     }
 }
 
+/// A subtype of mapping computation node that deserializes and checks values coming from other parties.
 #[derive_where::derive_where(Debug)]
 pub struct DeserializeAndCheck<SP: SessionParameters> {
     pub(crate) store_in: ReceivedTag,
@@ -501,6 +510,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<DeserializeAndCheck<SP
     }
 }
 
+/// A node that denotes sending a direct message to other parties.
 #[derive_where::derive_where(Debug)]
 pub struct DirectMessage<SP: SessionParameters> {
     pub(crate) store_in: SentTag,
@@ -548,6 +558,7 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for DirectMessage<S
     }
 }
 
+/// A nodes that denotes an expected message from other parties.
 #[derive_where::derive_where(Debug)]
 pub struct Receive<SP: SessionParameters> {
     pub(crate) store_in: RemoteSignedTag,
@@ -606,6 +617,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<Receive<SP>> {
     }
 }
 
+/// A leaf node denoting an input argument to the computation graph.
 #[derive_where::derive_where(Debug)]
 pub struct ScalarArgument<SP> {
     pub(crate) store_in: ScalarArgumentTag,
@@ -635,6 +647,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
     }
 }
 
+/// A node that is reached when one or both of its inputs are available,
+/// and merges them into a single value.
 #[derive_where::derive_where(Debug)]
 pub struct MergeScalars<SP: SessionParameters> {
     pub(crate) store_in: MergedScalarTag,

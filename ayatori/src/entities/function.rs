@@ -17,20 +17,26 @@ use super::{
 };
 use crate::traits::SessionParameters;
 
+/// The result of checking an evidence of malicious behavior of a protocol participant.
 #[derive(displaydoc::Display, Debug, Clone)]
 pub enum EvidenceVerdict {
+    /// The evidence was found to be conclusive.
     #[displaydoc("Valid evidence")]
     Valid,
+    /// There were problems with the evidence (missing data, incorrectly signed messages,
+    /// the data was found to be self-consistent and not leading to failures etc).
     #[displaydoc("Invalid evidence: {0}")]
     Invalid(String),
 }
 
 impl EvidenceVerdict {
+    /// Creates a new "valid" verdict.
     #[must_use]
     pub fn valid() -> Self {
         Self::Valid
     }
 
+    /// Creates a new "invalid" verdict with an associated description.
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid(message.into())
     }
@@ -41,7 +47,7 @@ macro_rules! define_function_type_common {
         #[derive_where::derive_where(Clone)]
         pub(crate) struct $type_name<$SP: SessionParameters> {
             #[allow(clippy::type_complexity)]
-            function: Arc<dyn Fn($($arg_type),*) -> Result<$return_type, $error_type>>,
+            function: Arc<dyn Fn($($arg_type),*) -> Result<$return_type, $error_type> + Send + Sync>,
             name: String,
         }
 
@@ -60,7 +66,7 @@ macro_rules! define_function_type_common {
         impl<$SP: SessionParameters> $type_name<$SP> {
             pub fn new_with_name(
                 name: impl Into<String>,
-                function: impl 'static + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
+                function: impl 'static + Send + Sync + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
             ) -> Self {
                 let wrapped = Arc::new(function);
                 Self {
@@ -84,7 +90,7 @@ macro_rules! define_erased_function_type {
 
         impl<$SP: SessionParameters> $type_name<$SP> {
             pub fn new(
-                function: impl 'static + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
+                function: impl 'static + Send + Sync + Fn($($arg_type),*) -> Result<$return_type, $error_type>,
             ) -> Self {
                 let name = core::any::type_name_of_val(&function).to_string();
                 Self::new_with_name(name, function)
@@ -100,7 +106,7 @@ macro_rules! define_typed_function_type {
 
         impl<$SP: SessionParameters> $type_name<$SP> {
             pub fn new_erased<Ret: Erasable>(
-                function: impl 'static + Fn($($arg_type),*) -> Result<Ret, $error_type>
+                function: impl 'static + Send + Sync + Fn($($arg_type),*) -> Result<Ret, $error_type>
             ) -> Self {
                 let name = core::any::type_name_of_val(&function).to_string();
                 Self::new_with_name(
@@ -154,12 +160,14 @@ define_typed_function_type!(
 
 define_erased_function_type!(
     ThirdPartyAttributableVerificationFunction<SP>,
-    (guilty_party: &SP::Verifier, session_id: &SessionId<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>
+    (guilty_party: &SP::Verifier, session_id: &SessionId<SP>, associated_data: &AssociatedData<SP>)
+    -> Result<EvidenceVerdict, RuntimeError>
 );
 
 define_erased_function_type!(
-    EvidenceVerificationFunction<SP>,
-    (guilty_party: &SP::Verifier, args: &Args<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>
+    SenderAttributableVerificationFunction<SP>,
+    (guilty_party: &SP::Verifier, args: &Args<SP>, associated_data: &AssociatedData<SP>)
+    -> Result<EvidenceVerdict, RuntimeError>
 );
 
 define_erased_function_type!(

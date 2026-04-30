@@ -1,3 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["ayatori", "integration-tests"]
+members = ["ayatori", "book-examples", "integration-tests"]

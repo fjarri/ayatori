@@ -111,7 +111,7 @@ fn verify_echo_contents_error<SP: SessionParameters>(
     session_id: &SessionId<SP>,
     associated_data: &AssociatedData<SP>,
 ) -> Result<EvidenceVerdict, RuntimeError> {
-    let (message1, message2) = associated_data.deserialize::<(SignedValue<SP>, SignedValue<SP>)>()?;
+    let (message1, message2) = associated_data.extract::<(SignedValue<SP>, SignedValue<SP>)>()?;
 
     if message1.metadata().session_id() != session_id {
         return Ok(EvidenceVerdict::invalid("Session ID mismatch"));
@@ -346,8 +346,9 @@ mod tests {
             .enumerate()
             .map(|(idx, signer)| {
                 if idx == 0 {
-                    let replacement1 = Replacement::<SP>::message(&["echo_x", "x"], serialize_replacement).unwrap();
-                    let replacement2 = Replacement::<SP>::compute_mapping_third_party_attributable(
+                    let replacement1 =
+                        Replacement::<SP>::serialize_and_check(&["echo_x", "x"], serialize_replacement).unwrap();
+                    let replacement2 = Replacement::<SP>::compute_mapping_third_party_fallible(
                         &["echo_x", "echo_contents_correct"],
                         dummy_verification,
                     )

@@ -130,7 +130,6 @@ mod tests {
 
     use ayatori::{
         dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
-        protocol_author_api::*,
         protocol_user_api::*,
     };
 

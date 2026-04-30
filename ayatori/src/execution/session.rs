@@ -12,21 +12,21 @@ use signature::Keypair;
 
 use super::{
     evidence::{
-        ConflictingMessagesEvidence, Evidence, EvidenceEnum, SenderErrorEvidence, SenderErrorWithRevealEvidence,
+        ConflictingMessagesEvidence, Evidence, EvidenceKind, SenderErrorEvidence, SenderErrorWithRevealEvidence,
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
-    task::{FinalizeWithStallTask, FinalizeWithSuccessTask, PreprocessingTask, Task, TaskResult, TaskResultEnum},
+    task::{PreprocessingTask, Task, TaskResult, TaskResultEnum},
 };
 #[cfg(feature = "dev")]
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
+        FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
+        ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
-    flat_representation::{Action, OnError, Ruleset},
+    flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -45,6 +45,7 @@ impl<SP: SessionParameters> SessionData<SP> {
     }
 }
 
+/// A state of a protocol being executed.
 #[derive(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
@@ -54,8 +55,9 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     data: Arc<SessionData<SP>>,
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
+    external_bans: BTreeMap<SP::Verifier, String>,
     preprocessing_tasks: Vec<PreprocessingTask<SP>>,
-    phantom: PhantomData<P>,
+    phantom: PhantomData<fn() -> P>,
 }
 
 fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<OutputNode<SP>, RuntimeError>
@@ -105,6 +107,7 @@ where
             data,
             provable_errors: BTreeMap::new(),
             attributable_errors: BTreeMap::new(),
+            external_bans: BTreeMap::new(),
             preprocessing_tasks: Vec::new(),
             phantom: PhantomData,
         };
@@ -131,32 +134,34 @@ where
             )));
         }
 
-        let all_names = public_names.union(&private_names).copied().collect::<BTreeSet<_>>();
-        if all_names != arguments.keys().collect() {
+        let arguments_given = public_names.union(&private_names).copied().collect::<BTreeSet<_>>();
+        let arguments_required = arguments.keys().collect::<BTreeSet<_>>();
+
+        // Note: we are allowing some arguments to be unused.
+
+        if !arguments_required.is_subset(&arguments_given) {
+            let missing_args = arguments_required.difference(&arguments_given).join(", ");
             return Err(RuntimeError::new(format!(
-                "Public and private argument names ({}) differ from the protocol signature ({})",
-                all_names.iter().join(", "),
-                arguments.keys().join(", "),
+                "Some arguments required by the graph are not given: {missing_args}",
             )));
         }
 
         for (name, value) in public_values {
-            let store_in = arguments.get(&name).ok_or_else(|| {
-                RuntimeError::new(format!("Public argument {name} not found in the protocol signature"))
-            })?;
-            self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            if let Some(store_in) = arguments.get(&name) {
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            }
         }
 
         for (name, value) in private_values {
-            let store_in = arguments.get(&name).ok_or_else(|| {
-                RuntimeError::new(format!("Private argument {name} not found in the protocol signature"))
-            })?;
-            self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            if let Some(store_in) = arguments.get(&name) {
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+            }
         }
 
         Ok(())
     }
 
+    /// Creates a new session with the given party identity (signer), and session ID.
     pub fn new(
         id: SessionId<SP>,
         signer: SP::Signer,
@@ -185,6 +190,7 @@ where
         Self::new_inner(id, None, reported_by, &output_node, PrivateInputs::new(), shared_data)
     }
 
+    /// Creates a new session applying some replacements to the node graph (for testing purposes).
     #[cfg(feature = "dev")]
     pub fn new_with_replacements(
         id: SessionId<SP>,
@@ -202,6 +208,7 @@ where
         Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
     }
 
+    /// Returns the identity of the party associated with the session.
     pub fn verifier(&self) -> &SP::Verifier {
         &self.verifier
     }
@@ -229,43 +236,60 @@ where
             .insert(guilty_party, format!("Error when calculating {tag}"));
     }
 
-    pub fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
+    /// Bans a party internally, resulting in all of its messages and values calculated from them being discarded,
+    /// and new messages ignored.
+    pub fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
+        self.ruleset.update_with_banned_party(&guilty_party);
+        self.external_bans.insert(guilty_party, reason);
+    }
+
+    fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
         SessionReport::<SP, P> {
             outcome,
             provable_errors: self.provable_errors,
             attributable_errors: self.attributable_errors,
+            external_bans: self.external_bans,
         }
     }
 
-    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: ComputedScalarTag) -> Result<T, RuntimeError> {
-        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag))?;
+    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
+        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
         value.downcast::<T>()
     }
 
-    pub(crate) fn finalize_with_evidence_verdict(
-        self,
-        task: FinalizeWithSuccessTask,
-    ) -> Result<EvidenceVerdict, RuntimeError> {
-        let verdict = self.get_output::<EvidenceVerdict>(task.output_tag())?;
+    pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
+        let verdict = self.get_output::<EvidenceVerdict>(self.ruleset.output_tag())?;
         Ok(verdict)
     }
 
-    pub fn finalize_with_success(self, task: FinalizeWithSuccessTask) -> Result<SessionReport<SP, P>, RuntimeError> {
-        let result = self.get_output::<P::Output>(task.output_tag())?;
+    fn finalize_with_success(self) -> Result<SessionReport<SP, P>, RuntimeError> {
+        let result = self.get_output::<P::Output>(self.ruleset.output_tag())?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
 
-    pub fn finalize_with_stalled(self, task: FinalizeWithStallTask) -> SessionReport<SP, P> {
-        self.make_report(SessionOutcome::Unfinishable(format!(
-            "Stalled at {}",
-            task.stalled_tag()
-        )))
+    fn finalize_with_stalled(self, tag: &CollectedTag) -> SessionReport<SP, P> {
+        self.make_report(SessionOutcome::Unfinishable(format!("Stalled at {tag}")))
     }
 
+    /// Attempts to finalize the session.
+    pub fn try_finalize(self) -> SessionState<SP, P> {
+        let state = self.ruleset.state().clone();
+        match state {
+            RulesetState::InProgress => SessionState::InProgress(self),
+            RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
+            RulesetState::StalledAt(stalled_at) => SessionState::Stalled(StalledSession {
+                session: self,
+                stalled_at,
+            }),
+        }
+    }
+
+    /// Terminates the session and returns the report containing the recorded failures of remote parties (if any).
     pub fn terminate(self) -> SessionReport<SP, P> {
         self.make_report(SessionOutcome::ManuallyTerminated)
     }
 
+    /// Registers a received message.
     pub fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
         let tasks = message
             .into_values()
@@ -274,19 +298,16 @@ where
         self.preprocessing_tasks.extend(tasks);
     }
 
+    /// Attempts to make a task to execute.
+    ///
+    /// The returned task may be offloaded to a thread pool.
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, RuntimeError> {
         if let Some(task) = self.preprocessing_tasks.pop() {
             return Ok(Some(Task::preprocess_message(task)));
         }
 
-        while let Some(action) = self.ruleset.pop_action()? {
+        while let Some(action) = self.ruleset.pop_action() {
             match action {
-                Action::ReturnOutput(tag) => {
-                    return Ok(Some(Task::finalize_with_success(tag)));
-                }
-                Action::Terminate(tag) => {
-                    return Ok(Some(Task::finalize_with_stall(tag)));
-                }
                 Action::DirectMessage {
                     store_in,
                     to_send,
@@ -374,10 +395,9 @@ where
                     on_error,
                 } => {
                     let value = self.storage.get_elem(&MappingTag::RemoteSigned(data), &index)?;
-                    let expected_senders = self
-                        .data
-                        .expected_senders(&message_name)
-                        .ok_or_else(|| RuntimeError::expect(format!("{message_name} has expected senders")))?;
+                    let expected_senders = self.data.expected_senders(&message_name).ok_or_else(|| {
+                        RuntimeError::expect(format!("{message_name} does not have expected senders"))
+                    })?;
                     let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
                     return Ok(Some(Task::compute_deserialize_elem(
                         store_in, index, function, args, on_error,
@@ -405,9 +425,11 @@ where
         Ok(None)
     }
 
+    /// Registers the result of an executed task.
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
             TaskResultEnum::Success => {}
+            TaskResultEnum::UnattributableError { error } => return Err(TaskError::Unattributable(error)),
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
             }
@@ -438,7 +460,7 @@ where
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
-                    let evidence = EvidenceEnum::SenderError(SenderErrorEvidence::new(
+                    let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
                         &self.verifier,
                         &store_in,
                         signed_values,
@@ -464,7 +486,7 @@ where
                         let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
-                    let evidence = EvidenceEnum::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
+                    let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
                         &self.verifier,
                         &store_in,
                         signed_values,
@@ -479,7 +501,7 @@ where
                 error,
             } => {
                 let evidence =
-                    EvidenceEnum::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
+                    EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
                 self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
             }
             TaskResultEnum::Preprocessed {
@@ -499,7 +521,7 @@ where
                     if typed_existing_value.metadata() != typed_received_value.metadata()
                         || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
                     {
-                        let evidence = EvidenceEnum::ConflictingMessages(ConflictingMessagesEvidence::new(
+                        let evidence = EvidenceKind::ConflictingMessages(ConflictingMessagesEvidence::new(
                             typed_existing_value,
                             typed_received_value,
                         ));
@@ -511,10 +533,12 @@ where
                     // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
                     // For now we can only report both message IDs that delivered these values,
                     // and let the user deal with it, if possible.
-                    return Err(TaskError::DuplicateMessages(DuplicateMessagesError {
-                        first: typed_existing_value.message_id().clone(),
-                        second: typed_existing_value.message_id().clone(),
-                    }));
+                    return Err(TaskError::MessageAttributable(
+                        MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
+                            first: typed_existing_value.message_id().clone(),
+                            second: typed_existing_value.message_id().clone(),
+                        }),
+                    ));
                 }
 
                 self.add_element(&store_in, &source, value)?;
@@ -523,27 +547,111 @@ where
                 message_id,
                 description,
             } => {
-                return Err(TaskError::InvalidMessage(InvalidMessageError {
-                    message_id,
-                    description,
-                }));
+                return Err(TaskError::MessageAttributable(
+                    MessageAttributableError::InvalidMessage(InvalidMessageError {
+                        message_id,
+                        description,
+                    }),
+                ));
             }
         }
         Ok(())
     }
 }
 
-#[derive_where::derive_where(Debug)]
-pub enum TaskError<SP: SessionParameters> {
-    Unattributable(UnattributableError),
-    InvalidMessage(InvalidMessageError<SP>),
-    DuplicateMessages(DuplicateMessagesError<SP>),
+/// A wrapper for a session that has reached the output.
+#[derive(Debug)]
+pub struct ReachedOutputSession<SP: SessionParameters, P: ExecutableProtocol<SP>>(Session<SP, P>);
+
+impl<SP, P> ReachedOutputSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    /// Destroys the session and returns the report containing the output
+    /// and recorded failures of remote parties (if any).
+    pub fn finalize(self) -> Result<SessionReport<SP, P>, RuntimeError> {
+        self.0.finalize_with_success()
+    }
+
+    pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
+        self.0.finalize_with_evidence_verdict()
+    }
+
+    /// Returns the contained session allowing to continue with the event loop.
+    ///
+    /// Can be used to accumulate more shares for protocols with threshold conditions.
+    pub fn continue_execution(self) -> Session<SP, P> {
+        self.0
+    }
 }
 
+impl<SP, P> AsRef<Session<SP, P>> for ReachedOutputSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    fn as_ref(&self) -> &Session<SP, P> {
+        &self.0
+    }
+}
+
+/// A wrapper for a session that is unfinishable.
+#[derive(Debug)]
+pub struct StalledSession<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    session: Session<SP, P>,
+    stalled_at: CollectedTag,
+}
+
+impl<SP, P> StalledSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    /// Destroys the session and returns the report containing
+    /// recorded failures of remote parties (if any).
+    pub fn finalize(self) -> SessionReport<SP, P> {
+        self.session.finalize_with_stalled(&self.stalled_at)
+    }
+
+    /// Returns the contained session allowing to continue with the event loop.
+    ///
+    /// Can be used to accumulate more reports of malicious actions.
+    pub fn continue_execution(self) -> Session<SP, P> {
+        self.session
+    }
+}
+
+impl<SP, P> AsRef<Session<SP, P>> for StalledSession<SP, P>
+where
+    SP: SessionParameters,
+    P: ExecutableProtocol<SP>,
+{
+    fn as_ref(&self) -> &Session<SP, P> {
+        &self.session
+    }
+}
+
+/// Possible results of attempting to finalize a session.
+#[derive(Debug)]
+pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    /// The session is in progress.
+    ///
+    /// Continue working with the returned session object.
+    InProgress(Session<SP, P>),
+    /// The session has reached the output.
+    ReachedOutput(ReachedOutputSession<SP, P>),
+    /// The session is unfinishable due to some nodes having been banned.
+    Stalled(StalledSession<SP, P>),
+}
+
+/// A possible error when registering a task's result.
 #[derive_where::derive_where(Debug)]
-pub struct InvalidMessageError<SP: SessionParameters> {
-    pub message_id: MessageId<SP>,
-    pub description: String,
+pub enum TaskError<SP: SessionParameters> {
+    /// An error that is not attributable to a specific party or message.
+    Unattributable(UnattributableError),
+    /// An error that is attributable to a specific message, but not to a specific party.
+    MessageAttributable(MessageAttributableError<SP>),
 }
 
 impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
@@ -552,20 +660,64 @@ impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
     }
 }
 
+/// An error that is attributable to a specific message, but not to a specific party.
 #[derive_where::derive_where(Debug)]
+#[derive(displaydoc::Display)]
+pub enum MessageAttributableError<SP: SessionParameters> {
+    /// A registered message was found to be invalid.
+    #[displaydoc("{0}")]
+    InvalidMessage(InvalidMessageError<SP>),
+    /// A registered message was found to be a duplicate of a previously registered message.
+    #[displaydoc("{0}")]
+    DuplicateMessages(DuplicateMessagesError<SP>),
+}
+
+/// A registered message was found to be invalid.
+#[derive_where::derive_where(Debug)]
+#[derive(displaydoc::Display)]
+#[displaydoc("Invalid message with ID {message_id:?}: {description}")]
+pub struct InvalidMessageError<SP: SessionParameters> {
+    /// The message's ID.
+    ///
+    /// The user may possess the means of attributing it to a specific party,
+    /// in which case it should be penalized.
+    pub message_id: MessageId<SP>,
+    /// The description of the error.
+    pub description: String,
+}
+
+/// A registered message was found to be a duplicate of a previously registered message.
+#[derive_where::derive_where(Debug)]
+#[derive(displaydoc::Display)]
+#[displaydoc("Duplicate data in messages with IDs {first:?} and {second:?}")]
 pub struct DuplicateMessagesError<SP: SessionParameters> {
+    /// The first message's ID.
+    ///
+    /// The user may possess the means of attributing it to a specific party,
+    /// in which case it should be penalized.
     pub first: MessageId<SP>,
+    /// The second message's ID.
+    ///
+    /// The user may possess the means of attributing it to a specific party,
+    /// in which case it should be penalized.
     pub second: MessageId<SP>,
 }
 
+/// The results of a session.
 #[derive(Debug, Clone)]
 pub struct SessionReport<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    /// The session's outcome.
     pub outcome: SessionOutcome<SP, P>,
+    /// The provable attributable errors registered during the execution.
     pub provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
+    /// The unprovable attributable errors registered during the execution.
     pub attributable_errors: BTreeMap<SP::Verifier, String>,
+    /// The bans requested by the user explicitly.
+    pub external_bans: BTreeMap<SP::Verifier, String>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
+    /// Returns the protocol's output if the session was successful.
     pub fn success(self) -> Option<P::Output> {
         if let SessionOutcome::Success(output) = self.outcome {
             Some(output)
@@ -574,6 +726,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
         }
     }
 
+    /// Returns a reference to the protocol's output if the session was successful.
     pub fn success_ref(&self) -> Option<&P::Output> {
         if let SessionOutcome::Success(output) = &self.outcome {
             Some(output)
@@ -582,6 +735,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
         }
     }
 
+    /// Returns `true` if the session was terminated due to being unfinishable
+    /// (enough nodes were banned to make some collection nodes impossible to trigger).
     pub fn is_unfinishable(&self) -> bool {
         matches!(self.outcome, SessionOutcome::Unfinishable(..))
     }

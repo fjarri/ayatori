@@ -12,8 +12,8 @@ pub(crate) use errors::{
     ThirdPartyAttributableErrorEnum, ThirdPartyError,
 };
 pub(crate) use function::{
-    DeserializeFunction, EvidenceVerificationFunction, MappingFunction, ScalarFunction,
-    SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
+    DeserializeFunction, MappingFunction, ScalarFunction, SenderAttributableMappingFunction,
+    SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
     SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
     UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
     UnattributableScalarFunction, UnattributableScalarFunctionWithRng,
@@ -30,7 +30,7 @@ pub use errors::{
     ThirdPartyAttributableError, UnattributableError,
 };
 pub use function::EvidenceVerdict;
-pub use message::{Message, MessageId, SignedHash, SignedValue, VerificationError, VerifiedValue};
+pub use message::{Message, MessageId, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedValue};
 pub use party::PartyGroup;
 pub use session_id::SessionId;
 pub use tag::FullName;

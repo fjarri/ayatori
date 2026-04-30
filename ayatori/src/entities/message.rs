@@ -12,6 +12,7 @@ use signature::{
 use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
 use crate::traits::{SessionParameters, WireFormat};
 
+/// Metadata of a signed value.
 #[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValueMetadata<SP: SessionParameters> {
     name: FullName,
@@ -20,23 +21,29 @@ pub struct ValueMetadata<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ValueMetadata<SP> {
+    /// The name associated with the value.
     pub fn full_name(&self) -> &FullName {
         &self.name
     }
 
+    /// The party the value is intended for.
     pub fn destination(&self) -> &SP::Verifier {
         &self.destination
     }
 
+    /// The ID of the session in which the value was created.
     pub fn session_id(&self) -> &SessionId<SP> {
         &self.session_id
     }
 }
 
+/// A possible error when verifying a value signature.
 #[derive(displaydoc::Display, Debug, Clone)]
 pub enum VerificationError {
+    /// Internal or environment error.
     #[displaydoc("{0}")]
     Runtime(RuntimeError),
+    /// The signature is invalid.
     #[displaydoc("Signature mismatch")]
     SignatureMismatch,
 }
@@ -94,6 +101,7 @@ impl signature::rand_core::RngCore for Rng<'_> {
 
 impl signature::rand_core::CryptoRng for Rng<'_> {}
 
+/// A signed value with metadata.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedValue<SP: SessionParameters> {
     signature: SP::Signature,
@@ -103,6 +111,7 @@ pub struct SignedValue<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SignedValue<SP> {
+    /// Signs a new value.
     pub fn new(
         rng: &mut dyn CryptoRngCore,
         signer: &SP::Signer,
@@ -129,6 +138,7 @@ impl<SP: SessionParameters> SignedValue<SP> {
         })
     }
 
+    /// The party that signed the value.
     pub fn source(&self) -> &SP::Verifier {
         &self.source
     }
@@ -140,15 +150,12 @@ impl<SP: SessionParameters> SignedValue<SP> {
             .map_err(|_err| VerificationError::SignatureMismatch)
     }
 
-    pub fn is_signature_correct(&self) -> bool {
-        self.verify_inner().is_ok()
-    }
-
     pub(crate) fn verify_and_unpack(self) -> Result<SerializedValue, VerificationError> {
         self.verify_inner()?;
         Ok(self.value)
     }
 
+    /// Attempts to verify the value.
     pub fn verify(self, message_id: &MessageId<SP>) -> Result<VerifiedValue<SP>, VerificationError> {
         self.verify_inner()?;
         Ok(VerifiedValue {
@@ -160,11 +167,13 @@ impl<SP: SessionParameters> SignedValue<SP> {
         })
     }
 
+    /// Returns the associated metadata.
     pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
 }
 
+/// A signed hash of the value and metadata.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedHash<SP: SessionParameters> {
     signature: SP::Signature,
@@ -175,10 +184,12 @@ pub struct SignedHash<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SignedHash<SP> {
+    /// The party that signed the value.
     pub fn source(&self) -> &SP::Verifier {
         &self.source
     }
 
+    /// Returns the associated metadata.
     pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
@@ -190,11 +201,13 @@ impl<SP: SessionParameters> SignedHash<SP> {
             .map_err(|_err| VerificationError::SignatureMismatch)
     }
 
+    /// Checks if the hash is correctly signed.
     pub fn is_signature_correct(&self) -> bool {
         self.verify_inner().is_ok()
     }
 }
 
+/// A signed value with the signature that has been verified and found correct.
 #[derive_where::derive_where(Debug, Clone)]
 pub struct VerifiedValue<SP: SessionParameters> {
     signature: SP::Signature,
@@ -205,10 +218,12 @@ pub struct VerifiedValue<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> VerifiedValue<SP> {
+    /// The party that signed the value.
     pub fn source(&self) -> &SP::Verifier {
         &self.source
     }
 
+    /// Returns the associated metadata.
     pub fn metadata(&self) -> &ValueMetadata<SP> {
         &self.metadata
     }
@@ -221,11 +236,13 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         &self.value
     }
 
+    /// Returns `true` if the hash in `other` is equal to the hash of this value.
     pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> Result<bool, RuntimeError> {
         let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
         Ok(value_hash.as_ref() == other.hash.as_ref())
     }
 
+    /// Turns this back into non-verified value (to send over the wire).
     pub fn unverify(self) -> SignedValue<SP> {
         SignedValue {
             signature: self.signature,
@@ -235,6 +252,8 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         }
     }
 
+    /// Turns this into a signed hash (essentially replacing the actual value with its hash,
+    /// keeping the metadata intact).
     pub fn to_signed_hash(&self) -> Result<SignedHash<SP>, RuntimeError> {
         let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
         Ok(SignedHash {
@@ -258,6 +277,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
 pub struct MessageId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
 
 impl<SP: SessionParameters> MessageId<SP> {
+    /// Creates a random message ID.
     pub fn random(rng: &mut impl CryptoRngCore) -> Self {
         let mut buffer = digest::Output::<SP::Digest>::default();
         rng.fill_bytes(&mut buffer);
@@ -275,6 +295,7 @@ impl<SP: SessionParameters> Debug for MessageId<SP> {
     }
 }
 
+/// A message to be sent to another party, containing multiple signed values.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message<SP: SessionParameters> {
     destination: SP::Verifier,
@@ -286,6 +307,7 @@ impl<SP: SessionParameters> Message<SP> {
         Self { destination, values }
     }
 
+    /// The party for which the message is intended.
     pub fn destination(&self) -> &SP::Verifier {
         &self.destination
     }

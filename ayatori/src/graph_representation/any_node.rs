@@ -21,7 +21,7 @@ use crate::{
     entities::{
         AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, PartyGroup, RuntimeError,
         ScalarFunction, ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum, SimpleMappingFunction,
-        UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction,
+        UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     traits::SessionParameters,
 };
@@ -35,16 +35,26 @@ pub(crate) enum Reproducibility {
     NotAvailable,
 }
 
+/// A union of all possible nodes.
 #[derive_where::derive_where(Debug)]
 pub enum AnyNode<SP: SessionParameters> {
+    /// A scalar computation.
     ComputeScalar(Node<ComputeScalar<SP>>),
+    /// A collection of mapping elements.
     Collect(Node<Collect<SP>>),
+    /// A mapping computation.
     ComputeMapping(Node<ComputeMapping<SP>>),
+    /// A serialization.
     SerializeAndSign(Node<SerializeAndSign<SP>>),
+    /// A deserialization.
     DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
+    /// An outgoing direct message.
     DirectMessage(Node<DirectMessage<SP>>),
+    /// An expected message.
     Receive(Node<Receive<SP>>),
+    /// An argument to the protocol.
     ScalarArgument(Node<ScalarArgument<SP>>),
+    /// One or both scalar node results merged into one.
     MergeScalars(Node<MergeScalars<SP>>),
 }
 
@@ -152,6 +162,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         }
     }
 
+    /// Pretty prints the node tree.
     #[must_use]
     pub fn display_tree(&self) -> String {
         let mut s = String::new();
@@ -289,8 +300,9 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::from(Node::new(ComputeMapping {
                 store_in: node.as_ref().store_in.clone(),
                 kind: ComputeMappingKind::Simple {
-                    function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
-                        move |id, args| Ok(verification.call(id, args, &associated_data)?),
+                    function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
+                        "<associated_verification>",
+                        move |id, args| Ok(Value::new(verification.call(id, args, &associated_data)?)),
                     )),
                 },
                 args: args_to_owned(verification_args),
@@ -305,15 +317,19 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::from(Node::new(ComputeMapping {
                 store_in: node.as_ref().store_in.clone(),
                 kind: ComputeMappingKind::Simple {
-                    function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_erased(
-                        move |id, args| match function.call(id, args) {
-                            Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
-                            Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
-                                Err(error)
+                    function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
+                        "<node_itself_as_verification>",
+                        move |id, args| {
+                            match function.call(id, args) {
+                                Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
+                                Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
+                                    Err(error)
+                                }
+                                Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
+                                    Ok(EvidenceVerdict::valid())
+                                }
                             }
-                            Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
-                                Ok(EvidenceVerdict::valid())
-                            }
+                            .map(Value::new)
                         },
                     )),
                 },
@@ -345,13 +361,14 @@ impl<SP: SessionParameters> AnyNode<SP> {
         let guilty_party = guilty_party.clone();
         let wrapped = OutputNode::ComputeScalar(Node::new(ComputeScalar {
             store_in: original_output_tag.clone(),
-            function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(
-                move |args| -> Result<EvidenceVerdict, UnattributableError> {
+            function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
+                "<evidence_verification_output>",
+                move |args| {
                     let map = args.get_map::<EvidenceVerdict>(arg_name)?;
                     let verdict: &EvidenceVerdict = map
                         .get(&guilty_party)
                         .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))?;
-                    Ok(verdict.clone())
+                    Ok(Value::new(verdict.clone()))
                 },
             )),
             args: [(arg_name.into(), ComputeScalarArg::Collect(collected.get_strong_ref()))].into(),
@@ -517,6 +534,8 @@ impl<SP: SessionParameters> From<ComputeMappingArg<SP>> for AnyNode<SP> {
     fn from(source: ComputeMappingArg<SP>) -> Self {
         match source {
             ComputeMappingArg::ComputeScalar(node) => Self::ComputeScalar(node),
+            ComputeMappingArg::MergeScalars(node) => Self::MergeScalars(node),
+            ComputeMappingArg::ScalarArgument(node) => Self::ScalarArgument(node),
             ComputeMappingArg::Collect(node) => Self::Collect(node),
             ComputeMappingArg::ComputeMapping(node) => Self::ComputeMapping(node),
             ComputeMappingArg::SerializeAndSign(node) => Self::SerializeAndSign(node),

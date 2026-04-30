@@ -1,9 +1,16 @@
-use alloc::{format, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use super::{session::Session, task::Task};
+use super::{
+    session::{Session, SessionState, TaskError},
+    task::Task,
+};
 use crate::{
     entities::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
@@ -13,44 +20,60 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
+/// Evidence of malicious behavior of a protocol participant,
+/// verifiable by anyone having access to the shared public data used during the protocol's execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     session_id: SessionId<SP>,
     guilty_party: SP::Verifier,
-    evidence: EvidenceEnum<SP, P>,
+    kind: EvidenceKind<SP, P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
-    pub(crate) fn new(session_id: &SessionId<SP>, guilty_party: &SP::Verifier, evidence: EvidenceEnum<SP, P>) -> Self {
+    pub(crate) fn new(session_id: &SessionId<SP>, guilty_party: &SP::Verifier, kind: EvidenceKind<SP, P>) -> Self {
         Self {
             session_id: session_id.clone(),
             guilty_party: guilty_party.clone(),
-            evidence,
+            kind,
         }
     }
 
+    /// Returns the ID of the session where the evidence was recorded.
     pub fn session_id(&self) -> &SessionId<SP> {
         &self.session_id
     }
 
+    /// Returns the ID of the guilty party.
     pub fn guilty_party(&self) -> &SP::Verifier {
         &self.guilty_party
     }
 
+    /// Verifies the evidence given the same public shared data used for the protocol execution.
     pub fn verify(&self, shared_data: &P::SharedData) -> Result<EvidenceVerdict, RuntimeError> {
-        self.evidence.verify(&self.session_id, &self.guilty_party, shared_data)
+        self.kind.verify(&self.session_id, &self.guilty_party, shared_data)
+    }
+
+    /// Returns the description of the encountered error.
+    pub fn description(&self) -> String {
+        format!(
+            "Evidence for Session ID {:?} and party {:?}: {}",
+            self.session_id,
+            self.guilty_party,
+            self.kind.description()
+        )
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum EvidenceEnum<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
+pub(crate) enum EvidenceKind<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     SenderError(SenderErrorEvidence<SP, P>),
     SenderErrorWithReveal(SenderErrorWithRevealEvidence<SP, P>),
     ConflictingMessages(ConflictingMessagesEvidence<SP>),
     ThirdPartyError(ThirdPartyErrorEvidence<SP, P>),
 }
 
-impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceKind<SP, P> {
     pub fn verify(
         &self,
         session_id: &SessionId<SP>,
@@ -64,9 +87,19 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceEnum<SP, P> {
             Self::ThirdPartyError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
         }
     }
+
+    pub fn description(&self) -> String {
+        match self {
+            Self::SenderError(evidence) => evidence.description(),
+            Self::SenderErrorWithReveal(evidence) => evidence.description(),
+            Self::ConflictingMessages(evidence) => evidence.description(),
+            Self::ThirdPartyError(evidence) => evidence.description(),
+        }
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct ConflictingMessagesEvidence<SP: SessionParameters> {
     first: SignedValue<SP>,
     second: SignedValue<SP>,
@@ -78,6 +111,10 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
             first: first.clone().unverify(),
             second: second.clone().unverify(),
         }
+    }
+
+    pub fn description(&self) -> String {
+        format!("conflicting messages for value {}", self.first.metadata().full_name())
     }
 
     pub fn verify(
@@ -130,13 +167,14 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
     signed_values: Vec<SignedValue<SP>>,
     error: SenderError,
-    phantom: PhantomData<P>,
+    phantom: PhantomData<fn() -> P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P> {
@@ -153,6 +191,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
             error,
             phantom: PhantomData,
         }
+    }
+
+    pub fn description(&self) -> String {
+        self.error.to_string()
     }
 
     pub fn verify(
@@ -174,13 +216,14 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct SenderErrorWithRevealEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
     signed_values: Vec<SignedValue<SP>>,
     error: SenderErrorWithReveal<SP>,
-    phantom: PhantomData<P>,
+    phantom: PhantomData<fn() -> P>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvidence<SP, P> {
@@ -197,6 +240,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvid
             error,
             phantom: PhantomData,
         }
+    }
+
+    pub fn description(&self) -> String {
+        self.error.to_string()
     }
 
     pub fn verify(
@@ -240,59 +287,50 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 
     while let Some(task) = session.make_task()? {
         let task_result = match task {
-            Task::Compute(task) => {
-                let result = match task.compute() {
-                    Ok(result) => result,
-                    Err(UnattributableError::Spurious(error)) => {
-                        return Ok(EvidenceVerdict::invalid(format!(
-                            "Unexpected spurious error when reproducing the failure: {error}"
-                        )));
-                    }
-                    Err(UnattributableError::Runtime(error)) => return Err(error),
-                };
-                session.add_result(result)
-            }
+            Task::Compute(task) => session.add_result(task.compute()),
             Task::ComputeWithRng(_task) => {
                 return Ok(EvidenceVerdict::invalid(
                     "Unexpected RNG-based computation when reproducing the failure",
                 ));
             }
-            Task::Send(task) => {
-                let (_message, result) = match task.compute() {
-                    Ok(result) => result,
-                    Err(UnattributableError::Spurious(error)) => {
-                        return Ok(EvidenceVerdict::invalid(format!(
-                            "Unexpected spurious error when reproducing the failure: {error}"
-                        )));
-                    }
-                    Err(UnattributableError::Runtime(error)) => return Err(error),
-                };
-                session.add_result(result)
-            }
-            Task::FinalizeWithSuccess(task) => {
-                return session.finalize_with_evidence_verdict(task);
-            }
-            Task::FinalizeWithStall(_task) => {
-                return Ok(EvidenceVerdict::invalid("Unexpected finalization with stall task"));
+            Task::Send(_task) => {
+                // TODO (#82): is that an error if we're in this branch? For now we assume it is.
+                return Ok(EvidenceVerdict::invalid(
+                    "Unexpected outgoing message node encountered when reproducing the failure",
+                ));
             }
         };
 
-        if let Some(error) = task_result.err() {
-            return Ok(EvidenceVerdict::invalid(format!("Unexpected task error: {error:?}")));
+        match task_result {
+            Ok(()) => {}
+            Err(TaskError::Unattributable(UnattributableError::Runtime(error))) => return Err(error),
+            Err(TaskError::Unattributable(UnattributableError::Spurious(error))) => {
+                return Ok(EvidenceVerdict::invalid(format!(
+                    "Unexpected spurious error: {error:?}"
+                )));
+            }
+            Err(TaskError::MessageAttributable(error)) => {
+                return Ok(EvidenceVerdict::invalid(format!(
+                    "Unexpected message-attributable error: {error:?}"
+                )));
+            }
         }
     }
 
-    Ok(EvidenceVerdict::invalid(
-        "The execution did not encounter the expected error",
-    ))
+    match session.try_finalize() {
+        SessionState::InProgress(_session) => Ok(EvidenceVerdict::invalid("The execution did not finish")),
+        SessionState::ReachedOutput(success) => success.finalize_with_evidence_verdict(),
+        SessionState::Stalled(_stalled) => Ok(EvidenceVerdict::invalid("The execution was stalled")),
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
     error: ThirdPartyError<SP>,
-    phantom: PhantomData<(SP, P)>,
+    phantom: PhantomData<fn() -> (SP, P)>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
@@ -303,6 +341,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
             error,
             phantom: PhantomData,
         }
+    }
+
+    pub fn description(&self) -> String {
+        self.error.to_string()
     }
 
     pub fn verify(
