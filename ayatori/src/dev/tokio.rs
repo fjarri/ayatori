@@ -111,7 +111,7 @@ where
 }
 
 /// Executes the given sessions concurrently within a `tokio` runtime.
-pub async fn run_async<SP, P, F, R>(
+pub async fn run_sessions_async<SP, P, F, R>(
     rng: &mut R,
     sessions: Vec<Session<SP, P>>,
     session_runner: F,

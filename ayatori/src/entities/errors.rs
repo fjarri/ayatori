@@ -123,8 +123,8 @@ impl SenderAttributableError {
 }
 
 /// Additional data (not calculated in the nodes leading to the error) to be attached to the evidence.
-#[derive(Debug, Serialize, Deserialize)]
-#[derive_where::derive_where(Clone)]
+#[derive(Serialize, Deserialize)]
+#[derive_where::derive_where(Debug, Clone)]
 pub struct AssociatedData<SP: SessionParameters> {
     serialized_value: SerializedValue,
     phantom: PhantomData<fn() -> SP>,
@@ -148,7 +148,8 @@ impl<SP: SessionParameters> AssociatedData<SP> {
     }
 }
 
-#[derive(displaydoc::Display, Debug, Clone, Serialize, Deserialize)]
+#[derive(displaydoc::Display, Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 #[displaydoc("Sender error (with secret reveal): {description}")]
 pub(crate) struct SenderErrorWithReveal<SP: SessionParameters> {
     pub(crate) description: String,
@@ -207,8 +208,8 @@ impl<SP: SessionParameters> SenderAttributableErrorWithReveal<SP> {
     }
 }
 
-#[derive(displaydoc::Display, Debug, Serialize, Deserialize)]
-#[derive_where::derive_where(Clone)]
+#[derive(displaydoc::Display, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug, Clone)]
 #[displaydoc("Third party attributable error: {description}")]
 pub(crate) struct ThirdPartyError<SP: SessionParameters> {
     pub(crate) description: String,

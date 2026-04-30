@@ -92,7 +92,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use ayatori::{
-        dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_async},
+        dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async},
         protocol_user_api::{PartyGroup, Session, SessionId},
     };
     use rand_chacha::ChaCha8Rng;
@@ -131,10 +131,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let results =
-            run_async::<SP, P, _, ChaCha8Rng>(&mut rng, sessions, run_session::<SP, P>)
-                .await
-                .unwrap();
+        let results = run_sessions_async::<SP, P, _, ChaCha8Rng>(
+            &mut rng,
+            sessions,
+            run_session::<SP, P>,
+        )
+        .await
+        .unwrap();
 
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);

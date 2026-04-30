@@ -3,7 +3,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use ayatori::{
-        dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_async},
+        dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async},
         protocol_user_api::{
             PartyGroup, Session, SessionId,
             tokio::{SessionRunner, par_run_session, run_session},
@@ -34,7 +34,9 @@ mod tests {
             .map(|signer| Session::<SP, P>::new(session_id.clone(), signer, &(), &shared_data).unwrap())
             .collect::<Vec<_>>();
 
-        let results = run_async::<SP, P, _, ChaCha8Rng>(&mut rng, sessions, f).await.unwrap();
+        let results = run_sessions_async::<SP, P, _, ChaCha8Rng>(&mut rng, sessions, f)
+            .await
+            .unwrap();
 
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);

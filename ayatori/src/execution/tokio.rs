@@ -271,7 +271,7 @@ where
 ///
 /// This function should be used if message creation and verification takes a significant amount of time,
 /// to offset the parallelizing overhead.
-/// Use [`tokio::run_async`](`crate::dev::tokio::run_async`) to benchmark your specific protocol.
+/// Use [`tokio::run_sessions_async`](`crate::dev::tokio::run_sessions_async`) to benchmark your specific protocol.
 pub async fn par_run_session<SP, P>(
     rng: &mut impl CryptoRngCore,
     tx: &mpsc::Sender<MessageOut<SP>>,

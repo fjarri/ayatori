@@ -12,7 +12,7 @@ The full executable code can be found in `book-examples/src/session_runner.rs`.
 
 ### Session runner
 
-The signature of the runner will be a little overcomplicated because we need to comply to the requirements of [`run_async`](dev::tokio::run_async) which we will use to execute multiple sessions concurrently using our runner.
+The signature of the runner will be a little overcomplicated because we need to comply to the requirements of [`run_sessions_async`](dev::tokio::run_sessions_async) which we will use to execute multiple sessions concurrently using our runner.
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:signature}}
 ```

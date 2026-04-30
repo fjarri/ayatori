@@ -50,7 +50,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) enum EvidenceKind<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     SenderError(SenderErrorEvidence<SP, P>),
     SenderErrorWithReveal(SenderErrorWithRevealEvidence<SP, P>),
@@ -74,7 +75,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceKind<SP, P> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct ConflictingMessagesEvidence<SP: SessionParameters> {
     first: SignedValue<SP>,
     second: SignedValue<SP>,
@@ -138,7 +140,8 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct SenderErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
@@ -182,7 +185,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct SenderErrorWithRevealEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
@@ -285,7 +289,8 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,

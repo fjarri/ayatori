@@ -177,6 +177,11 @@ mod tests {
 
     use super::DistributedRng;
 
+    // ANCHOR: happy_path
+    type SP = TestSessionParams<BinaryFormat>;
+    type P = DistributedRng;
+    type S = Session<SP, P>;
+
     #[test]
     fn happy_path() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
@@ -194,13 +199,7 @@ mod tests {
         let sessions = signers
             .into_iter()
             .map(|signer| {
-                Session::<TestSessionParams<BinaryFormat>, DistributedRng>::new(
-                    session_id.clone(),
-                    signer,
-                    &private_data,
-                    &shared_data,
-                )
-                .unwrap()
+                S::new(session_id.clone(), signer, &private_data, &shared_data).unwrap()
             })
             .collect::<Vec<_>>();
         let results = run_sessions_sync(&mut rng, sessions).unwrap();
@@ -209,4 +208,5 @@ mod tests {
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
         assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
     }
+    // ANCHOR_END: happy_path
 }
