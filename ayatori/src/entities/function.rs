@@ -160,12 +160,14 @@ define_typed_function_type!(
 
 define_erased_function_type!(
     ThirdPartyAttributableVerificationFunction<SP>,
-    (guilty_party: &SP::Verifier, session_id: &SessionId<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>
+    (guilty_party: &SP::Verifier, session_id: &SessionId<SP>, associated_data: &AssociatedData<SP>)
+    -> Result<EvidenceVerdict, RuntimeError>
 );
 
 define_erased_function_type!(
-    EvidenceVerificationFunction<SP>,
-    (guilty_party: &SP::Verifier, args: &Args<SP>, associated_data: &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>
+    SenderAttributableVerificationFunction<SP>,
+    (guilty_party: &SP::Verifier, args: &Args<SP>, associated_data: &AssociatedData<SP>)
+    -> Result<EvidenceVerdict, RuntimeError>
 );
 
 define_erased_function_type!(

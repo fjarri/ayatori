@@ -21,9 +21,9 @@ use super::{
 use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, EvidenceVerificationFunction, FullName, LocalSignedTag, MergedScalarTag, OneOrBoth,
-        PartyGroup, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError,
-        SenderAttributableErrorWithReveal, SenderAttributableMappingFunction,
+        EvidenceVerdict, FullName, LocalSignedTag, MergedScalarTag, OneOrBoth, PartyGroup, RemoteSignedTag,
+        RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError, SenderAttributableErrorWithReveal,
+        SenderAttributableMappingFunction, SenderAttributableVerificationFunction,
         SenderAttributableWithRevealMappingFunction, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId,
         SignedValue, SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction, UnattributableError, UnattributableMappingFunction,
@@ -359,7 +359,7 @@ pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: E
         store_in: ComputedMappingTag::new(name),
         kind: ComputeMappingKind::WithReveal {
             function: SenderAttributableWithRevealMappingFunction::new_erased(function),
-            verification: EvidenceVerificationFunction::new(verification),
+            verification: SenderAttributableVerificationFunction::new(verification),
             verification_args: verification_args.0,
         },
         args: args.0,

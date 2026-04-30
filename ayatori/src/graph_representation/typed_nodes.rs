@@ -18,9 +18,9 @@ use super::{
 };
 use crate::{
     entities::{
-        CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, EvidenceVerificationFunction,
-        FullName, LocalSignedTag, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError,
-        ScalarArgumentTag, ScalarFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
+        CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedTag,
+        MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction,
+        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
         SerializeAndSignFunction, SimpleMappingFunction, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction,
     },
@@ -273,7 +273,7 @@ pub(crate) enum ComputeMappingKind<SP: SessionParameters> {
     },
     WithReveal {
         function: SenderAttributableWithRevealMappingFunction<SP>,
-        verification: EvidenceVerificationFunction<SP>,
+        verification: SenderAttributableVerificationFunction<SP>,
         verification_args: BTreeMap<String, ComputeMappingArg<SP>>,
     },
     ThirdPartyAttributable {

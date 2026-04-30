@@ -12,8 +12,8 @@ pub(crate) use errors::{
     ThirdPartyAttributableErrorEnum, ThirdPartyError,
 };
 pub(crate) use function::{
-    DeserializeFunction, EvidenceVerificationFunction, MappingFunction, ScalarFunction,
-    SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
+    DeserializeFunction, MappingFunction, ScalarFunction, SenderAttributableMappingFunction,
+    SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
     SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
     UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
     UnattributableScalarFunction, UnattributableScalarFunctionWithRng,
