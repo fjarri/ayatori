@@ -1,4 +1,8 @@
-use alloc::{format, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
@@ -48,6 +52,16 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> Evidence<SP, P> {
     pub fn verify(&self, shared_data: &P::SharedData) -> Result<EvidenceVerdict, RuntimeError> {
         self.kind.verify(&self.session_id, &self.guilty_party, shared_data)
     }
+
+    /// Returns the description of the encountered error.
+    pub fn description(&self) -> String {
+        format!(
+            "Evidence for Session ID {:?} and party {:?}: {}",
+            self.session_id,
+            self.guilty_party,
+            self.kind.description()
+        )
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -73,6 +87,15 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> EvidenceKind<SP, P> {
             Self::ThirdPartyError(evidence) => evidence.verify(session_id, guilty_party, shared_data),
         }
     }
+
+    pub fn description(&self) -> String {
+        match self {
+            Self::SenderError(evidence) => evidence.description(),
+            Self::SenderErrorWithReveal(evidence) => evidence.description(),
+            Self::ConflictingMessages(evidence) => evidence.description(),
+            Self::ThirdPartyError(evidence) => evidence.description(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -88,6 +111,10 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
             first: first.clone().unverify(),
             second: second.clone().unverify(),
         }
+    }
+
+    pub fn description(&self) -> String {
+        format!("conflicting messages for value {}", self.first.metadata().full_name())
     }
 
     pub fn verify(
@@ -166,6 +193,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
         }
     }
 
+    pub fn description(&self) -> String {
+        self.error.to_string()
+    }
+
     pub fn verify(
         &self,
         session_id: &SessionId<SP>,
@@ -209,6 +240,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvid
             error,
             phantom: PhantomData,
         }
+    }
+
+    pub fn description(&self) -> String {
+        self.error.to_string()
     }
 
     pub fn verify(
@@ -306,6 +341,10 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
             error,
             phantom: PhantomData,
         }
+    }
+
+    pub fn description(&self) -> String {
+        self.error.to_string()
     }
 
     pub fn verify(
