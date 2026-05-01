@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// A container for incoming commands to a session runner.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum MessageIn<SP: SessionParameters> {
     /// An incoming message.
     Message {
@@ -43,7 +43,7 @@ pub enum MessageIn<SP: SessionParameters> {
 }
 
 /// A container for outgoing information from a session runner.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.
     Message(Message<SP>),
@@ -72,7 +72,7 @@ pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>, R:
 /// Executes the session waiting for the messages from the `rx` channel
 /// and pushing outgoing messages into the `tx` channel.
 pub async fn run_session<SP, P>(
-    rng: &mut impl CryptoRngCore,
+    rng: &mut (impl CryptoRngCore + Send),
     tx: &mpsc::Sender<MessageOut<SP>>,
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
@@ -80,6 +80,7 @@ pub async fn run_session<SP, P>(
 ) -> Result<SessionReport<SP, P>, UnattributableError>
 where
     SP: SessionParameters,
+    SP::Signer: Sync,
     P: ExecutableProtocol<SP>,
 {
     loop {

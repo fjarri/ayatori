@@ -5,7 +5,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::{fmt::Debug, marker::PhantomData};
+use core::marker::PhantomData;
 
 use itertools::Itertools;
 use signature::Keypair;
@@ -46,7 +46,7 @@ impl<SP: SessionParameters> SessionData<SP> {
 }
 
 /// A state of a protocol being executed.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ruleset: Ruleset<SP>,
     storage: Storage<SP::Verifier>,
@@ -560,7 +560,7 @@ where
 }
 
 /// A wrapper for a session that has reached the output.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct ReachedOutputSession<SP: SessionParameters, P: ExecutableProtocol<SP>>(Session<SP, P>);
 
 impl<SP, P> ReachedOutputSession<SP, P>
@@ -597,7 +597,7 @@ where
 }
 
 /// A wrapper for a session that is unfinishable.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct StalledSession<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     session: Session<SP, P>,
     stalled_at: CollectedTag,
@@ -633,7 +633,7 @@ where
 }
 
 /// Possible results of attempting to finalize a session.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     /// The session is in progress.
     ///
@@ -704,7 +704,7 @@ pub struct DuplicateMessagesError<SP: SessionParameters> {
 }
 
 /// The results of a session.
-#[derive(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone)]
 pub struct SessionReport<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     /// The session's outcome.
     pub outcome: SessionOutcome<SP, P>,
@@ -742,7 +742,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone)]
 pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     Success(P::Output),
     ManuallyTerminated,

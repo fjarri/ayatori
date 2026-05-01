@@ -243,7 +243,7 @@ pub(crate) enum RulesetState {
     StalledAt(CollectedTag),
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: ComputedScalarTag,
     scalar_rules: Vec<ScalarRule<SP>>,
@@ -555,7 +555,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         on_error,
                     } => Action::ComputeMappingElement {
                         store_in: store_in.clone(),
-                        index: id.clone(),
+                        index: id,
                         function: function.clone(),
                         args: args.clone(),
                         on_error: on_error.clone(),
@@ -568,7 +568,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         serde_adapter,
                     } => Action::ComputeSerializeAndSignElement {
                         store_in: store_in.clone(),
-                        index: id.clone(),
+                        index: id,
                         function: function.clone(),
                         data: data.clone(),
                         message_name: message_name.clone(),
@@ -583,7 +583,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         on_error,
                     } => Action::ComputeDeserializeElement {
                         store_in: store_in.clone(),
-                        index: id.clone(),
+                        index: id,
                         function: function.clone(),
                         data: data.clone(),
                         message_name: message_name.clone(),

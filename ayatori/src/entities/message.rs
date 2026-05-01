@@ -1,7 +1,6 @@
 use alloc::{format, vec::Vec};
 use core::fmt::{self, Debug};
 
-use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
@@ -272,8 +271,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
 /// If there is a problem with the message that cannot be associated with the specific verifier,
 /// the returned error will contain the ID of the message the information came from.
 /// Then, the user can use whatever measures necessary towards the associated source.
-#[derive(Serialize, Deserialize, PartialOrd, Ord, Hash)]
-#[derive_where::derive_where(Clone, PartialEq, Eq)]
+#[derive_where::derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub struct MessageId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
 
 impl<SP: SessionParameters> MessageId<SP> {
@@ -296,7 +294,7 @@ impl<SP: SessionParameters> Debug for MessageId<SP> {
 }
 
 /// A message to be sent to another party, containing multiple signed values.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct Message<SP: SessionParameters> {
     destination: SP::Verifier,
     values: Vec<SignedValue<SP>>,

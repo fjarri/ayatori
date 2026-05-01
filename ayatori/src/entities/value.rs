@@ -158,7 +158,7 @@ impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdap
     }
 
     fn clone_boxed(&self) -> Box<dyn DynAdapter<F>> {
-        Box::new(DynAdapterHolder::<F, T>(PhantomData))
+        Box::new(Self(PhantomData))
     }
 
     fn debug(&self) -> String {

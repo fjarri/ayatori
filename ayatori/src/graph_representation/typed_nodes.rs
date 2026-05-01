@@ -42,7 +42,7 @@ impl<T> Node<T> {
 
     fn id(&self) -> NodeId {
         // Using the pointer adderss of `Arc` to uniquely identify nodes. A little hacky.
-        Arc::as_ptr(&self.0) as NodeId
+        Arc::as_ptr(&self.0).addr()
     }
 
     fn get_strong_ref(&self) -> Self {
@@ -627,7 +627,7 @@ pub struct ScalarArgument<SP> {
 
 impl<SP: SessionParameters> ShallowClone for ScalarArgument<SP> {
     fn shallow_clone(&self) -> Self {
-        ScalarArgument {
+        Self {
             store_in: self.store_in.clone(),
             name: self.name.clone(),
             phantom: PhantomData,

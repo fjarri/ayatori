@@ -87,7 +87,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
                 self.dependencies()
                     .iter()
                     .map(GeneralizedNode::get_strong_ref)
-                    .map(AnyNode::from),
+                    .map(Self::from),
             ),
         )
     }
@@ -191,7 +191,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             let args = verification_args
                 .values()
                 .map(GeneralizedNode::get_strong_ref)
-                .map(AnyNode::from);
+                .map(Self::from);
             UnorderedIterator::new_with_nodes(args, true)
         } else {
             self.flattened_args_only()
@@ -402,7 +402,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
 
     pub(crate) fn with_substituted_arguments(&self, arguments: &BoundProtocolArgs<SP>) -> Result<Self, RuntimeError> {
         self.mutated_tree(|node| {
-            Ok(if let AnyNode::ScalarArgument(node) = node {
+            Ok(if let Self::ScalarArgument(node) = node {
                 arguments.get(&node.as_ref().name)?.get_strong_ref()
             } else {
                 node

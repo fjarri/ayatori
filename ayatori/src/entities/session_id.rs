@@ -1,6 +1,5 @@
 use core::fmt::{self, Debug};
 
-use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::digest::{self, Digest};
 #[cfg(feature = "dev")]
@@ -9,8 +8,7 @@ use signature::rand_core::CryptoRngCore;
 use crate::traits::SessionParameters;
 
 /// A session identifier shared between the parties.
-#[derive(Serialize, Deserialize, PartialOrd, Ord, Hash)]
-#[derive_where::derive_where(Clone, PartialEq, Eq)]
+#[derive_where::derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub struct SessionId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
 
 /// A session ID.

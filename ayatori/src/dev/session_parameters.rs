@@ -1,3 +1,5 @@
+use core::num::NonZeroUsize;
+
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::{
@@ -32,7 +34,7 @@ impl TestVerifier {
 }
 
 /// A signature produced by [`TestSigner`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TestSignature<D: digest::Digest> {
     signed_by: u8,
     randomness: u64,
@@ -95,7 +97,11 @@ impl digest::Update for TestHasher {
         // A very simple algorithm for testing, just xor the data in buffer-sized chunks.
         for byte in data {
             *self.buffer.get_mut(self.cursor).expect("index within bounds") ^= byte;
-            self.cursor = (self.cursor + 1) % self.buffer.len();
+
+            let buffer_len = NonZeroUsize::new(self.buffer.len()).expect("buffer length is non-zero");
+
+            // `cursor` is maintained `< buffer.len()`, so the addition will not overflow.
+            self.cursor = (self.cursor.wrapping_add(1)) % buffer_len;
         }
     }
 }
@@ -111,7 +117,7 @@ impl digest::OutputSizeUser for TestHasher {
 }
 
 /// An implementation of [`SessionParameters`] using the testing signer/verifier types.
-#[derive(Debug, Clone, Copy)]
+#[derive_where::derive_where(Debug, Clone, Copy)]
 pub struct TestSessionParams<F>(core::marker::PhantomData<fn() -> F>);
 
 impl<F: WireFormat> SessionParameters for TestSessionParams<F> {

@@ -1,7 +1,10 @@
 [package]
 name = "integration-tests"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2024"
+license = "MIT"
+authors = ['Bogdan Opanchuk <bogdan@opanchuk.net>']
+description = "Integration tests"
 
 [dependencies]
 ayatori = { path = "../ayatori", features = ["dev", "tokio"] }
