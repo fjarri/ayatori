@@ -46,7 +46,6 @@ macro_rules! define_function_type_common {
     ($type_name:ident<$SP:ident>, ($($arg_name:ident: $arg_type:ty),+) -> Result<$return_type:ty, $error_type:ty> ) => {
         #[derive_where::derive_where(Clone)]
         pub(crate) struct $type_name<$SP: SessionParameters> {
-            #[allow(clippy::type_complexity)]
             function: Arc<dyn Fn($($arg_type),*) -> Result<$return_type, $error_type> + Send + Sync>,
             name: String,
         }

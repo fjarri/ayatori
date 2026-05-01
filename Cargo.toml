@@ -6,6 +6,11 @@ members = ["ayatori", "book-examples", "integration-tests"]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
 
 # Disabling this due to too much noise.
 # We are not really interested in internal functions being const or not.
@@ -21,9 +26,17 @@ missing_errors_doc = "allow"
 # We have some big methods.
 too_many_lines = "allow"
 
+# Doesn't work. See https://github.com/rust-lang/rust-clippy/issues/13918
+doc_include_without_cfg = "allow"
+
+# Select warning from the `restriction` category.
+alloc_instead_of_core = "warn"
+allow_attributes = "warn"
+arithmetic_side_effects = "warn"
+as_conversions = "warn"
+indexing_slicing = "warn"
 mod_module_files = "warn"
 unwrap_used = "warn"
-indexing_slicing = "warn"
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn" }

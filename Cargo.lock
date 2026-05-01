@@ -12,6 +12,7 @@ dependencies = [
  "impls",
  "itertools",
  "postcard",
+ "rand",
  "rand_chacha",
  "serde",
  "serde-encoded-bytes",
@@ -216,6 +217,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "rand"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+dependencies = [
+ "rand_core",
 ]
 
 [[package]]

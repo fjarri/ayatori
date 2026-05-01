@@ -42,7 +42,7 @@ impl<T> Node<T> {
 
     fn id(&self) -> NodeId {
         // Using the pointer adderss of `Arc` to uniquely identify nodes. A little hacky.
-        Arc::as_ptr(&self.0) as NodeId
+        Arc::as_ptr(&self.0).addr()
     }
 
     fn get_strong_ref(&self) -> Self {

@@ -38,7 +38,7 @@ impl<SP: SessionParameters> Debug for Replacement<SP> {
 }
 
 #[derive_where::derive_where(Clone)]
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 enum ReplacementEnum<SP: SessionParameters> {
     ComputeScalar {
         function: Arc<dyn Fn(Value, &Args<SP>) -> Result<Value, UnattributableError> + Send + Sync>,
