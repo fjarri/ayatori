@@ -123,8 +123,7 @@ impl SenderAttributableError {
 }
 
 /// Additional data (not calculated in the nodes leading to the error) to be attached to the evidence.
-#[derive(Serialize, Deserialize)]
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct AssociatedData<SP: SessionParameters> {
     serialized_value: SerializedValue,
     phantom: PhantomData<fn() -> SP>,
@@ -148,8 +147,8 @@ impl<SP: SessionParameters> AssociatedData<SP> {
     }
 }
 
-#[derive(displaydoc::Display, Clone, Serialize, Deserialize)]
-#[derive_where::derive_where(Debug)]
+#[derive(displaydoc::Display)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 #[displaydoc("Sender error (with secret reveal): {description}")]
 pub(crate) struct SenderErrorWithReveal<SP: SessionParameters> {
     pub(crate) description: String,
@@ -158,13 +157,15 @@ pub(crate) struct SenderErrorWithReveal<SP: SessionParameters> {
 
 /// An error during a mapping element computation that is attributable to the party with the element's ID,
 /// and needs additional data to be revealed and stored in the evidence.
-#[derive(displaydoc::Display, Debug, Clone)]
+#[derive(displaydoc::Display)]
+#[derive_where::derive_where(Debug, Clone)]
 #[displaydoc("{0}")]
 pub struct SenderAttributableErrorWithReveal<SP: SessionParameters>(
     pub(crate) SenderAttributableErrorWithRevealEnum<SP>,
 );
 
-#[derive(displaydoc::Display, Debug, Clone)]
+#[derive(displaydoc::Display)]
+#[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum SenderAttributableErrorWithRevealEnum<SP: SessionParameters> {
     #[displaydoc("{0}")]
     Unattributable(UnattributableError),
@@ -208,8 +209,8 @@ impl<SP: SessionParameters> SenderAttributableErrorWithReveal<SP> {
     }
 }
 
-#[derive(displaydoc::Display, Serialize, Deserialize)]
-#[derive_where::derive_where(Debug, Clone)]
+#[derive(displaydoc::Display)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 #[displaydoc("Third party attributable error: {description}")]
 pub(crate) struct ThirdPartyError<SP: SessionParameters> {
     pub(crate) description: String,
@@ -218,13 +219,13 @@ pub(crate) struct ThirdPartyError<SP: SessionParameters> {
 
 /// An error during a mapping element computation that is attributable to a party with the ID
 /// different from that of the element's.
-#[derive(displaydoc::Display, Debug)]
-#[derive_where::derive_where(Clone)]
+#[derive(displaydoc::Display)]
+#[derive_where::derive_where(Debug, Clone)]
 #[displaydoc("{0}")]
 pub struct ThirdPartyAttributableError<SP: SessionParameters>(pub(crate) ThirdPartyAttributableErrorEnum<SP>);
 
-#[derive(displaydoc::Display, Debug)]
-#[derive_where::derive_where(Clone)]
+#[derive(displaydoc::Display)]
+#[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ThirdPartyAttributableErrorEnum<SP: SessionParameters> {
     #[displaydoc("{0}")]
     Unattributable(UnattributableError),

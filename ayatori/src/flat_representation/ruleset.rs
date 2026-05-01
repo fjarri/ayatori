@@ -243,7 +243,7 @@ pub(crate) enum RulesetState {
     StalledAt(CollectedTag),
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub(crate) struct Ruleset<SP: SessionParameters> {
     output_tag: ComputedScalarTag,
     scalar_rules: Vec<ScalarRule<SP>>,

@@ -18,7 +18,7 @@ use crate::{
 use crate::protocol_author_api::{ComposableProtocol, ExecutableProtocol, call_protocol};
 
 /// Party-specific data available during the build stage of the protocol.
-#[derive(Debug, Clone)]
+#[derive_where::derive_where(Debug, Clone)]
 pub struct PartyBuildData<SP: SessionParameters> {
     id: SP::Verifier,
 }
@@ -98,7 +98,7 @@ impl PublicInputs {
 
 /// A structure containing [`ScalarArgument`] nodes corresponding to the inputs
 /// declared in [`PrivateInputs`] and [`PublicInputs`].
-#[derive(Debug, Default)]
+#[derive_where::derive_where(Debug, Default)]
 pub struct ArgNodes<SP: SessionParameters>(BTreeMap<String, Node<ScalarArgument<SP>>>);
 
 impl<SP: SessionParameters> ArgNodes<SP> {
@@ -121,7 +121,7 @@ impl<SP: SessionParameters> ArgNodes<SP> {
 }
 
 /// A structure used to define inputs to a sub-protocol (see [`call_protocol`]).
-#[derive(Debug, Default)]
+#[derive_where::derive_where(Debug, Default)]
 pub struct ProtocolArgs<SP: SessionParameters>(BTreeMap<String, AnyNode<SP>>);
 
 impl<SP: SessionParameters> ProtocolArgs<SP> {

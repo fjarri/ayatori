@@ -34,7 +34,7 @@ impl TestVerifier {
 }
 
 /// A signature produced by [`TestSigner`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive_where::derive_where(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TestSignature<D: digest::Digest> {
     signed_by: u8,
     randomness: u64,
@@ -117,7 +117,7 @@ impl digest::OutputSizeUser for TestHasher {
 }
 
 /// An implementation of [`SessionParameters`] using the testing signer/verifier types.
-#[derive(Debug, Clone, Copy)]
+#[derive_where::derive_where(Debug, Clone, Copy)]
 pub struct TestSessionParams<F>(core::marker::PhantomData<fn() -> F>);
 
 impl<F: WireFormat> SessionParameters for TestSessionParams<F> {

@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// A container for incoming commands to a session runner.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum MessageIn<SP: SessionParameters> {
     /// An incoming message.
     Message {
@@ -43,7 +43,7 @@ pub enum MessageIn<SP: SessionParameters> {
 }
 
 /// A container for outgoing information from a session runner.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.
     Message(Message<SP>),

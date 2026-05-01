@@ -1,5 +1,4 @@
 use alloc::{format, string::String, sync::Arc, vec};
-use core::fmt::Debug;
 
 use signature::rand_core::CryptoRngCore;
 
@@ -508,7 +507,7 @@ impl<SP: SessionParameters> Task<SP> {
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct TaskResult<SP: SessionParameters>(TaskResultEnum<SP>);
 
 impl<SP: SessionParameters> TaskResult<SP> {
@@ -517,7 +516,7 @@ impl<SP: SessionParameters> TaskResult<SP> {
     }
 }
 
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub(crate) enum TaskResultEnum<SP: SessionParameters> {
     Success,
     Sent {

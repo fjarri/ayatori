@@ -102,7 +102,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 }
 
 /// The result of executing sessions.
-#[derive(Debug)]
+#[derive_where::derive_where(Debug)]
 pub struct ExecutionResult<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     /// The combined reports of finished sessions.
     pub reports: BTreeMap<SP::Verifier, SessionReport<SP, P>>,

@@ -34,8 +34,7 @@ use crate::{
 };
 
 /// A typed message that can be sent to other parties.
-#[derive(Debug)]
-#[derive_where::derive_where(Clone)]
+#[derive_where::derive_where(Debug, Clone)]
 pub struct ProtocolMessage<SP: SessionParameters> {
     name: String,
     serde_adapter: SerdeAdapter<SP::WireFormat>,
