@@ -6,7 +6,7 @@ license = "MIT"
 authors = ['Bogdan Opanchuk <bogdan@opanchuk.net>']
 description = "Graph-based framework for distributed cryptographic protocols"
 repository = "https://github.com/fjarri/ayatori"
-readme = "../README.md"
+readme = "README.md"
 categories = ["cryptography", "no-std"]
 rust-version = "1.91"
 
