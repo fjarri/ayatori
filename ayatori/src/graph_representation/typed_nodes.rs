@@ -627,7 +627,7 @@ pub struct ScalarArgument<SP> {
 
 impl<SP: SessionParameters> ShallowClone for ScalarArgument<SP> {
     fn shallow_clone(&self) -> Self {
-        ScalarArgument {
+        Self {
             store_in: self.store_in.clone(),
             name: self.name.clone(),
             phantom: PhantomData,

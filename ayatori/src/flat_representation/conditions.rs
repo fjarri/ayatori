@@ -1,7 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     string::ToString,
-    vec::Vec,
 };
 use core::fmt::{self, Display};
 
@@ -315,7 +314,7 @@ impl<Id: PartyId> Display for QuorumConditionWithState<Id> {
             "quorum({}, {}/{} (-{}))",
             self.original_condition.tag,
             self.got_ids.len(),
-            self.original_condition.group.ids().collect::<Vec<_>>().len(),
+            self.original_condition.group.ids().count(),
             self.banned_ids.len()
         )
     }

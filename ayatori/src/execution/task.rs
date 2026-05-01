@@ -101,13 +101,13 @@ impl<SP: SessionParameters> ComputeTask<SP> {
             } => {
                 let store_in = ScalarTag::Computed(store_in);
                 match function.call(&args) {
-                    Ok(result) => TaskResult(match result {
-                        Some(value) => TaskResultEnum::ComputedScalar {
+                    Ok(result) => TaskResult(result.map_or_else(
+                        || TaskResultEnum::Success,
+                        |value| TaskResultEnum::ComputedScalar {
                             store_in,
                             result: value,
                         },
-                        None => TaskResultEnum::Success,
-                    }),
+                    )),
                     Err(error) => unattributable_error_to_result(error),
                 }
             }
@@ -333,7 +333,7 @@ impl<SP: SessionParameters> SendTask<SP> {
         let message = Message::new(self.destination.clone(), signed_values);
         let result = TaskResult(TaskResultEnum::Sent {
             store_in: MappingTag::Sent(self.store_in.clone()),
-            destination: self.destination.clone(),
+            destination: self.destination,
         });
         (Some(message), result)
     }
