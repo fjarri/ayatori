@@ -23,7 +23,7 @@ dependencies = [
 
 [[package]]
 name = "book-examples"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "ayatori",
  "rand_chacha",
@@ -143,7 +143,7 @@ checksum = "7a46645bbd70538861a90d0f26c31537cdf1e44aae99a794fb75a664b70951bc"
 
 [[package]]
 name = "integration-tests"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "ayatori",
  "rand_chacha",
