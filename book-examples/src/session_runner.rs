@@ -3,8 +3,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
-    ExecutableProtocol, Session, SessionParameters, SessionReport, SessionState, Task,
-    TaskError, UnattributableError,
+    ExecutableProtocol, ResultExt, Session, SessionParameters, SessionReport,
+    SessionState, TResult, Task, TaskError, UnattributableError,
     tokio::{MessageIn, MessageOut},
 };
 
@@ -15,7 +15,7 @@ pub async fn run_session<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> TResult<SessionReport<SP, P>, UnattributableError>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
@@ -27,7 +27,7 @@ where
         // ANCHOR_END: event_loop
 
         // ANCHOR: task_loop
-        while let Some(task) = session.make_task()? {
+        while let Some(task) = session.make_task().trace()? {
             let task_result = match task {
                 // ANCHOR_END: task_loop
                 // ANCHOR: task_compute
@@ -51,8 +51,12 @@ where
             // ANCHOR: task_result
             match task_result {
                 Ok(()) => {}
-                Err(TaskError::Unattributable(error)) => return Err(error),
-                Err(TaskError::MessageAttributable(error)) => {
+                Err(error) => {
+                    let error = error.narrow_down(|error| match error {
+                        TaskError::Unattributable(error) => Err(error),
+                        TaskError::MessageAttributable(error) => Ok(error),
+                    })?;
+
                     tx.send(MessageOut::Error(error)).await.unwrap();
                 }
             }
@@ -66,7 +70,9 @@ where
             SessionState::InProgress(session) => session,
             // ANCHOR_END: try_finalize_in_progress
             // ANCHOR: try_finalize_reached_output
-            SessionState::ReachedOutput(success) => return Ok(success.finalize()?),
+            SessionState::ReachedOutput(success) => {
+                return success.finalize().trace();
+            }
             // ANCHOR_END: try_finalize_reached_output
             // ANCHOR: try_finalize_stalled
             SessionState::Stalled(stalled) => return Ok(stalled.finalize()),

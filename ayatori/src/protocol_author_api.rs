@@ -7,6 +7,7 @@ pub use crate::{
         SessionId, SignedHash, SignedValue, SpuriousError, ThirdPartyAttributableError, UnattributableError,
         ValueMetadata, VerificationError, VerifiedValue,
     },
+    error::{IntoTraced, ResultExt, TResult, Traced},
     graph_representation::{
         AnyNode, ArgNodes, BroadcastArg, Collect, CollectArg, ComputeMapping, ComputeMappingArg, ComputeMappingArgs,
         ComputeScalar, ComputeScalarArg, ComputeScalarArgs, Dependency, DeserializeAndCheck, DirectMessage,

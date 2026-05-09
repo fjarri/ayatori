@@ -6,6 +6,7 @@ use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest}
 
 use crate::{
     entities::{Erasable, RuntimeError},
+    error::TResult,
     graph_representation::{
         AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, ProtocolSignature, PublicInputs,
     },
@@ -110,5 +111,5 @@ pub trait ComposableProtocol<SP: SessionParameters>: 'static {
         party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Self::OutputNode, RuntimeError>;
+    ) -> TResult<Self::OutputNode, RuntimeError>;
 }

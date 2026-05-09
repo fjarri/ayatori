@@ -9,7 +9,10 @@ use signature::{
 };
 
 use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
-use crate::traits::{SessionParameters, WireFormat};
+use crate::{
+    error::TResult,
+    traits::{SessionParameters, WireFormat},
+};
 
 /// Metadata of a signed value.
 #[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,7 +70,12 @@ fn hash_value_hash_and_metadata<SP: SessionParameters>(
     metadata: &ValueMetadata<SP>,
 ) -> Result<SP::Digest, RuntimeError> {
     Ok(SP::Digest::new_with_prefix(b"SignedValueDigest")
-        .chain_update(<SP::WireFormat as WireFormat>::serialize(metadata)?)
+        .chain_update(<SP::WireFormat as WireFormat>::serialize(metadata).map_err(|err| {
+            RuntimeError::new(format!(
+                "Failed to serialize value metadata for {}: {err}",
+                metadata.full_name()
+            ))
+        })?)
         .chain_update(value_hash.as_ref()))
 }
 
@@ -128,7 +136,7 @@ impl<SP: SessionParameters> SignedValue<SP> {
         let mut typed_rng = Rng(rng);
         let signature = signer
             .try_sign_digest_with_rng(&mut typed_rng, digest)
-            .map_err(|err| RuntimeError::new(format!("Signing failed: {err}")))?;
+            .map_err(|err| RuntimeError::new(format!("Failed to sign value with metadata: {err}")))?;
         Ok(Self {
             signature,
             source: signer.verifying_key(),
@@ -236,7 +244,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
     }
 
     /// Returns `true` if the hash in `other` is equal to the hash of this value.
-    pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> Result<bool, RuntimeError> {
+    pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> TResult<bool, RuntimeError> {
         let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
         Ok(value_hash.as_ref() == other.hash.as_ref())
     }
@@ -253,7 +261,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
 
     /// Turns this into a signed hash (essentially replacing the actual value with its hash,
     /// keeping the metadata intact).
-    pub fn to_signed_hash(&self) -> Result<SignedHash<SP>, RuntimeError> {
+    pub fn to_signed_hash(&self) -> TResult<SignedHash<SP>, RuntimeError> {
         let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
         Ok(SignedHash {
             signature: self.signature.clone(),

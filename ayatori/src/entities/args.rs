@@ -105,6 +105,7 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
     pub(crate) fn verified_value(&self) -> &VerifiedValue<SP> {
         self.value
             .downcast_ref::<VerifiedValue<SP>>()
+            // TODO: it wasn't really checked
             .expect("the value type was already checked in the constructor")
     }
 }
@@ -139,7 +140,7 @@ impl<SP: SessionParameters> Args<SP> {
     pub(crate) fn get_value(&self, name: &str) -> Result<&Value, RuntimeError> {
         self.values.get(name).ok_or_else(|| {
             RuntimeError::new(format!(
-                "Value {name} is not present in the Args (have: {})",
+                "Attempted to get a value `{name}` from Args (have: {})",
                 self.values.keys().join(", ")
             ))
         })
@@ -150,7 +151,9 @@ impl<SP: SessionParameters> Args<SP> {
     ///
     /// Fails if `name` was not present in the argument list, or the type of the stored value is not `T`.
     pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, RuntimeError> {
-        self.get_value(name)?.downcast_ref::<T>()
+        self.get_value(name)?
+            .downcast_ref::<T>()
+            .map_err(|err| RuntimeError::new(format!("Failed to downcast the value `{name}`: {err}")))
     }
 
     /// Returns the value from the storage slot that was declared as the argument for this computation
@@ -163,7 +166,16 @@ impl<SP: SessionParameters> Args<SP> {
         let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name)?;
         value_map
             .iter()
-            .map(|(id, value)| value.downcast_ref::<T>().map(|value_ref| (id, value_ref)))
+            .map(|(id, value)| {
+                value
+                    .downcast_ref::<T>()
+                    .map(|value_ref| (id, value_ref))
+                    .map_err(|err| {
+                        RuntimeError::new(format!(
+                            "Failed to downcast the element {id:?} of the mapping `{name}`: {err}"
+                        ))
+                    })
+            })
             .collect()
     }
 
@@ -178,12 +190,29 @@ impl<SP: SessionParameters> Args<SP> {
         name: &str,
     ) -> Result<OneOrBoth<&L, &R>, RuntimeError> {
         Ok(match self.get::<OneOrBoth<Value, Value>>(name)? {
-            OneOrBoth::Left(left) => OneOrBoth::Left(left.downcast_ref::<L>()?),
-            OneOrBoth::Right(right) => OneOrBoth::Right(right.downcast_ref::<R>()?),
-            OneOrBoth::Both { left, right } => OneOrBoth::Both {
-                left: left.downcast_ref::<L>()?,
-                right: right.downcast_ref::<R>()?,
-            },
+            OneOrBoth::Left(left) => OneOrBoth::Left(left.downcast_ref::<L>().map_err(|err| {
+                RuntimeError::new(format!(
+                    "Failed to downcast the left variant of the merged value `{name}`: {err}"
+                ))
+            })?),
+            OneOrBoth::Right(right) => OneOrBoth::Right(right.downcast_ref::<R>().map_err(|err| {
+                RuntimeError::new(format!(
+                    "Failed to downcast the right variant of the merged value `{name}`: {err}"
+                ))
+            })?),
+            OneOrBoth::Both { left, right } => {
+                let left = left.downcast_ref::<L>().map_err(|err| {
+                    RuntimeError::new(format!(
+                        "Failed to downcast the left variant of the merged value `{name}`: {err}"
+                    ))
+                })?;
+                let right = right.downcast_ref::<R>().map_err(|err| {
+                    RuntimeError::new(format!(
+                        "Failed to downcast the right variant of the merged value `{name}`: {err}"
+                    ))
+                })?;
+                OneOrBoth::Both { left, right }
+            }
         })
     }
 }

@@ -27,7 +27,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
-    ) -> Result<Self::OutputNode, RuntimeError> {
+    ) -> TResult<Self::OutputNode, RuntimeError> {
         // ANCHOR_END: composable-build
 
         // ANCHOR: build-inputs
@@ -40,7 +40,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         let my_b = compute_scalar_with_rng(
             "my_b",
             |rng, args| {
-                let x = args.get::<u32>("x")?;
+                let x = args.get::<u32>("x").trace()?;
                 Ok(rng.next_u32() % x)
             },
             &[("x", x.into())],
@@ -51,7 +51,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         let my_r = compute_scalar_with_rng(
             "my_r",
             |rng, args| {
-                let y = args.get::<u32>("y")?;
+                let y = args.get::<u32>("y").trace()?;
                 Ok(rng.next_u32() % y)
             },
             &[("y", y.into())],
@@ -62,8 +62,8 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         let my_c = compute_scalar(
             "my_c",
             |args| {
-                let b = args.get::<u32>("b")?;
-                let r = args.get::<u32>("r")?;
+                let b = args.get::<u32>("b").trace()?;
+                let r = args.get::<u32>("r").trace()?;
                 Ok(b + r)
             },
             &[("b", (&my_b).into()), ("r", (&my_r).into())],
@@ -101,13 +101,13 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
                 if id == args.my_id() {
                     return Ok(());
                 }
-                let b = args.get::<u32>("b")?;
-                let r = args.get::<u32>("r")?;
-                let c = args.get::<u32>("c")?;
+                let b = args.get::<u32>("b").trace()?;
+                let r = args.get::<u32>("r").trace()?;
+                let c = args.get::<u32>("c").trace()?;
                 if b + r == *c {
                     Ok(())
                 } else {
-                    Err(SenderAttributableError::new("b + r != c"))
+                    Err(SenderAttributableError::new("b + r != c")).into_traced()
                 }
             },
             &[("c", (&c).into()), ("b", (&b).into()), ("r", (&r).into())],
@@ -122,8 +122,8 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         let output = compute_scalar(
             "output",
             |args| {
-                let bs = args.get_map::<u32>("b")?;
-                let x = args.get::<u32>("x")?;
+                let bs = args.get_map::<u32>("b").trace()?;
+                let x = args.get::<u32>("x").trace()?;
                 Ok(bs.values().copied().sum::<u32>() % x)
             },
             &[("b", (&all_b).into()), ("x", x.into())],

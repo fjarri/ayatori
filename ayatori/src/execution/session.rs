@@ -1,7 +1,7 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
-    string::String,
+    string::{ToString, String},
     sync::Arc,
     vec::Vec,
 };
@@ -26,6 +26,7 @@ use crate::{
         FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
         ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
+    error::{Traced, IntoTraced, ResultExt, TResult},
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
@@ -60,7 +61,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     phantom: PhantomData<fn() -> P>,
 }
 
-fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> Result<OutputNode<SP>, RuntimeError>
+fn make_tree<SP, P>(verifier: &SP::Verifier, shared_data: &P::SharedData) -> TResult<OutputNode<SP>, RuntimeError>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
@@ -84,7 +85,7 @@ where
         output_node: &OutputNode<SP>,
         private_inputs: PrivateInputs,
         shared_data: &P::SharedData,
-    ) -> Result<Self, RuntimeError> {
+    ) -> TResult<Self, RuntimeError> {
         let participants = P::all_participants(shared_data);
         let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
@@ -117,7 +118,7 @@ where
         Ok(session)
     }
 
-    fn fill_inputs(&mut self, public_inputs: PublicInputs, private_inputs: PrivateInputs) -> Result<(), RuntimeError> {
+    fn fill_inputs(&mut self, public_inputs: PublicInputs, private_inputs: PrivateInputs) -> TResult<(), RuntimeError> {
         let arguments = self.ruleset.arguments().clone();
 
         let public_values = public_inputs.into_inner();
@@ -131,7 +132,8 @@ where
             return Err(RuntimeError::new(format!(
                 "Intersecting names in public and private arguments: {}",
                 intersection.join(", ")
-            )));
+            )))
+            .into_traced();
         }
 
         let arguments_given = public_names.union(&private_names).copied().collect::<BTreeSet<_>>();
@@ -143,7 +145,8 @@ where
             let missing_args = arguments_required.difference(&arguments_given).join(", ");
             return Err(RuntimeError::new(format!(
                 "Some arguments required by the graph are not given: {missing_args}",
-            )));
+            )))
+            .into_traced();
         }
 
         for (name, value) in public_values {
@@ -167,7 +170,7 @@ where
         signer: SP::Signer,
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
-    ) -> Result<Self, RuntimeError> {
+    ) -> TResult<Self, RuntimeError> {
         let verifier = signer.verifying_key();
         let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
         let private_inputs = P::make_private_inputs(private_data);
@@ -181,7 +184,7 @@ where
         guilty_party: &SP::Verifier,
         shared_data: &P::SharedData,
         associated_data: Option<&AssociatedData<SP>>,
-    ) -> Result<Self, RuntimeError> {
+    ) -> TResult<Self, RuntimeError> {
         let output_node = AnyNode::from(make_tree::<SP, P>(reported_by, shared_data)?).get_reproduction_subtree(
             subtree_root,
             guilty_party,
@@ -198,7 +201,7 @@ where
         private_data: &P::PrivateData,
         shared_data: &P::SharedData,
         replacements: &[&Replacement<SP>],
-    ) -> Result<Self, RuntimeError> {
+    ) -> TResult<Self, RuntimeError> {
         let verifier = signer.verifying_key();
         let mut output_node = make_tree::<SP, P>(&verifier, shared_data)?;
         for replacement in replacements {
@@ -213,13 +216,13 @@ where
         &self.verifier
     }
 
-    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), RuntimeError> {
+    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> TResult<(), RuntimeError> {
         self.storage.set_scalar(store_in, value)?;
         self.ruleset.update_with_scalar_ready(store_in);
         Ok(())
     }
 
-    fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), RuntimeError> {
+    fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> TResult<(), RuntimeError> {
         self.storage.set_elem(store_in, id, value)?;
         self.ruleset.update_with_element_ready(store_in, id);
         Ok(())
@@ -252,17 +255,17 @@ where
         }
     }
 
-    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
+    pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> TResult<T, RuntimeError> {
         let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
-        value.downcast::<T>()
+        value.downcast::<T>().into_traced()
     }
 
-    pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
+    pub(crate) fn finalize_with_evidence_verdict(self) -> TResult<EvidenceVerdict, RuntimeError> {
         let verdict = self.get_output::<EvidenceVerdict>(self.ruleset.output_tag())?;
         Ok(verdict)
     }
 
-    fn finalize_with_success(self) -> Result<SessionReport<SP, P>, RuntimeError> {
+    fn finalize_with_success(self) -> TResult<SessionReport<SP, P>, RuntimeError> {
         let result = self.get_output::<P::Output>(self.ruleset.output_tag())?;
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
@@ -301,7 +304,7 @@ where
     /// Attempts to make a task to execute.
     ///
     /// The returned task may be offloaded to a thread pool.
-    pub fn make_task(&mut self) -> Result<Option<Task<SP>>, RuntimeError> {
+    pub fn make_task(&mut self) -> TResult<Option<Task<SP>>, RuntimeError> {
         if let Some(task) = self.preprocessing_tasks.pop() {
             return Ok(Some(Task::preprocess_message(task)));
         }
@@ -431,17 +434,17 @@ where
             TaskResultEnum::Success => {}
             TaskResultEnum::UnattributableError { error } => return Err(TaskError::Unattributable(error)),
             TaskResultEnum::Sent { store_in, destination } => {
-                self.add_element(&store_in, &destination, Value::new(()))?;
+                self.add_element(&store_in, &destination, Value::new(())).trace()?;
             }
             TaskResultEnum::ComputedScalar { store_in, result } => {
-                self.add_scalar(&store_in, result)?;
+                self.add_scalar(&store_in, result).trace()?;
             }
             TaskResultEnum::ComputedMappingElement {
                 store_in,
                 source,
                 result,
             } => {
-                self.add_element(&store_in, &source, result)?;
+                self.add_element(&store_in, &source, result).trace()?;
             }
             TaskResultEnum::SenderError {
                 store_in,
@@ -453,11 +456,14 @@ where
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self.storage.get_elem(
-                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &guilty_party,
-                        )?;
-                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        let value = self
+                            .storage
+                            .get_elem(
+                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &guilty_party,
+                            )
+                            .trace()?;
+                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>().into_traced()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
                     let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
@@ -479,11 +485,14 @@ where
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self.storage.get_elem(
-                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &guilty_party,
-                        )?;
-                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        let value = self
+                            .storage
+                            .get_elem(
+                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &guilty_party,
+                            )
+                            .trace()?;
+                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>().trace()?.clone().unverify();
                         signed_values.push(signed_value);
                     }
                     let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
@@ -510,8 +519,8 @@ where
                 value,
             } => {
                 if let Ok(existing_value) = self.storage.get_elem(&store_in, &source) {
-                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
-                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>().into_traced()?;
+                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>().into_traced()?;
 
                     // Both values are signed, contain the same named value, but are different.
                     // This is a provable failure.
@@ -538,10 +547,11 @@ where
                             first: typed_existing_value.message_id().clone(),
                             second: typed_existing_value.message_id().clone(),
                         }),
-                    ));
+                    ))
+                    .into_traced();
                 }
 
-                self.add_element(&store_in, &source, value)?;
+                self.add_element(&store_in, &source, value).trace()?;
             }
             TaskResultEnum::MessageError {
                 message_id,
@@ -552,7 +562,8 @@ where
                         message_id,
                         description,
                     }),
-                ));
+                ))
+                .into_traced();
             }
         }
         Ok(())
@@ -570,11 +581,11 @@ where
 {
     /// Destroys the session and returns the report containing the output
     /// and recorded failures of remote parties (if any).
-    pub fn finalize(self) -> Result<SessionReport<SP, P>, RuntimeError> {
+    pub fn finalize(self) -> TResult<SessionReport<SP, P>, RuntimeError> {
         self.0.finalize_with_success()
     }
 
-    pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
+    pub(crate) fn finalize_with_evidence_verdict(self) -> TResult<EvidenceVerdict, RuntimeError> {
         self.0.finalize_with_evidence_verdict()
     }
 
@@ -657,6 +668,18 @@ pub enum TaskError<SP: SessionParameters> {
 impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
     fn from(source: RuntimeError) -> Self {
         Self::Unattributable(source.into())
+    }
+}
+
+impl<SP: SessionParameters> From<Traced<RuntimeError>> for TaskError<SP> {
+    fn from(source: Traced<RuntimeError>) -> Self {
+        Self::Unattributable(UnattributableError::runtime(source.to_string()))
+    }
+}
+
+impl<SP: SessionParameters> From<UnattributableError> for TaskError<SP> {
+    fn from(source: UnattributableError) -> Self {
+        Self::Unattributable(source)
     }
 }
 

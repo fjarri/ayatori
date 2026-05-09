@@ -2,6 +2,7 @@
 
 pub use crate::{
     entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, UnattributableError},
+    error::{IntoTraced, ResultExt, TResult, Traced},
     execution::{
         DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError, ReachedOutputSession, Session,
         SessionReport, SessionState, StalledSession, Task, TaskError,

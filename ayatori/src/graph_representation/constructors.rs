@@ -30,6 +30,7 @@ use crate::{
         UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
         UnattributableScalarFunctionWithRng, Value,
     },
+    error::TResult,
     traits::{ComposableProtocol, SessionParameters},
 };
 
@@ -371,7 +372,10 @@ fn default_serialize_and_sign<SP: SessionParameters>(
     destination: &SP::Verifier,
     args: &SerializeArgs<SP>,
 ) -> Result<Value, RuntimeError> {
-    let serialized_value = args.serde_adapter().serialize(args.value())?;
+    let serialized_value = args
+        .serde_adapter()
+        .serialize(args.value())
+        .map_err(|err| RuntimeError::new(format!("Failed to serialize message `{}`: {err}", args.message_name())))?;
     let signed_value = SignedValue::<SP>::new(
         rng,
         args.signer(),
@@ -530,7 +534,7 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
     party_build_data: &PartyBuildData<SP>,
     build_data: &P::BuildData,
     args: ProtocolArgs<SP>,
-) -> Result<P::OutputNode, RuntimeError> {
+) -> TResult<P::OutputNode, RuntimeError> {
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
     let output = P::build(party_build_data, build_data, arg_nodes)?;

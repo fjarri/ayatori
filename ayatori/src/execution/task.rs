@@ -15,6 +15,7 @@ use crate::{
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
         VerificationError,
     },
+    error::{IntoTraced, ResultExt, TResult, Traced},
     flat_representation::OnError,
     traits::SessionParameters,
 };
@@ -72,8 +73,13 @@ enum ComputeTaskEnum<SP: SessionParameters> {
     },
 }
 
-fn unattributable_error_to_result<SP: SessionParameters>(error: impl Into<UnattributableError>) -> TaskResult<SP> {
-    TaskResult(TaskResultEnum::UnattributableError { error: error.into() })
+fn unattributable_error_to_result<SP: SessionParameters, E>(error: E) -> TaskResult<SP>
+where
+    UnattributableError: From<E>,
+{
+    TaskResult(TaskResultEnum::UnattributableError {
+        error: Traced::from(UnattributableError::from(error)),
+    })
 }
 
 #[derive_where::derive_where(Debug)]
@@ -235,7 +241,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
             }
             ComputeTaskEnum::PreprocessMessage { task } => match task.execute() {
                 Ok(result) => result,
-                Err(error) => unattributable_error_to_result(error),
+                Err(error) => TaskResult(TaskResultEnum::UnattributableError { error: error.trace() }),
             },
         }
     }
@@ -533,7 +539,7 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
         result: Value,
     },
     UnattributableError {
-        error: UnattributableError,
+        error: Traced<UnattributableError>,
     },
     SenderError {
         store_in: MappingTag,
@@ -583,7 +589,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         }
     }
 
-    pub fn execute(self) -> Result<TaskResult<SP>, RuntimeError> {
+    pub fn execute(self) -> TResult<TaskResult<SP>, RuntimeError> {
         // Before storing the value in the database, we check for the failures that are unattributable at this level.
         // In case of a failure all we can do is report the message ID and let the user deal with it
         // if their transport protocol allows it.
@@ -630,7 +636,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         // Verify the value signature.
         let verified_value = match self.signed_value.verify(&self.message_id) {
             Ok(value) => value,
-            Err(VerificationError::Runtime(error)) => return Err(error),
+            Err(VerificationError::Runtime(error)) => return Err(error).into_traced().trace(),
             Err(VerificationError::SignatureMismatch) => {
                 return Ok(TaskResult(TaskResultEnum::MessageError {
                     message_id: self.message_id.clone(),

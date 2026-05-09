@@ -10,39 +10,39 @@ pub struct TestProtocol;
 fn sample_value<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
     _args: &Args<SP>,
-) -> Result<u64, UnattributableError> {
+) -> TResult<u64, UnattributableError> {
     Ok(u64::from(rng.next_u32()))
 }
 
 fn sample_nonce<SP: SessionParameters>(
     rng: &mut dyn CryptoRngCore,
     _args: &Args<SP>,
-) -> Result<u64, UnattributableError> {
+) -> TResult<u64, UnattributableError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn commit_to_value<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, UnattributableError> {
-    let b = args.get::<u64>("b")?;
-    let r = args.get::<u64>("r")?;
+fn commit_to_value<SP: SessionParameters>(args: &Args<SP>) -> TResult<u64, UnattributableError> {
+    let b = args.get::<u64>("b").trace()?;
+    let r = args.get::<u64>("r").trace()?;
     Ok(b + r)
 }
 
 fn verify_commitment<SP: SessionParameters>(
     _id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<(), SenderAttributableError> {
-    let b = args.get::<u64>("b")?;
-    let r = args.get::<u64>("r")?;
-    let c = args.get::<u64>("c")?;
+) -> TResult<(), SenderAttributableError> {
+    let b = args.get::<u64>("b").trace()?;
+    let r = args.get::<u64>("r").trace()?;
+    let c = args.get::<u64>("c").trace()?;
     if b + r == *c {
         Ok(())
     } else {
-        Err(SenderAttributableError::new("b + r != c"))
+        Err(SenderAttributableError::new("b + r != c").into())
     }
 }
 
-fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, UnattributableError> {
-    let bs = args.get_map::<u64>("b")?;
+fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> TResult<u64, UnattributableError> {
+    let bs = args.get_map::<u64>("b").trace()?;
     Ok(bs.values().copied().sum())
 }
 
@@ -80,7 +80,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         _party_build_data: &PartyBuildData<SP>,
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
-    ) -> Result<Self::OutputNode, RuntimeError> {
+    ) -> TResult<Self::OutputNode, RuntimeError> {
         let message_b = ProtocolMessage::new::<u64>("b");
         let message_r = ProtocolMessage::new::<u64>("r");
         let message_c = ProtocolMessage::new::<u64>("c");

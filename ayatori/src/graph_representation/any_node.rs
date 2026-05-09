@@ -23,6 +23,7 @@ use crate::{
         ScalarFunction, ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum, SimpleMappingFunction,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
+    error::{IntoTraced, ResultExt, TResult},
     traits::SessionParameters,
 };
 
@@ -120,7 +121,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         }
     }
 
-    fn with_replacements(self, replacements: &BTreeMap<NodeId, Self>) -> Result<Self, RuntimeError> {
+    fn with_replacements(self, replacements: &BTreeMap<NodeId, Self>) -> TResult<Self, RuntimeError> {
         Ok(match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.with_replacements(replacements)?),
             Self::Collect(node) => Self::Collect(node.with_replacements(replacements)?),
@@ -282,7 +283,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         tag: &MappingTag,
         guilty_party: &SP::Verifier,
         associated_data: Option<&AssociatedData<SP>>,
-    ) -> Result<OutputNode<SP>, RuntimeError> {
+    ) -> TResult<OutputNode<SP>, RuntimeError> {
         let node = self
             .find_subnode(AnyTagRef::Mapping(tag.as_ref()))
             .ok_or_else(|| RuntimeError::new(format!("Node {tag} was not found")))?;
@@ -302,7 +303,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
                 kind: ComputeMappingKind::Simple {
                     function: SimpleMappingFunction::Unattributable(UnattributableMappingFunction::new_with_name(
                         "<associated_verification>",
-                        move |id, args| Ok(Value::new(verification.call(id, args, &associated_data)?)),
+                        move |id, args| Ok(Value::new(verification.call(id, args, &associated_data).trace()?)),
                     )),
                 },
                 args: args_to_owned(verification_args),
@@ -322,12 +323,14 @@ impl<SP: SessionParameters> AnyNode<SP> {
                         move |id, args| {
                             match function.call(id, args) {
                                 Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
-                                    Err(error)
-                                }
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
-                                    Ok(EvidenceVerdict::valid())
-                                }
+                                Err(error) => error.narrow_down(|error| match error {
+                                    SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error)) => {
+                                        Err(error)
+                                    }
+                                    SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. }) => {
+                                        Ok(EvidenceVerdict::valid())
+                                    }
+                                }),
                             }
                             .map(Value::new)
                         },
@@ -337,7 +340,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
                 dependencies: Vec::new(),
             }))
         } else {
-            return Err(RuntimeError::new("Unexpected node type"));
+            return Err(RuntimeError::new("Unexpected node type")).into_traced();
         };
 
         let node =
@@ -355,7 +358,8 @@ impl<SP: SessionParameters> AnyNode<SP> {
         let AnyTagRef::Scalar(ScalarTagRef::Computed(original_output_tag)) = self.store_in() else {
             return Err(RuntimeError::new(
                 "Assumption: we only get the reproduction subtree from a valid root node",
-            ));
+            ))
+            .into_traced();
         };
         let arg_name = "value";
         let guilty_party = guilty_party.clone();
@@ -364,10 +368,12 @@ impl<SP: SessionParameters> AnyNode<SP> {
             function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
                 "<evidence_verification_output>",
                 move |args| {
-                    let map = args.get_map::<EvidenceVerdict>(arg_name)?;
+                    let map = args.get_map::<EvidenceVerdict>(arg_name).trace()?;
                     let verdict: &EvidenceVerdict = map
                         .get(&guilty_party)
-                        .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))?;
+                        .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))
+                        .into_traced()
+                        .trace()?;
                     Ok(Value::new(verdict.clone()))
                 },
             )),
@@ -378,7 +384,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         Ok(wrapped)
     }
 
-    fn mutated_tree(&self, f: impl Fn(Self) -> Result<Self, RuntimeError>) -> Result<Self, RuntimeError> {
+    fn mutated_tree(&self, f: impl Fn(Self) -> TResult<Self, RuntimeError>) -> TResult<Self, RuntimeError> {
         let mut replacement_nodes = BTreeMap::new();
 
         // The root node will be processed separately
@@ -400,7 +406,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
             .expect("the closure is infallible")
     }
 
-    pub(crate) fn with_substituted_arguments(&self, arguments: &BoundProtocolArgs<SP>) -> Result<Self, RuntimeError> {
+    pub(crate) fn with_substituted_arguments(&self, arguments: &BoundProtocolArgs<SP>) -> TResult<Self, RuntimeError> {
         self.mutated_tree(|node| {
             Ok(if let Self::ScalarArgument(node) = node {
                 arguments.get(&node.as_ref().name)?.get_strong_ref()

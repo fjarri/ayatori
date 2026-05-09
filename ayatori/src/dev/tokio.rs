@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 use super::run_sync::ExecutionResult;
 use crate::{
     entities::{Message, MessageId, RuntimeError, UnattributableError},
+    error::{IntoTraced, ResultExt, TResult},
     execution::{
         Session, SessionReport,
         tokio::{MessageIn, MessageOut, SessionRunner},
@@ -21,7 +22,7 @@ async fn message_dispatcher<SP>(
     rng: impl CryptoRngCore,
     txs: BTreeMap<SP::Verifier, mpsc::Sender<MessageIn<SP>>>,
     rx: mpsc::Receiver<MessageOut<SP>>,
-) -> Result<(), RuntimeError>
+) -> TResult<(), RuntimeError>
 where
     SP: SessionParameters,
 {
@@ -46,7 +47,7 @@ where
         for msg_out in messages_out {
             let message = match msg_out {
                 MessageOut::Message(message) => message,
-                MessageOut::Error(error) => return Err(RuntimeError::new(format!("{error}"))),
+                MessageOut::Error(error) => return Err(RuntimeError::new(format!("{error}"))).into_traced(),
             };
 
             messages.push(message);
@@ -96,7 +97,7 @@ where
             CancellationToken,
             Session<SP, P>,
         ) -> Fut,
-    Fut: Send + Future<Output = Result<SessionReport<SP, P>, UnattributableError>> + 'a,
+    Fut: Send + Future<Output = TResult<SessionReport<SP, P>, UnattributableError>> + 'a,
 {
     type Fut = Fut;
     fn call(
@@ -116,7 +117,7 @@ pub async fn run_sessions_async<SP, P, F, R>(
     rng: &mut R,
     sessions: Vec<Session<SP, P>>,
     session_runner: F,
-) -> Result<ExecutionResult<SP, P>, UnattributableError>
+) -> TResult<ExecutionResult<SP, P>, UnattributableError>
 where
     R: 'static + CryptoRngCore + Clone + Send,
     SP: SessionParameters,
@@ -156,7 +157,7 @@ where
             let node_task = async move { session_runner.call(&mut rng, &tx, &mut rx, cancellation, session).await };
             Ok((id, tokio::spawn(node_task)))
         })
-        .collect::<Result<BTreeMap<_, _>, UnattributableError>>()?;
+        .collect::<TResult<BTreeMap<_, _>, UnattributableError>>()?;
 
     // Drop the last copy of the dispatcher's incoming channel so that it can finish.
     drop(dispatcher_tx);
@@ -167,13 +168,16 @@ where
             id.clone(),
             handle
                 .await
-                .map_err(|err| RuntimeError::new(format!("Could not join the task of {id:?}: {err}")))??,
+                .map_err(|err| RuntimeError::new(format!("Could not join the task of {id:?}: {err}")).into())
+                .into_traced()??,
         );
     }
 
     dispatcher
         .await
-        .map_err(|err| RuntimeError::new(format!("Could not join the message dispatcher task: {err}")))??;
+        .map_err(|err| RuntimeError::new(format!("Could not join the message dispatcher task: {err}")).into())
+        .into_traced()?
+        .trace()?;
 
     Ok(ExecutionResult { reports })
 }

@@ -4,6 +4,7 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{Message, MessageId, UnattributableError},
+    error::{IntoTraced, ResultExt, TResult},
     execution::{Session, SessionReport, SessionState, Task, TaskError},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -12,7 +13,7 @@ use crate::{
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
-) -> Result<ExecutionResult<SP, P>, UnattributableError> {
+) -> TResult<ExecutionResult<SP, P>, UnattributableError> {
     let mut sessions = sessions;
     let mut messages = sessions
         .iter()
@@ -39,7 +40,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 session.add_message(&message_id, message);
             }
 
-            while let Some(task) = session.make_task()? {
+            while let Some(task) = session.make_task().trace()? {
                 let task_result = match task {
                     Task::Compute(task) => session.add_result(task.compute()),
                     Task::ComputeWithRng(task) => session.add_result(task.compute(rng)),
@@ -61,15 +62,12 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 };
                 task_processed = true;
 
-                match task_result {
-                    Ok(()) => {}
-                    Err(TaskError::Unattributable(error)) => return Err(error),
-                    Err(TaskError::MessageAttributable(error)) => {
-                        return Err(UnattributableError::runtime(format!(
-                            "Message-attributable error: {error:?}"
-                        )));
+                task_result.trace_and_map(|error| match error {
+                    TaskError::Unattributable(error) => error,
+                    TaskError::MessageAttributable(error) => {
+                        UnattributableError::runtime(format!("Message-attributable error: {error:?}"))
                     }
-                }
+                })?;
             }
 
             match session.try_finalize() {
@@ -82,13 +80,14 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         if !task_processed {
             return Err(UnattributableError::runtime(
                 "Sessions are stuck: there are still active sessions, but no tasks are being created",
-            ));
+            ))
+            .into_traced();
         }
     }
 
     for session in finished_with_success {
         let id = session.as_ref().verifier().clone();
-        let report = session.finalize()?;
+        let report = session.finalize().trace()?;
         reports.insert(id.clone(), report);
     }
 

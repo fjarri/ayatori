@@ -18,6 +18,7 @@ use super::{
 };
 use crate::{
     entities::{Message, MessageId, RuntimeError, UnattributableError},
+    error::{IntoTraced, ResultExt, TResult},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -56,7 +57,7 @@ pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>, R:
     'static + Send + Sync
 {
     /// The returned future.
-    type Fut: Future<Output = Result<SessionReport<SP, P>, UnattributableError>> + 'a + Send;
+    type Fut: Future<Output = TResult<SessionReport<SP, P>, UnattributableError>> + 'a + Send;
 
     /// Calls the function returning the future.
     fn call(
@@ -77,14 +78,14 @@ pub async fn run_session<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> TResult<SessionReport<SP, P>, UnattributableError>
 where
     SP: SessionParameters,
     SP::Signer: Sync,
     P: ExecutableProtocol<SP>,
 {
     loop {
-        while let Some(task) = session.make_task()? {
+        while let Some(task) = session.make_task().trace()? {
             let task_result = match task {
                 Task::Compute(task) => {
                     let result = task.compute();
@@ -97,9 +98,13 @@ where
                 Task::Send(task) => {
                     let (message, result) = task.compute();
                     if let Some(message) = message {
-                        tx.send(MessageOut::Message(message)).await.map_err(|err| {
-                            RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                        })?;
+                        tx.send(MessageOut::Message(message))
+                            .await
+                            .map_err(|err| {
+                                RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                            })
+                            .into_traced()
+                            .trace()?;
                     }
                     session.add_result(result)
                 }
@@ -107,25 +112,33 @@ where
 
             match task_result {
                 Ok(()) => {}
-                Err(TaskError::Unattributable(error)) => return Err(error),
-                Err(TaskError::MessageAttributable(error)) => {
-                    tx.send(MessageOut::Error(error)).await.map_err(|err| {
-                        RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                Err(error) => {
+                    let error = error.narrow_down(|error| match error {
+                        TaskError::Unattributable(error) => Err(error),
+                        TaskError::MessageAttributable(error) => Ok(error),
                     })?;
+
+                    tx.send(MessageOut::Error(error))
+                        .await
+                        .map_err(|err| {
+                            RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                        })
+                        .into_traced()
+                        .trace()?;
                 }
             }
         }
 
         session = match session.try_finalize() {
             SessionState::InProgress(session) => session,
-            SessionState::ReachedOutput(success) => return Ok(success.finalize()?),
+            SessionState::ReachedOutput(success) => return success.finalize().trace(),
             SessionState::Stalled(stalled) => return Ok(stalled.finalize()),
         };
 
         let message_in = tokio::select! {
             message_in = rx.recv() => message_in.ok_or_else(|| {
                 RuntimeError::new("Failed to pop a message from the input channel")
-            })?,
+            }).into_traced().trace()?,
             () = cancellation.cancelled() => return Ok(session.terminate()),
         };
 
@@ -136,7 +149,7 @@ where
     }
 }
 
-struct TaskScope<SP: SessionParameters>(JoinSet<Result<TaskResult<SP>, RuntimeError>>);
+struct TaskScope<SP: SessionParameters>(JoinSet<TResult<TaskResult<SP>, RuntimeError>>);
 
 impl<SP: SessionParameters> TaskScope<SP> {
     fn new() -> Self {
@@ -145,22 +158,22 @@ impl<SP: SessionParameters> TaskScope<SP> {
 
     fn spawn<F>(&mut self, task: F)
     where
-        F: Future<Output = Result<TaskResult<SP>, RuntimeError>> + Send + 'static,
+        F: Future<Output = TResult<TaskResult<SP>, RuntimeError>> + Send + 'static,
     {
         self.0.spawn(task);
     }
 
     fn spawn_blocking<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Result<TaskResult<SP>, RuntimeError> + Send + 'static,
+        F: FnOnce() -> TResult<TaskResult<SP>, RuntimeError> + Send + 'static,
     {
         self.0.spawn_blocking(f);
     }
 
-    async fn join_next(&mut self) -> Option<Result<TaskResult<SP>, RuntimeError>> {
+    async fn join_next(&mut self) -> Option<TResult<TaskResult<SP>, RuntimeError>> {
         self.0.join_next().await.map(|join_result| match join_result {
             Ok(result) => result,
-            Err(err) => Err(RuntimeError::new(format!("Failed to join the task: {err}"))),
+            Err(err) => Err(RuntimeError::new(format!("Failed to join the task: {err}"))).into_traced(),
         })
     }
 
@@ -169,7 +182,7 @@ impl<SP: SessionParameters> TaskScope<SP> {
     }
 
     // Aborts all tasks, waits for them to finish, and if there were errors in the results, returns them.
-    async fn shutdown(&mut self) -> Result<(), RuntimeError> {
+    async fn shutdown(&mut self) -> TResult<(), RuntimeError> {
         self.0.abort_all();
         let mut errors = Vec::new();
         while let Some(result) = self.0.join_next().await {
@@ -179,7 +192,7 @@ impl<SP: SessionParameters> TaskScope<SP> {
                 // Skip the expected errors due to cancellation, but report all the rest.
                 Err(error) => {
                     if !error.is_cancelled() {
-                        errors.push(RuntimeError::new(format!("Unexpected JoinError: {error}")));
+                        errors.push(RuntimeError::new(format!("Unexpected JoinError: {error}")).into());
                     }
                 }
             }
@@ -192,6 +205,7 @@ impl<SP: SessionParameters> TaskScope<SP> {
                 "Errors during task shutdown: {}",
                 errors.iter().map(ToString::to_string).join(", ")
             )))
+            .into_traced()
         }
     }
 }
@@ -207,14 +221,14 @@ async fn par_run_session_inner<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> TResult<SessionReport<SP, P>, UnattributableError>
 where
     SP: SessionParameters,
     SP::Signer: Send + Sync,
     P: ExecutableProtocol<SP>,
 {
     loop {
-        while let Some(task) = session.make_task()? {
+        while let Some(task) = session.make_task().trace()? {
             match task {
                 Task::Compute(task) => {
                     tasks.spawn_blocking(move || Ok(task.compute()));
@@ -243,7 +257,7 @@ where
             message_in = rx.recv() => {
                 let message_in = message_in.ok_or_else(|| {
                     RuntimeError::new("Failed to pop an incoming message from the input channel")
-                })?;
+                }).into_traced().trace()?;
                 match message_in {
                     MessageIn::Message { message, id } => session.add_message(&id, message),
                     MessageIn::Ban { id, reason } => session.register_banned_party(id, reason),
@@ -251,14 +265,19 @@ where
             }
             task_result = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(task_result) = task_result {
-                    let task_result = task_result?;
+                    let task_result = task_result.trace()?;
+
                     match session.add_result(task_result) {
                         Ok(()) => {}
-                        Err(TaskError::Unattributable(error)) => return Err(error),
-                        Err(TaskError::MessageAttributable(error)) => {
+                        Err(error) => {
+                            let error = error.narrow_down(|error| match error {
+                            TaskError::Unattributable(error) => Err(error),
+                            TaskError::MessageAttributable(error) => Ok(error),
+                            })?;
+
                             tx.send(MessageOut::Error(error)).await.map_err(|err| {
                                 RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                            })?;
+                            }).into_traced().trace()?;
                         }
                     }
                 }
@@ -268,7 +287,7 @@ where
 
         session = match session.try_finalize() {
             SessionState::InProgress(session) => session,
-            SessionState::ReachedOutput(success) => return Ok(success.finalize()?),
+            SessionState::ReachedOutput(success) => return success.finalize().trace(),
             SessionState::Stalled(stalled) => return Ok(stalled.finalize()),
         };
     }
@@ -287,7 +306,7 @@ pub async fn par_run_session<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> TResult<SessionReport<SP, P>, UnattributableError>
 where
     SP: SessionParameters,
     SP::Signer: Send + Sync,
@@ -295,6 +314,6 @@ where
 {
     let mut tasks = TaskScope::new();
     let result = par_run_session_inner(&mut tasks, rng, tx, rx, cancellation, session).await;
-    tasks.shutdown().await?;
+    tasks.shutdown().await.trace()?;
     result
 }
