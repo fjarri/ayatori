@@ -24,6 +24,7 @@ use crate::{
         SerializeAndSignFunction, SimpleMappingFunction, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableVerificationFunction,
     },
+    error::TraceableResult,
     traits::SessionParameters,
 };
 
@@ -184,8 +185,14 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeScalar<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_btreemap(&mut node.args, replacements)?;
-        replace_in_slice(&mut node.dependencies, replacements)?;
+        replace_in_btreemap(&mut node.args, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the arguments of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }
@@ -245,8 +252,14 @@ impl<SP: SessionParameters> SpecificNode<SP> for Collect<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_node(&mut node.values, replacements)?;
-        replace_in_slice(&mut node.dependencies, replacements)?;
+        replace_in_node(&mut node.values, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }
@@ -283,7 +296,7 @@ pub(crate) enum ComputeMappingKind<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> ComputeMappingKind<SP> {
-    pub(crate) fn shallow_clone(&self) -> Self {
+    fn shallow_clone(&self) -> Self {
         match self {
             Self::Simple { function } => Self::Simple {
                 function: function.clone(),
@@ -304,12 +317,18 @@ impl<SP: SessionParameters> ComputeMappingKind<SP> {
         }
     }
 
-    pub(crate) fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+    fn with_replacements(
+        self,
+        store_in: &ComputedMappingTag,
+        replacements: &BTreeMap<usize, AnyNode<SP>>,
+    ) -> Result<Self, RuntimeError> {
         let mut kind = self;
         match &mut kind {
             Self::Simple { .. } | Self::ThirdPartyAttributable { .. } => {}
             Self::WithReveal { verification_args, .. } => {
-                replace_in_btreemap(verification_args, replacements)?;
+                replace_in_btreemap(verification_args, replacements).or_with_context(|| {
+                    format!("Failed to replace nodes in the verification arguments of node `{store_in}`")
+                })?;
             }
         }
         Ok(kind)
@@ -345,9 +364,15 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeMapping<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_btreemap(&mut node.args, replacements)?;
-        node.kind = node.kind.with_replacements(replacements)?;
-        replace_in_slice(&mut node.dependencies, replacements)?;
+        replace_in_btreemap(&mut node.args, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the arguments of node `{}`", node.store_in))?;
+        node.kind = node.kind.with_replacements(&node.store_in, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }
@@ -412,8 +437,14 @@ impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSign<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_node(&mut node.data, replacements)?;
-        replace_in_slice(&mut node.dependencies, replacements)?;
+        replace_in_node(&mut node.data, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }
@@ -478,8 +509,14 @@ impl<SP: SessionParameters> SpecificNode<SP> for DeserializeAndCheck<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_node(&mut node.data, replacements)?;
-        replace_in_slice(&mut node.dependencies, replacements)?;
+        replace_in_node(&mut node.data, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }
@@ -537,8 +574,14 @@ impl<SP: SessionParameters> SpecificNode<SP> for DirectMessage<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_node(&mut node.data, replacements)?;
-        replace_in_slice(&mut node.dependencies, replacements)?;
+        replace_in_node(&mut node.data, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }
@@ -586,7 +629,12 @@ impl<SP: SessionParameters> SpecificNode<SP> for Receive<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_slice(&mut node.dependencies, replacements)?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }
@@ -675,8 +723,18 @@ impl<SP: SessionParameters> SpecificNode<SP> for MergeScalars<SP> {
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
         let mut node = self;
-        replace_in_node(&mut node.left, replacements)?;
-        replace_in_node(&mut node.right, replacements)?;
+        replace_in_node(&mut node.left, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the left argument of node `{}`",
+                node.store_in
+            )
+        })?;
+        replace_in_node(&mut node.right, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the right argument of node `{}`",
+                node.store_in
+            )
+        })?;
         Ok(node)
     }
 }

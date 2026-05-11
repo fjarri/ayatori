@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -176,9 +177,11 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
     }
 
     fn get(&self, tag: MappingTagRef<'_>) -> Result<&BTreeSet<SP::Verifier>, RuntimeError> {
-        self.0
-            .get(&tag.to_owned())
-            .ok_or_else(|| RuntimeError::expect("The required IDs were propagated to this node"))
+        self.0.get(&tag.to_owned()).ok_or_else(|| {
+            RuntimeError::expect(format!(
+                "Expected the node {tag} to be present in the propagated groups"
+            ))
+        })
     }
 
     fn new(root: &AnyNode<SP>) -> Result<Self, RuntimeError> {

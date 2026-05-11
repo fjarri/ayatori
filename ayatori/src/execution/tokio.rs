@@ -18,6 +18,7 @@ use super::{
 };
 use crate::{
     entities::{Message, MessageId, RuntimeError, UnattributableError},
+    error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -84,7 +85,7 @@ where
     P: ExecutableProtocol<SP>,
 {
     loop {
-        while let Some(task) = session.make_task()? {
+        while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
             let task_result = match task {
                 Task::Compute(task) => {
                     let result = task.compute();
@@ -189,8 +190,8 @@ impl<SP: SessionParameters> TaskScope<SP> {
             Ok(())
         } else {
             Err(RuntimeError::new(format!(
-                "Errors during task shutdown: {}",
-                errors.iter().map(ToString::to_string).join(", ")
+                "Errors during task shutdown:\n{}",
+                errors.iter().map(ToString::to_string).join("\n")
             )))
         }
     }
@@ -214,14 +215,14 @@ where
     P: ExecutableProtocol<SP>,
 {
     loop {
-        while let Some(task) = session.make_task()? {
+        while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
             match task {
                 Task::Compute(task) => {
                     tasks.spawn_blocking(move || Ok(task.compute()));
                 }
                 Task::ComputeWithRng(task) => {
                     let mut task_rng = ChaCha20Rng::from_rng(&mut *rng)
-                        .map_err(|err| UnattributableError::runtime(format!("Failed to create an RNG: {err}")))?;
+                        .map_err(|err| RuntimeError::new(format!("Failed to create an RNG: {err}")))?;
                     tasks.spawn_blocking(move || Ok(task.compute(&mut task_rng)));
                 }
                 Task::Send(task) => {

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{Hex, SliceLike};
 
 use super::errors::RuntimeError;
-use crate::traits::WireFormat;
+use crate::{error::TraceableResult, traits::WireFormat};
 
 /*
 We need a dyn trait that both supports downcast for `Arc`s (like `Any` does),
@@ -147,8 +147,12 @@ trait DynAdapter<F: WireFormat>: Send + Sync {
 
 impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdapter<F> for DynAdapterHolder<F, T> {
     fn serialize(&self, value: &Value) -> Result<SerializedValue, RuntimeError> {
-        let typed_value = value.downcast_ref::<T>()?;
-        Ok(SerializedValue::new(F::serialize(typed_value)?))
+        let typed_value = value
+            .downcast_ref::<T>()
+            .or_with_context(|| "Failed to downcast an erased value".into())?;
+        Ok(SerializedValue::new(
+            F::serialize(typed_value).or_with_context(|| "Failed to serialize an erased value".into())?,
+        ))
     }
 
     fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError> {

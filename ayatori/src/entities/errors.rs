@@ -4,7 +4,10 @@ use core::{fmt::Debug, marker::PhantomData};
 use serde::{Deserialize, Serialize};
 
 use super::value::SerializedValue;
-use crate::traits::{SessionParameters, WireFormat};
+use crate::{
+    error::{Traceable, TracedError},
+    traits::{SessionParameters, WireFormat},
+};
 
 /// A randomly occuring error that is not a result of a misuse of the API, or malicious actions of other parties.
 ///
@@ -32,17 +35,26 @@ impl SpuriousError {
 /// The protocol should not be restarted until the problem is fixed.
 #[derive(displaydoc::Display, Debug, Clone)]
 #[displaydoc("Runtime error: {0}")]
-pub struct RuntimeError(String);
+pub struct RuntimeError(TracedError);
 
 impl RuntimeError {
     /// Creates a new error with the given description.
+    #[track_caller]
     pub fn new(description: impl Into<String>) -> Self {
-        Self(description.into())
+        Self(TracedError::new(description))
     }
 
     /// Indicates a runtime error that is unreachable in tests.
-    pub fn expect(description: impl Into<String>) -> Self {
-        Self(description.into())
+    #[track_caller]
+    pub(crate) fn expect(description: impl Into<String>) -> Self {
+        Self(TracedError::new(description))
+    }
+}
+
+impl Traceable for RuntimeError {
+    #[track_caller]
+    fn with_context(self, context: impl Into<String>) -> Self {
+        Self(self.0.with_context(context))
     }
 }
 
@@ -63,6 +75,12 @@ impl From<RuntimeError> for UnattributableError {
     }
 }
 
+impl From<SpuriousError> for UnattributableError {
+    fn from(source: SpuriousError) -> Self {
+        Self::Spurious(source)
+    }
+}
+
 impl UnattributableError {
     /// Returns the [`UnattributableError::Spurious`] variant.
     pub fn spurious(description: impl Into<String>) -> Self {
@@ -70,6 +88,7 @@ impl UnattributableError {
     }
 
     /// Returns the [`UnattributableError::Runtime`] variant.
+    #[track_caller]
     pub fn runtime(description: impl Into<String>) -> Self {
         Self::Runtime(RuntimeError::new(description))
     }
@@ -103,14 +122,15 @@ impl SenderAttributableError {
     /// Returns the [`UnattributableError::Spurious`] variant.
     pub fn spurious(description: impl Into<String>) -> Self {
         Self(SenderAttributableErrorEnum::Unattributable(
-            UnattributableError::spurious(description),
+            SpuriousError::new(description).into(),
         ))
     }
 
     /// Returns the [`UnattributableError::Runtime`] variant.
+    #[track_caller]
     pub fn runtime(description: impl Into<String>) -> Self {
         Self(SenderAttributableErrorEnum::Unattributable(
-            UnattributableError::runtime(description),
+            RuntimeError::new(description).into(),
         ))
     }
 
@@ -183,14 +203,15 @@ impl<SP: SessionParameters> SenderAttributableErrorWithReveal<SP> {
     /// Returns the [`UnattributableError::Spurious`] variant.
     pub fn spurious(description: impl Into<String>) -> Self {
         Self(SenderAttributableErrorWithRevealEnum::Unattributable(
-            UnattributableError::spurious(description),
+            SpuriousError::new(description).into(),
         ))
     }
 
     /// Returns the [`UnattributableError::Runtime`] variant.
+    #[track_caller]
     pub fn runtime(description: impl Into<String>) -> Self {
         Self(SenderAttributableErrorWithRevealEnum::Unattributable(
-            UnattributableError::runtime(description),
+            RuntimeError::new(description).into(),
         ))
     }
 
@@ -246,14 +267,15 @@ impl<SP: SessionParameters> ThirdPartyAttributableError<SP> {
     /// Returns the [`UnattributableError::Spurious`] variant.
     pub fn spurious(description: impl Into<String>) -> Self {
         Self(ThirdPartyAttributableErrorEnum::Unattributable(
-            UnattributableError::spurious(description),
+            SpuriousError::new(description).into(),
         ))
     }
 
     /// Returns the [`UnattributableError::Runtime`] variant.
+    #[track_caller]
     pub fn runtime(description: impl Into<String>) -> Self {
         Self(ThirdPartyAttributableErrorEnum::Unattributable(
-            UnattributableError::runtime(description),
+            RuntimeError::new(description).into(),
         ))
     }
 

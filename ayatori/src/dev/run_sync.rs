@@ -3,7 +3,8 @@ use alloc::{collections::BTreeMap, format, vec::Vec};
 use signature::rand_core::CryptoRngCore;
 
 use crate::{
-    entities::{Message, MessageId, UnattributableError},
+    entities::{Message, MessageId, RuntimeError, UnattributableError},
+    error::TraceableResult,
     execution::{Session, SessionReport, SessionState, Task, TaskError},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -32,14 +33,14 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
             let id = session.verifier().clone();
             for message in messages
                 .get_mut(&id)
-                .ok_or_else(|| UnattributableError::runtime(format!("{id:?} not found in the map of message queues")))?
+                .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the map of message queues")))?
                 .drain(..)
             {
                 let message_id = MessageId::random(rng);
                 session.add_message(&message_id, message);
             }
 
-            while let Some(task) = session.make_task()? {
+            while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
                 let task_result = match task {
                     Task::Compute(task) => session.add_result(task.compute()),
                     Task::ComputeWithRng(task) => session.add_result(task.compute(rng)),
@@ -50,9 +51,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                             messages
                                 .get_mut(&destination)
                                 .ok_or_else(|| {
-                                    UnattributableError::runtime(format!(
-                                        "{id:?} not found in the map of message queues"
-                                    ))
+                                    RuntimeError::new(format!("{id:?} not found in the map of message queues"))
                                 })?
                                 .push(message);
                         }
@@ -65,9 +64,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                     Ok(()) => {}
                     Err(TaskError::Unattributable(error)) => return Err(error),
                     Err(TaskError::MessageAttributable(error)) => {
-                        return Err(UnattributableError::runtime(format!(
-                            "Message-attributable error: {error:?}"
-                        )));
+                        return Err(RuntimeError::new(format!("Message-attributable error: {error:?}")).into());
                     }
                 }
             }
@@ -80,9 +77,10 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         }
 
         if !task_processed {
-            return Err(UnattributableError::runtime(
+            return Err(RuntimeError::new(
                 "Sessions are stuck: there are still active sessions, but no tasks are being created",
-            ));
+            )
+            .into());
         }
     }
 

@@ -26,6 +26,7 @@ use crate::{
         FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
         ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
     },
+    error::TraceableResult,
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
@@ -89,7 +90,8 @@ where
         let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
 
-        let ruleset = Ruleset::new(output_node, &private_inputs.names())?;
+        let ruleset = Ruleset::new(output_node, &private_inputs.names())
+            .or_with_context(|| "Failed to build the ruleset".into())?;
         let storage = Storage::new();
 
         let expected_messages = ruleset.expected_messages().clone();
@@ -112,7 +114,9 @@ where
             phantom: PhantomData,
         };
 
-        session.fill_inputs(public_inputs, private_inputs)?;
+        session
+            .fill_inputs(public_inputs, private_inputs)
+            .or_with_context(|| "Failed to associate protocol inputs with the input nodes".into())?;
 
         Ok(session)
     }
@@ -148,13 +152,15 @@ where
 
         for (name, value) in public_values {
             if let Some(store_in) = arguments.get(&name) {
-                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)
+                    .or_with_context(|| format!("Failed to add the private input `{store_in}` to the storage"))?;
             }
         }
 
         for (name, value) in private_values {
             if let Some(store_in) = arguments.get(&name) {
-                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)
+                    .or_with_context(|| format!("Failed to add the public input `{store_in}` to the storage"))?;
             }
         }
 
@@ -169,7 +175,8 @@ where
         shared_data: &P::SharedData,
     ) -> Result<Self, RuntimeError> {
         let verifier = signer.verifying_key();
-        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        let output_node = make_tree::<SP, P>(&verifier, shared_data)
+            .or_with_context(|| "Failed to build the protocol graph".into())?;
         let private_inputs = P::make_private_inputs(private_data);
         Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
     }
@@ -182,11 +189,11 @@ where
         shared_data: &P::SharedData,
         associated_data: Option<&AssociatedData<SP>>,
     ) -> Result<Self, RuntimeError> {
-        let output_node = AnyNode::from(make_tree::<SP, P>(reported_by, shared_data)?).get_reproduction_subtree(
-            subtree_root,
-            guilty_party,
-            associated_data,
-        )?;
+        let full_graph = make_tree::<SP, P>(reported_by, shared_data)
+            .or_with_context(|| "Failed to build the protocol graph".into())?;
+        let output_node = AnyNode::from(full_graph)
+            .get_reproduction_subtree(subtree_root, guilty_party, associated_data)
+            .or_with_context(|| format!("Failed to extract the reproduction subtree for node `{subtree_root}`"))?;
         Self::new_inner(id, None, reported_by, &output_node, PrivateInputs::new(), shared_data)
     }
 
@@ -200,9 +207,15 @@ where
         replacements: &[&Replacement<SP>],
     ) -> Result<Self, RuntimeError> {
         let verifier = signer.verifying_key();
-        let mut output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        let mut output_node = make_tree::<SP, P>(&verifier, shared_data)
+            .or_with_context(|| "Failed to build the protocol graph".into())?;
         for replacement in replacements {
-            output_node = replacement.apply(&output_node)?;
+            output_node = replacement.apply(&output_node).or_with_context(|| {
+                format!(
+                    "Failed to build apply the replacement for node `{}`",
+                    output_node.store_in()
+                )
+            })?;
         }
         let private_inputs = P::make_private_inputs(private_data);
         Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
@@ -214,13 +227,17 @@ where
     }
 
     fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), RuntimeError> {
-        self.storage.set_scalar(store_in, value)?;
+        self.storage
+            .set_scalar(store_in, value)
+            .or_with_context(|| format!("Failed to store the scalar result of `{store_in}`"))?;
         self.ruleset.update_with_scalar_ready(store_in);
         Ok(())
     }
 
     fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), RuntimeError> {
-        self.storage.set_elem(store_in, id, value)?;
+        self.storage
+            .set_elem(store_in, id, value)
+            .or_with_context(|| format!("Failed to store a mapping element result of `{store_in}`"))?;
         self.ruleset.update_with_element_ready(store_in, id);
         Ok(())
     }
@@ -253,13 +270,19 @@ where
     }
 
     pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
-        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
-        value.downcast::<T>()
+        let tag = ScalarTag::Computed(output_tag.clone());
+        let value = self
+            .storage
+            .get_scalar(&tag)
+            .or_with_context(|| "Failed to get the output value from storage".into())?;
+        value
+            .downcast::<T>()
+            .or_with_context(|| "Failed to downcast the output value".into())
     }
 
     pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
-        let verdict = self.get_output::<EvidenceVerdict>(self.ruleset.output_tag())?;
-        Ok(verdict)
+        self.get_output::<EvidenceVerdict>(self.ruleset.output_tag())
+            .or_with_context(|| "Failed to extract the evidence verdict".into())
     }
 
     fn finalize_with_success(self) -> Result<SessionReport<SP, P>, RuntimeError> {
@@ -313,7 +336,10 @@ where
                     to_send,
                     destination,
                 } => {
-                    let signed_value = self.storage.get_elem(&MappingTag::LocalSigned(to_send), &destination)?;
+                    let signed_value = self
+                        .storage
+                        .get_elem(&MappingTag::LocalSigned(to_send), &destination)
+                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
                     return Ok(Some(Task::direct_message(store_in, destination, signed_value)));
                 }
                 Action::ComputeScalar {
@@ -321,7 +347,10 @@ where
                     function,
                     args,
                 } => {
-                    let arg_values = self.storage.get_scalar_args(args)?;
+                    let arg_values = self
+                        .storage
+                        .get_scalar_args(args)
+                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         ScalarFunction::Unattributable(function) => {
@@ -342,7 +371,10 @@ where
                     args,
                     on_error,
                 } => {
-                    let arg_values = self.storage.get_scalar_or_mapping_args(&index, args)?;
+                    let arg_values = self
+                        .storage
+                        .get_scalar_or_mapping_args(&index, args)
+                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         MappingFunction::Unattributable(function) => {
@@ -372,14 +404,20 @@ where
                     message_name,
                     serde_adapter,
                 } => {
-                    let signer = self
-                        .signer
-                        .as_ref()
-                        .ok_or_else(|| RuntimeError::new("This session does not contain a signer"))?;
+                    let signer = self.signer.as_ref().ok_or_else(|| {
+                        // This can happen if a serialization node somehow remains
+                        // in an evidence verification subtree.
+                        RuntimeError::new(
+                            "Attempted to execute a serialize-and-sign node in a session without a signer",
+                        )
+                    })?;
+
                     let value = match data {
-                        AnyTag::Scalar(tag) => self.storage.get_scalar(&tag)?,
-                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index)?,
-                    };
+                        AnyTag::Scalar(tag) => self.storage.get_scalar(&tag),
+                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index),
+                    }
+                    .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+
                     let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
                     return Ok(Some(Task::compute_serialize_and_sign_elem(
                         store_in, index, function, args,
@@ -394,7 +432,10 @@ where
                     serde_adapter,
                     on_error,
                 } => {
-                    let value = self.storage.get_elem(&MappingTag::RemoteSigned(data), &index)?;
+                    let value = self
+                        .storage
+                        .get_elem(&MappingTag::RemoteSigned(data), &index)
+                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
                     let expected_senders = self.data.expected_senders(&message_name).ok_or_else(|| {
                         RuntimeError::expect(format!("{message_name} does not have expected senders"))
                     })?;
@@ -406,7 +447,9 @@ where
                 Action::MergeScalar { store_in, left, right } => {
                     self.add_scalar(
                         &ScalarTag::Merged(store_in.clone()),
-                        self.storage.get_one_or_both_as_value(&left, &right)?,
+                        self.storage
+                            .get_one_or_both_as_value(&left, &right)
+                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
                     )?;
                 }
                 Action::Collect {
@@ -416,7 +459,9 @@ where
                 } => {
                     self.add_scalar(
                         &ScalarTag::Collected(store_in.clone()),
-                        self.storage.get_mapping_as_value(&values, &indices)?,
+                        self.storage
+                            .get_mapping_as_value(&values, &indices)
+                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
                     )?;
                 }
             }
@@ -453,11 +498,34 @@ where
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self.storage.get_elem(
-                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &guilty_party,
-                        )?;
-                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        let value = self
+                            .storage
+                            .get_elem(
+                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &guilty_party,
+                            )
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to get the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?;
+                        let signed_value = value
+                            .downcast_ref::<VerifiedValue<SP>>()
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to downcast the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?
+                            .clone()
+                            .unverify();
                         signed_values.push(signed_value);
                     }
                     let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
@@ -479,11 +547,34 @@ where
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self.storage.get_elem(
-                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &guilty_party,
-                        )?;
-                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        let value = self
+                            .storage
+                            .get_elem(
+                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &guilty_party,
+                            )
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to get the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?;
+                        let signed_value = value
+                            .downcast_ref::<VerifiedValue<SP>>()
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to downcast the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?
+                            .clone()
+                            .unverify();
                         signed_values.push(signed_value);
                     }
                     let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
@@ -510,8 +601,12 @@ where
                 value,
             } => {
                 if let Ok(existing_value) = self.storage.get_elem(&store_in, &source) {
-                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
-                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+                    let typed_existing_value = existing_value
+                        .downcast_ref::<VerifiedValue<SP>>()
+                        .or_with_context(|| format!("Failed to downcast a stored signed message `{store_in}`"))?;
+                    let typed_received_value = value
+                        .downcast_ref::<VerifiedValue<SP>>()
+                        .or_with_context(|| format!("Failed to downcast a newly received message `{store_in}`"))?;
 
                     // Both values are signed, contain the same named value, but are different.
                     // This is a provable failure.

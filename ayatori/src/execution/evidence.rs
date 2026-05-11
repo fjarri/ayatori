@@ -14,6 +14,7 @@ use crate::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
         SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError, VerifiedValue,
     },
+    error::{Traceable, TraceableResult},
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -143,16 +144,24 @@ impl<SP: SessionParameters> ConflictingMessagesEvidence<SP> {
         let first_value = match self.first.clone().verify_and_unpack() {
             Ok(value) => value,
             Err(VerificationError::SignatureMismatch) => {
-                return Ok(EvidenceVerdict::invalid("Failed to verify the first value"));
+                return Ok(EvidenceVerdict::invalid(
+                    "Signature mismatch when verifying the first value",
+                ));
             }
-            Err(VerificationError::Runtime(error)) => return Err(error),
+            Err(VerificationError::Runtime(error)) => {
+                return Err(error.with_context("Failed to verify the first value"));
+            }
         };
         let second_value = match self.second.clone().verify_and_unpack() {
             Ok(value) => value,
             Err(VerificationError::SignatureMismatch) => {
-                return Ok(EvidenceVerdict::invalid("Failed to verify the second value"));
+                return Ok(EvidenceVerdict::invalid(
+                    "Signature mismatch when verifying the second value",
+                ));
             }
-            Err(VerificationError::Runtime(error)) => return Err(error),
+            Err(VerificationError::Runtime(error)) => {
+                return Err(error.with_context("Failed to verify the second value"));
+            }
         };
 
         if first_value == second_value {
@@ -205,7 +214,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
             guilty_party,
             shared_data,
             None,
-        )?;
+        )
+        .or_with_context(|| "Failed to build the reproduction subtree".into())?;
 
         run_evidence_verification_session(session, &self.reported_by, guilty_party, &self.signed_values)
     }
@@ -253,7 +263,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvid
             guilty_party,
             shared_data,
             Some(&self.error.associated_data),
-        )?;
+        )
+        .or_with_context(|| "Failed to build the reproduction subtree".into())?;
 
         run_evidence_verification_session(session, &self.reported_by, guilty_party, &self.signed_values)
     }
@@ -297,7 +308,9 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 
         match task_result {
             Ok(()) => {}
-            Err(TaskError::Unattributable(UnattributableError::Runtime(error))) => return Err(error),
+            Err(TaskError::Unattributable(UnattributableError::Runtime(error))) => {
+                return Err(error.with_context("Runtime error when executing a task"));
+            }
             Err(TaskError::Unattributable(UnattributableError::Spurious(error))) => {
                 return Ok(EvidenceVerdict::invalid(format!(
                     "Unexpected spurious error: {error:?}"
@@ -313,7 +326,9 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 
     match session.try_finalize() {
         SessionState::InProgress(_session) => Ok(EvidenceVerdict::invalid("The execution did not finish")),
-        SessionState::ReachedOutput(success) => success.finalize_with_evidence_verdict(),
+        SessionState::ReachedOutput(success) => success
+            .finalize_with_evidence_verdict()
+            .or_with_context(|| "Failed to finalize the reproduction session".into()),
         SessionState::Stalled(_stalled) => Ok(EvidenceVerdict::invalid("The execution was stalled")),
     }
 }
@@ -350,7 +365,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         let signature = P::signature();
         let arg_nodes = ArgNodes::new(&signature);
         let party_build_data = PartyBuildData::new(&self.reported_by);
-        let output = P::build(&party_build_data, &build_data, arg_nodes)?;
+        let output = P::build(&party_build_data, &build_data, arg_nodes)
+            .or_with_context(|| "Failed to build the protocol graph".into())?;
         let any_node = Into::<AnyNode<SP>>::into(output);
         let Some(node) = any_node.find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref())) else {
             return Ok(EvidenceVerdict::invalid(format!(
@@ -367,6 +383,8 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
             return Ok(EvidenceVerdict::invalid("Invalid function type"));
         };
 
-        verification.call(guilty_party, session_id, &self.error.associated_data)
+        verification
+            .call(guilty_party, session_id, &self.error.associated_data)
+            .or_with_context(|| "Failed to run the associated verification function".into())
     }
 }

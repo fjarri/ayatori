@@ -14,7 +14,7 @@ use super::{
     tag::FullName,
     value::{Erasable, SerdeAdapter, Value},
 };
-use crate::traits::SessionParameters;
+use crate::{error::TraceableResult, traits::SessionParameters};
 
 #[cfg(doc)]
 use crate::protocol_author_api::{
@@ -105,6 +105,7 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
     pub(crate) fn verified_value(&self) -> &VerifiedValue<SP> {
         self.value
             .downcast_ref::<VerifiedValue<SP>>()
+            // TODO: was it checked?
             .expect("the value type was already checked in the constructor")
     }
 }
@@ -150,7 +151,9 @@ impl<SP: SessionParameters> Args<SP> {
     ///
     /// Fails if `name` was not present in the argument list, or the type of the stored value is not `T`.
     pub fn get<T: Erasable>(&self, name: &str) -> Result<&T, RuntimeError> {
-        self.get_value(name)?.downcast_ref::<T>()
+        self.get_value(name)?
+            .downcast_ref::<T>()
+            .or_with_context(|| format!("Failed to downcast the value `{name}`"))
     }
 
     /// Returns the value from the storage slot that was declared as the argument for this computation
@@ -163,7 +166,12 @@ impl<SP: SessionParameters> Args<SP> {
         let value_map = self.get::<BTreeMap<SP::Verifier, Value>>(name)?;
         value_map
             .iter()
-            .map(|(id, value)| value.downcast_ref::<T>().map(|value_ref| (id, value_ref)))
+            .map(|(id, value)| {
+                value
+                    .downcast_ref::<T>()
+                    .map(|value_ref| (id, value_ref))
+                    .or_with_context(|| format!("Failed to downcast the element `{id:?}` of the mapping `{name}`"))
+            })
             .collect()
     }
 
@@ -178,12 +186,24 @@ impl<SP: SessionParameters> Args<SP> {
         name: &str,
     ) -> Result<OneOrBoth<&L, &R>, RuntimeError> {
         Ok(match self.get::<OneOrBoth<Value, Value>>(name)? {
-            OneOrBoth::Left(left) => OneOrBoth::Left(left.downcast_ref::<L>()?),
-            OneOrBoth::Right(right) => OneOrBoth::Right(right.downcast_ref::<R>()?),
-            OneOrBoth::Both { left, right } => OneOrBoth::Both {
-                left: left.downcast_ref::<L>()?,
-                right: right.downcast_ref::<R>()?,
-            },
+            OneOrBoth::Left(left) => OneOrBoth::Left(
+                left.downcast_ref::<L>()
+                    .or_with_context(|| format!("Failed to downcast the left variant of the merged value `{name}`"))?,
+            ),
+            OneOrBoth::Right(right) => OneOrBoth::Right(
+                right
+                    .downcast_ref::<R>()
+                    .or_with_context(|| format!("Failed to downcast the right variant of the merged value `{name}`"))?,
+            ),
+            OneOrBoth::Both { left, right } => {
+                let left = left
+                    .downcast_ref::<L>()
+                    .or_with_context(|| format!("Failed to downcast the left variant of the merged value `{name}`"))?;
+                let right = right
+                    .downcast_ref::<R>()
+                    .or_with_context(|| format!("Failed to downcast the right variant of the merged value `{name}`"))?;
+                OneOrBoth::Both { left, right }
+            }
         })
     }
 }

@@ -23,6 +23,7 @@ use crate::{
         ScalarFunction, ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum, SimpleMappingFunction,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
+    error::TraceableResult,
     traits::SessionParameters,
 };
 
@@ -341,7 +342,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         };
 
         let node =
-            CollectArg::try_from(node.tree_without_dependencies()).expect("the node is convertable to CollectArg");
+            CollectArg::try_from(node.tree_without_dependencies()).expect("the node is convertible to CollectArg");
 
         // The output must be a scalar node, and `node` is a mapping node.
         // So we wrap it in a collect.
@@ -353,8 +354,8 @@ impl<SP: SessionParameters> AnyNode<SP> {
         // So we take the original root name (which is guaranteed to not be present in the subtree),
         // and use it for the new root.
         let AnyTagRef::Scalar(ScalarTagRef::Computed(original_output_tag)) = self.store_in() else {
-            return Err(RuntimeError::new(
-                "Assumption: we only get the reproduction subtree from a valid root node",
+            return Err(RuntimeError::expect(
+                "We only get the reproduction subtree from a valid root node",
             ));
         };
         let arg_name = "value";
@@ -384,7 +385,10 @@ impl<SP: SessionParameters> AnyNode<SP> {
         // The root node will be processed separately
         for node in LeavesFirstIterator::new_with_nodes(self.args_and_dependencies()) {
             let old_id = node.id();
-            let new_node = f(node)?.with_replacements(&replacement_nodes)?;
+            let store_in = node.store_in().to_owned();
+            let new_node = f(node)
+                .or_with_context(|| format!("Failed to apply predicate to the node {store_in}"))?
+                .with_replacements(&replacement_nodes)?;
             // Note that this may lead to errors if the node with `old_id` is dropped,
             // but we are still retaining `self`, so all of its tree will persist until the end of the method.
             if new_node.id() != old_id {
@@ -392,7 +396,9 @@ impl<SP: SessionParameters> AnyNode<SP> {
             }
         }
 
-        f(self.get_strong_ref())?.with_replacements(&replacement_nodes)
+        f(self.get_strong_ref())
+            .or_with_context(|| format!("Failed to apply predicate to the root node {}", self.store_in()))?
+            .with_replacements(&replacement_nodes)
     }
 
     pub(crate) fn tree_with_added_prefix(&self, prefix: &str) -> Self {

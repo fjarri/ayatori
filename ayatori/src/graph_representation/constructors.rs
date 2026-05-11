@@ -30,6 +30,7 @@ use crate::{
         UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
         UnattributableScalarFunctionWithRng, Value,
     },
+    error::TraceableResult,
     traits::{ComposableProtocol, SessionParameters},
 };
 
@@ -371,7 +372,10 @@ fn default_serialize_and_sign<SP: SessionParameters>(
     destination: &SP::Verifier,
     args: &SerializeArgs<SP>,
 ) -> Result<Value, RuntimeError> {
-    let serialized_value = args.serde_adapter().serialize(args.value())?;
+    let serialized_value = args
+        .serde_adapter()
+        .serialize(args.value())
+        .or_with_context(|| format!("Failed to serialize an outgoing value `{}`", args.message_name()))?;
     let signed_value = SignedValue::<SP>::new(
         rng,
         args.signer(),
@@ -379,7 +383,8 @@ fn default_serialize_and_sign<SP: SessionParameters>(
         args.message_name(),
         destination,
         serialized_value,
-    )?;
+    )
+    .or_with_context(|| format!("Failed to sign an outgoing value `{}`", args.message_name()))?;
     Ok(Value::new(signed_value))
 }
 
@@ -533,10 +538,13 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
 ) -> Result<P::OutputNode, RuntimeError> {
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
-    let output = P::build(party_build_data, build_data, arg_nodes)?;
+    let output = P::build(party_build_data, build_data, arg_nodes)
+        .or_with_context(|| "Failed to build the protocol graph".into())?;
     let any_node = Into::<AnyNode<SP>>::into(output).get_strong_ref();
     let prefixed = any_node.tree_with_added_prefix(prefix);
-    let bound_args = signature.bind(args)?;
+    let bound_args = signature
+        .bind(args)
+        .or_with_context(|| "Failed to bind protocol arguments".into())?;
     let with_args = prefixed.with_substituted_arguments(&bound_args)?;
     let downcasted = P::OutputNode::try_from(with_args)
         .map_err(|_err| RuntimeError::new("Adding a prefix changed the root node type"))?;
