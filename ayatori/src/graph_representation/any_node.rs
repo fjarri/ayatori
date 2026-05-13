@@ -21,7 +21,7 @@ use crate::{
     entities::{
         AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, PartyGroup, RuntimeError,
         ScalarFunction, ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum, SimpleMappingFunction,
-        UnattributableMappingFunction, UnattributableScalarFunction, Value,
+        UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     error::TraceableResult,
     traits::SessionParameters,
@@ -323,11 +323,14 @@ impl<SP: SessionParameters> AnyNode<SP> {
                         move |id, args| {
                             match function.call(id, args) {
                                 Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Unattributable(error))) => {
-                                    Err(error)
-                                }
                                 Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
                                     Ok(EvidenceVerdict::valid())
+                                }
+                                Err(SenderAttributableError(SenderAttributableErrorEnum::Spurious(error))) => {
+                                    Err(UnattributableError::Spurious(error))
+                                }
+                                Err(SenderAttributableError(SenderAttributableErrorEnum::Runtime(error))) => {
+                                    Err(UnattributableError::Runtime(error))
                                 }
                             }
                             .map(Value::new)

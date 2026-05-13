@@ -13,11 +13,11 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    session::{MessageAttributableError, Session, SessionReport, SessionState, TaskError},
+    session::{MessageAttributableError, Session, SessionError, SessionReport, SessionState, TaskError},
     task::{Task, TaskResult},
 };
 use crate::{
-    entities::{Message, MessageId, RuntimeError, UnattributableError},
+    entities::{Message, MessageId, RuntimeError},
     error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -57,7 +57,7 @@ pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>, R:
     'static + Send + Sync
 {
     /// The returned future.
-    type Fut: Future<Output = Result<SessionReport<SP, P>, UnattributableError>> + 'a + Send;
+    type Fut: Future<Output = Result<SessionReport<SP, P>, SessionError>> + 'a + Send;
 
     /// Calls the function returning the future.
     fn call(
@@ -78,7 +78,7 @@ pub async fn run_session<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> Result<SessionReport<SP, P>, SessionError>
 where
     SP: SessionParameters,
     SP::Signer: Sync,
@@ -108,7 +108,8 @@ where
 
             match task_result {
                 Ok(()) => {}
-                Err(TaskError::Unattributable(error)) => return Err(error),
+                Err(TaskError::Runtime(error)) => return Err(error.into()),
+                Err(TaskError::Spurious(error)) => return Err(error.into()),
                 Err(TaskError::MessageAttributable(error)) => {
                     tx.send(MessageOut::Error(error)).await.map_err(|err| {
                         RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
@@ -208,7 +209,7 @@ async fn par_run_session_inner<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> Result<SessionReport<SP, P>, SessionError>
 where
     SP: SessionParameters,
     SP::Signer: Send + Sync,
@@ -255,7 +256,8 @@ where
                     let task_result = task_result?;
                     match session.add_result(task_result) {
                         Ok(()) => {}
-                        Err(TaskError::Unattributable(error)) => return Err(error),
+                        Err(TaskError::Runtime(error)) => return Err(error.into()),
+                        Err(TaskError::Spurious(error)) => return Err(error.into()),
                         Err(TaskError::MessageAttributable(error)) => {
                             tx.send(MessageOut::Error(error)).await.map_err(|err| {
                                 RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
@@ -288,7 +290,7 @@ pub async fn par_run_session<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> Result<SessionReport<SP, P>, SessionError>
 where
     SP: SessionParameters,
     SP::Signer: Send + Sync,

@@ -3,8 +3,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
-    ExecutableProtocol, Session, SessionParameters, SessionReport, SessionState, Task,
-    TaskError, UnattributableError,
+    ExecutableProtocol, Session, SessionError, SessionParameters, SessionReport,
+    SessionState, Task, TaskError,
     tokio::{MessageIn, MessageOut},
 };
 
@@ -15,7 +15,7 @@ pub async fn run_session<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> Result<SessionReport<SP, P>, SessionError>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
@@ -51,7 +51,8 @@ where
             // ANCHOR: task_result
             match task_result {
                 Ok(()) => {}
-                Err(TaskError::Unattributable(error)) => return Err(error),
+                Err(TaskError::Runtime(error)) => return Err(error.into()),
+                Err(TaskError::Spurious(error)) => return Err(error.into()),
                 Err(TaskError::MessageAttributable(error)) => {
                     tx.send(MessageOut::Error(error)).await.unwrap();
                 }

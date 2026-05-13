@@ -12,7 +12,7 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
-        SessionId, SignedValue, ThirdPartyError, UnattributableError, VerificationError, VerifiedValue,
+        SessionId, SignedValue, ThirdPartyError, VerificationError, VerifiedValue,
     },
     error::{Traceable, TraceableResult},
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
@@ -308,10 +308,10 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 
         match task_result {
             Ok(()) => {}
-            Err(TaskError::Unattributable(UnattributableError::Runtime(error))) => {
+            Err(TaskError::Runtime(error)) => {
                 return Err(error.with_context("Runtime error when executing a task"));
             }
-            Err(TaskError::Unattributable(UnattributableError::Spurious(error))) => {
+            Err(TaskError::Spurious(error)) => {
                 return Ok(EvidenceVerdict::invalid(format!(
                     "Unexpected spurious error: {error:?}"
                 )));

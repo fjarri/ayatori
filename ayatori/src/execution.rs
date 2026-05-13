@@ -8,7 +8,7 @@ pub mod tokio;
 
 pub use evidence::Evidence;
 pub use session::{
-    DuplicateMessagesError, InvalidMessageError, MessageAttributableError, ReachedOutputSession, Session,
+    DuplicateMessagesError, InvalidMessageError, MessageAttributableError, ReachedOutputSession, Session, SessionError,
     SessionReport, SessionState, StalledSession, TaskError,
 };
 pub use task::Task;

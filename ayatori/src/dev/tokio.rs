@@ -9,9 +9,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::run_sync::ExecutionResult;
 use crate::{
-    entities::{Message, MessageId, RuntimeError, UnattributableError},
+    entities::{Message, MessageId, RuntimeError},
     execution::{
-        Session, SessionReport,
+        Session, SessionError, SessionReport,
         tokio::{MessageIn, MessageOut, SessionRunner},
     },
     traits::{ExecutableProtocol, SessionParameters},
@@ -96,7 +96,7 @@ where
             CancellationToken,
             Session<SP, P>,
         ) -> Fut,
-    Fut: Send + Future<Output = Result<SessionReport<SP, P>, UnattributableError>> + 'a,
+    Fut: Send + Future<Output = Result<SessionReport<SP, P>, SessionError>> + 'a,
 {
     type Fut = Fut;
     fn call(
@@ -116,7 +116,7 @@ pub async fn run_sessions_async<SP, P, F, R>(
     rng: &mut R,
     sessions: Vec<Session<SP, P>>,
     session_runner: F,
-) -> Result<ExecutionResult<SP, P>, UnattributableError>
+) -> Result<ExecutionResult<SP, P>, SessionError>
 where
     R: 'static + CryptoRngCore + Clone + Send,
     SP: SessionParameters,
@@ -156,7 +156,7 @@ where
             let node_task = async move { session_runner.call(&mut rng, &tx, &mut rx, cancellation, session).await };
             Ok((id, tokio::spawn(node_task)))
         })
-        .collect::<Result<BTreeMap<_, _>, UnattributableError>>()?;
+        .collect::<Result<BTreeMap<_, _>, SessionError>>()?;
 
     // Drop the last copy of the dispatcher's incoming channel so that it can finish.
     drop(dispatcher_tx);

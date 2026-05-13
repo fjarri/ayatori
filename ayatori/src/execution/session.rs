@@ -24,7 +24,7 @@ use crate::{
     entities::{
         AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
         FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
-        ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
+        ScalarTag, SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
     },
     error::TraceableResult,
     flat_representation::{Action, OnError, Ruleset, RulesetState},
@@ -474,7 +474,8 @@ where
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
             TaskResultEnum::Success => {}
-            TaskResultEnum::UnattributableError { error } => return Err(TaskError::Unattributable(error)),
+            TaskResultEnum::RuntimeError { error } => return Err(TaskError::Runtime(error)),
+            TaskResultEnum::SpuriousError { error } => return Err(TaskError::Spurious(error)),
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
             }
@@ -743,15 +744,17 @@ pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
 /// A possible error when registering a task's result.
 #[derive_where::derive_where(Debug)]
 pub enum TaskError<SP: SessionParameters> {
-    /// An error that is not attributable to a specific party or message.
-    Unattributable(UnattributableError),
+    /// An internal error caused by the environment or a bug in the code.
+    Runtime(RuntimeError),
+    /// A random error that occurred during the protocol execution by no fault of a single party.
+    Spurious(SpuriousError),
     /// An error that is attributable to a specific message, but not to a specific party.
     MessageAttributable(MessageAttributableError<SP>),
 }
 
 impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
     fn from(source: RuntimeError) -> Self {
-        Self::Unattributable(source.into())
+        Self::Runtime(source)
     }
 }
 
@@ -842,4 +845,28 @@ pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     Success(P::Output),
     ManuallyTerminated,
     Unfinishable(String),
+}
+
+// TODO: merge into SessionOutcome? Or allow termination where one can return RuntimeError AND all the evidences?
+/// A fatal error that can happen when executing a session.
+#[derive(Debug, Clone, displaydoc::Display)]
+pub enum SessionError {
+    /// See [`RuntimeError`].
+    #[displaydoc("{0}")]
+    Runtime(RuntimeError),
+    /// See [`SpuriousError`].
+    #[displaydoc("{0}")]
+    Spurious(SpuriousError),
+}
+
+impl From<RuntimeError> for SessionError {
+    fn from(source: RuntimeError) -> Self {
+        Self::Runtime(source)
+    }
+}
+
+impl From<SpuriousError> for SessionError {
+    fn from(source: SpuriousError) -> Self {
+        Self::Spurious(source)
+    }
 }

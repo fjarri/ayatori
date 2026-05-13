@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, format, vec::Vec};
 use signature::rand_core::CryptoRngCore;
 
 use crate::{
-    entities::{Message, MessageId, RuntimeError, UnattributableError},
+    entities::{Message, MessageId, RuntimeError},
     error::TraceableResult,
     execution::{Session, SessionReport, SessionState, Task, TaskError},
     traits::{ExecutableProtocol, SessionParameters},
@@ -13,7 +13,7 @@ use crate::{
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
     rng: &mut impl CryptoRngCore,
     sessions: Vec<Session<SP, P>>,
-) -> Result<ExecutionResult<SP, P>, UnattributableError> {
+) -> Result<ExecutionResult<SP, P>, RuntimeError> {
     let mut sessions = sessions;
     let mut messages = sessions
         .iter()
@@ -62,9 +62,13 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 
                 match task_result {
                     Ok(()) => {}
-                    Err(TaskError::Unattributable(error)) => return Err(error),
+                    Err(TaskError::Runtime(error)) => return Err(error),
+                    // TODO: record non-runtime errors per session
+                    Err(TaskError::Spurious(error)) => {
+                        return Err(RuntimeError::new(format!("Spurious error: {error:?}")));
+                    }
                     Err(TaskError::MessageAttributable(error)) => {
-                        return Err(RuntimeError::new(format!("Message-attributable error: {error:?}")).into());
+                        return Err(RuntimeError::new(format!("Message-attributable error: {error:?}")));
                     }
                 }
             }
@@ -79,8 +83,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         if !task_processed {
             return Err(RuntimeError::new(
                 "Sessions are stuck: there are still active sessions, but no tasks are being created",
-            )
-            .into());
+            ));
         }
     }
 

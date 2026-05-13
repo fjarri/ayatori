@@ -1,10 +1,10 @@
 //! The API to be used by the code that executes the protocol.
 
 pub use crate::{
-    entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, UnattributableError},
+    entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, SpuriousError},
     execution::{
         DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError, ReachedOutputSession, Session,
-        SessionReport, SessionState, StalledSession, Task, TaskError,
+        SessionError, SessionReport, SessionState, StalledSession, Task, TaskError,
     },
     traits::{ExecutableProtocol, SessionParameters},
 };

@@ -107,31 +107,29 @@ pub struct SenderAttributableError(pub(crate) SenderAttributableErrorEnum);
 #[derive(displaydoc::Display, Debug, Clone)]
 pub(crate) enum SenderAttributableErrorEnum {
     #[displaydoc("{0}")]
-    Unattributable(UnattributableError),
+    Runtime(RuntimeError),
+    #[displaydoc("{0}")]
+    Spurious(SpuriousError),
     #[displaydoc("{0}")]
     Attributable(SenderError),
 }
 
 impl From<RuntimeError> for SenderAttributableError {
     fn from(source: RuntimeError) -> Self {
-        Self(SenderAttributableErrorEnum::Unattributable(source.into()))
+        Self(SenderAttributableErrorEnum::Runtime(source))
     }
 }
 
 impl SenderAttributableError {
     /// Returns the [`UnattributableError::Spurious`] variant.
     pub fn spurious(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorEnum::Unattributable(
-            SpuriousError::new(description).into(),
-        ))
+        Self(SenderAttributableErrorEnum::Spurious(SpuriousError::new(description)))
     }
 
     /// Returns the [`UnattributableError::Runtime`] variant.
     #[track_caller]
     pub fn runtime(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorEnum::Unattributable(
-            RuntimeError::new(description).into(),
-        ))
+        Self(SenderAttributableErrorEnum::Runtime(RuntimeError::new(description)))
     }
 
     /// Creates a new error with the given description.
@@ -188,31 +186,33 @@ pub struct SenderAttributableErrorWithReveal<SP: SessionParameters>(
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum SenderAttributableErrorWithRevealEnum<SP: SessionParameters> {
     #[displaydoc("{0}")]
-    Unattributable(UnattributableError),
+    Runtime(RuntimeError),
+    #[displaydoc("{0}")]
+    Spurious(SpuriousError),
     #[displaydoc("{0}")]
     Attributable(SenderErrorWithReveal<SP>),
 }
 
 impl<SP: SessionParameters> From<RuntimeError> for SenderAttributableErrorWithReveal<SP> {
     fn from(source: RuntimeError) -> Self {
-        Self(SenderAttributableErrorWithRevealEnum::Unattributable(source.into()))
+        Self(SenderAttributableErrorWithRevealEnum::Runtime(source))
     }
 }
 
 impl<SP: SessionParameters> SenderAttributableErrorWithReveal<SP> {
     /// Returns the [`UnattributableError::Spurious`] variant.
     pub fn spurious(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorWithRevealEnum::Unattributable(
-            SpuriousError::new(description).into(),
-        ))
+        Self(SenderAttributableErrorWithRevealEnum::Spurious(SpuriousError::new(
+            description,
+        )))
     }
 
     /// Returns the [`UnattributableError::Runtime`] variant.
     #[track_caller]
     pub fn runtime(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorWithRevealEnum::Unattributable(
-            RuntimeError::new(description).into(),
-        ))
+        Self(SenderAttributableErrorWithRevealEnum::Runtime(RuntimeError::new(
+            description,
+        )))
     }
 
     /// Creates a new error with the given description and an associated value (revealed data).
@@ -249,7 +249,9 @@ pub struct ThirdPartyAttributableError<SP: SessionParameters>(pub(crate) ThirdPa
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum ThirdPartyAttributableErrorEnum<SP: SessionParameters> {
     #[displaydoc("{0}")]
-    Unattributable(UnattributableError),
+    Runtime(RuntimeError),
+    #[displaydoc("{0}")]
+    Spurious(SpuriousError),
     #[displaydoc("{error}")]
     Attributable {
         guilty_party: SP::Verifier,
@@ -259,24 +261,22 @@ pub(crate) enum ThirdPartyAttributableErrorEnum<SP: SessionParameters> {
 
 impl<SP: SessionParameters> From<RuntimeError> for ThirdPartyAttributableError<SP> {
     fn from(source: RuntimeError) -> Self {
-        Self(ThirdPartyAttributableErrorEnum::Unattributable(source.into()))
+        Self(ThirdPartyAttributableErrorEnum::Runtime(source))
     }
 }
 
 impl<SP: SessionParameters> ThirdPartyAttributableError<SP> {
     /// Returns the [`UnattributableError::Spurious`] variant.
     pub fn spurious(description: impl Into<String>) -> Self {
-        Self(ThirdPartyAttributableErrorEnum::Unattributable(
-            SpuriousError::new(description).into(),
-        ))
+        Self(ThirdPartyAttributableErrorEnum::Spurious(SpuriousError::new(
+            description,
+        )))
     }
 
     /// Returns the [`UnattributableError::Runtime`] variant.
     #[track_caller]
     pub fn runtime(description: impl Into<String>) -> Self {
-        Self(ThirdPartyAttributableErrorEnum::Unattributable(
-            RuntimeError::new(description).into(),
-        ))
+        Self(ThirdPartyAttributableErrorEnum::Runtime(RuntimeError::new(description)))
     }
 
     /// Creates a new error with the given description and an associated value (revealed data).
