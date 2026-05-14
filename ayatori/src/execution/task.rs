@@ -65,9 +65,7 @@ enum ComputeTaskEnum<SP: SessionParameters> {
         args: DeserializeArgs<SP>,
         on_error: OnError,
     },
-    PreprocessMessage {
-        task: PreprocessingTask<SP>,
-    },
+    PreprocessMessage(PreprocessingTask<SP>),
 }
 
 #[derive_where::derive_where(Debug)]
@@ -84,8 +82,8 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 let store_in = ScalarTag::Computed(store_in);
                 match function.call(&args) {
                     Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
             ComputeTaskEnum::ScalarUnattributableOptional {
@@ -102,7 +100,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                             result: value,
                         },
                     )),
-                    Err(error) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
                 }
             }
             ComputeTaskEnum::MappingElementUnattributable {
@@ -118,8 +116,8 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
             ComputeTaskEnum::MappingElementSenderAttributable {
@@ -136,8 +134,8 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                     Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                         store_in,
                         guilty_party: source,
@@ -160,8 +158,8 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                     Err(MaybeAttributableError::Attributable(error)) => {
                         TaskResult(TaskResultEnum::SenderErrorWithReveal {
                             store_in,
@@ -185,8 +183,8 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                     Err(MaybeAttributableError::Attributable(error)) => {
                         TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
                     }
@@ -206,8 +204,8 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                     Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                         store_in,
                         guilty_party: source,
@@ -216,7 +214,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     }),
                 }
             }
-            ComputeTaskEnum::PreprocessMessage { task } => task.execute(),
+            ComputeTaskEnum::PreprocessMessage(task) => task.execute(),
         }
     }
 }
@@ -256,8 +254,8 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                 let store_in = ScalarTag::Computed(store_in);
                 match function.call(rng, &args) {
                     Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
             ComputeWithRngTaskEnum::MappingElementUnattributable {
@@ -273,8 +271,8 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                         source,
                         result,
                     }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
             ComputeWithRngTaskEnum::SerializeAndSignElement {
@@ -290,7 +288,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                         source,
                         result,
                     }),
-                    Err(error) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
                 }
             }
         }
@@ -308,7 +306,7 @@ impl<SP: SessionParameters> SendTask<SP> {
     pub fn execute(self) -> (Option<Message<SP>>, TaskResult<SP>) {
         let signed_value = match self.signed_value.downcast::<SignedValue<SP>>() {
             Ok(value) => value,
-            Err(error) => return (None, TaskResult(TaskResultEnum::RuntimeError { error })),
+            Err(error) => return (None, TaskResult(TaskResultEnum::RuntimeError(error))),
         };
         let signed_values = vec![signed_value];
         let message = Message::new(self.destination.clone(), signed_values);
@@ -333,7 +331,7 @@ pub enum Task<SP: SessionParameters> {
 
 impl<SP: SessionParameters> Task<SP> {
     pub(crate) fn preprocess_message(task: PreprocessingTask<SP>) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::PreprocessMessage { task }))
+        Self::Compute(ComputeTask(ComputeTaskEnum::PreprocessMessage(task)))
     }
 
     pub(crate) fn direct_message(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
@@ -519,12 +517,8 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
         source: SP::Verifier,
         value: Value,
     },
-    RuntimeError {
-        error: RuntimeError,
-    },
-    SpuriousError {
-        error: SpuriousError,
-    },
+    RuntimeError(RuntimeError),
+    SpuriousError(SpuriousError),
     SenderError {
         store_in: MappingTag,
         guilty_party: SP::Verifier,
@@ -614,7 +608,7 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
         // Verify the value signature.
         let verified_value = match self.signed_value.verify(&self.message_id) {
             Ok(value) => value,
-            Err(VerificationError::Runtime(error)) => return TaskResult(TaskResultEnum::RuntimeError { error }),
+            Err(VerificationError::Runtime(error)) => return TaskResult(TaskResultEnum::RuntimeError(error)),
             Err(VerificationError::SignatureMismatch) => {
                 return TaskResult(TaskResultEnum::MessageError {
                     message_id: self.message_id.clone(),

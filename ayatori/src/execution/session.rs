@@ -474,8 +474,8 @@ where
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
             TaskResultEnum::NoActionNeeded => {}
-            TaskResultEnum::RuntimeError { error } => return Err(TaskError::Runtime(error)),
-            TaskResultEnum::SpuriousError { error } => return Err(TaskError::Spurious(error)),
+            TaskResultEnum::RuntimeError(error) => return Err(TaskError::Runtime(error)),
+            TaskResultEnum::SpuriousError(error) => return Err(TaskError::Spurious(error)),
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
             }
