@@ -292,8 +292,8 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 
     while let Some(task) = session.make_task()? {
         let task_result = match task {
-            Task::Compute(task) => session.add_result(task.execute()),
-            Task::ComputeWithRng(_task) => {
+            Task::Deterministic(task) => session.add_result(task.execute()),
+            Task::Randomized(_task) => {
                 return Ok(EvidenceVerdict::invalid(
                     "Unexpected RNG-based computation when reproducing the failure",
                 ));

@@ -43,14 +43,14 @@ In an inner loop, we will get tasks from the session until there are any.
 Depending on the task, we need to perform certain actions.
 
 ```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:task_compute}}
+{{#include ../../book-examples/src/session_runner.rs:task_deterministic}}
 ```
 A computation task: execute and give the result back to the session.
 This corresponds to a computation node in the protocol graph.
 Note that it can be offloaded to another `tokio` task, or a thread pool.
 
 ```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:task_compute_rng}}
+{{#include ../../book-examples/src/session_runner.rs:task_randomized}}
 ```
 This is similar to the computation task above, but this one takes an RNG.
 We extract these tasks to their own variant because offloading such tasks to another threads requires forking an RNG, and it is not trivial.

@@ -30,13 +30,13 @@ where
         while let Some(task) = session.make_task()? {
             let task_result = match task {
                 // ANCHOR_END: task_loop
-                // ANCHOR: task_compute
-                Task::Compute(task) => session.add_result(task.execute()),
-                // ANCHOR_END: task_compute
+                // ANCHOR: task_deterministic
+                Task::Deterministic(task) => session.add_result(task.execute()),
+                // ANCHOR_END: task_deterministic
 
-                // ANCHOR: task_compute_rng
-                Task::ComputeWithRng(task) => session.add_result(task.execute(rng)),
-                // ANCHOR_END: task_compute_rng
+                // ANCHOR: task_randomized
+                Task::Randomized(task) => session.add_result(task.execute(rng)),
+                // ANCHOR_END: task_randomized
 
                 // ANCHOR: task_send
                 Task::Send(task) => {

@@ -87,11 +87,11 @@ where
     loop {
         while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
             let task_result = match task {
-                Task::Compute(task) => {
+                Task::Deterministic(task) => {
                     let result = task.execute();
                     session.add_result(result)
                 }
-                Task::ComputeWithRng(task) => {
+                Task::Randomized(task) => {
                     let result = task.execute(rng);
                     session.add_result(result)
                 }
@@ -218,10 +218,10 @@ where
     loop {
         while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
             match task {
-                Task::Compute(task) => {
+                Task::Deterministic(task) => {
                     tasks.spawn_blocking(move || Ok(task.execute()));
                 }
-                Task::ComputeWithRng(task) => {
+                Task::Randomized(task) => {
                     let mut task_rng = ChaCha20Rng::from_rng(&mut *rng)
                         .map_err(|err| RuntimeError::new(format!("Failed to create an RNG: {err}")))?;
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));

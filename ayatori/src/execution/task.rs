@@ -21,7 +21,7 @@ use crate::{
 use crate::protocol_user_api::Session;
 
 #[derive_where::derive_where(Debug)]
-enum ComputeTaskEnum<SP: SessionParameters> {
+enum DeterministicTaskEnum<SP: SessionParameters> {
     ScalarUnattributable {
         store_in: ComputedScalarTag,
         function: UnattributableScalarFunction<SP>,
@@ -69,12 +69,12 @@ enum ComputeTaskEnum<SP: SessionParameters> {
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct ComputeTask<SP: SessionParameters>(ComputeTaskEnum<SP>);
+pub struct DeterministicTask<SP: SessionParameters>(DeterministicTaskEnum<SP>);
 
-impl<SP: SessionParameters> ComputeTask<SP> {
+impl<SP: SessionParameters> DeterministicTask<SP> {
     pub fn execute(self) -> TaskResult<SP> {
         match self.0 {
-            ComputeTaskEnum::ScalarUnattributable {
+            DeterministicTaskEnum::ScalarUnattributable {
                 store_in,
                 function,
                 args,
@@ -86,7 +86,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
-            ComputeTaskEnum::ScalarUnattributableOptional {
+            DeterministicTaskEnum::ScalarUnattributableOptional {
                 store_in,
                 function,
                 args,
@@ -103,7 +103,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
                 }
             }
-            ComputeTaskEnum::MappingElementUnattributable {
+            DeterministicTaskEnum::MappingElementUnattributable {
                 store_in,
                 function,
                 source,
@@ -120,7 +120,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
-            ComputeTaskEnum::MappingElementSenderAttributable {
+            DeterministicTaskEnum::MappingElementSenderAttributable {
                 store_in,
                 function,
                 source,
@@ -144,7 +144,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     }),
                 }
             }
-            ComputeTaskEnum::MappingElementSenderAttributableWithReveal {
+            DeterministicTaskEnum::MappingElementSenderAttributableWithReveal {
                 store_in,
                 function,
                 source,
@@ -170,7 +170,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     }
                 }
             }
-            ComputeTaskEnum::MappingElementThirdPartyAttributable {
+            DeterministicTaskEnum::MappingElementThirdPartyAttributable {
                 store_in,
                 function,
                 source,
@@ -190,7 +190,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     }
                 }
             }
-            ComputeTaskEnum::DeserializeElement {
+            DeterministicTaskEnum::DeserializeElement {
                 store_in,
                 function,
                 source,
@@ -214,13 +214,13 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                     }),
                 }
             }
-            ComputeTaskEnum::PreprocessMessage(task) => task.execute(),
+            DeterministicTaskEnum::PreprocessMessage(task) => task.execute(),
         }
     }
 }
 
 #[derive_where::derive_where(Debug)]
-enum ComputeWithRngTaskEnum<SP: SessionParameters> {
+enum RandomizedTaskEnum<SP: SessionParameters> {
     ScalarUnattributable {
         store_in: ComputedScalarTag,
         function: UnattributableScalarFunctionWithRng<SP>,
@@ -241,12 +241,12 @@ enum ComputeWithRngTaskEnum<SP: SessionParameters> {
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct ComputeWithRngTask<SP: SessionParameters>(ComputeWithRngTaskEnum<SP>);
+pub struct RandomizedTask<SP: SessionParameters>(RandomizedTaskEnum<SP>);
 
-impl<SP: SessionParameters> ComputeWithRngTask<SP> {
+impl<SP: SessionParameters> RandomizedTask<SP> {
     pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
         match self.0 {
-            ComputeWithRngTaskEnum::ScalarUnattributable {
+            RandomizedTaskEnum::ScalarUnattributable {
                 store_in,
                 function,
                 args,
@@ -258,7 +258,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                     Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
-            ComputeWithRngTaskEnum::MappingElementUnattributable {
+            RandomizedTaskEnum::MappingElementUnattributable {
                 store_in,
                 function,
                 source,
@@ -275,7 +275,7 @@ impl<SP: SessionParameters> ComputeWithRngTask<SP> {
                     Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
                 }
             }
-            ComputeWithRngTaskEnum::SerializeAndSignElement {
+            RandomizedTaskEnum::SerializeAndSignElement {
                 store_in,
                 function,
                 source,
@@ -324,14 +324,14 @@ pub enum Task<SP: SessionParameters> {
     /// Send an outgoing message.
     Send(SendTask<SP>),
     /// Perform a dererministic computation.
-    Compute(ComputeTask<SP>),
+    Deterministic(DeterministicTask<SP>),
     /// Perform a computation that needs access to an RNG.
-    ComputeWithRng(ComputeWithRngTask<SP>),
+    Randomized(RandomizedTask<SP>),
 }
 
 impl<SP: SessionParameters> Task<SP> {
     pub(crate) fn preprocess_message(task: PreprocessingTask<SP>) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::PreprocessMessage(task)))
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::PreprocessMessage(task)))
     }
 
     pub(crate) fn direct_message(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
@@ -347,7 +347,7 @@ impl<SP: SessionParameters> Task<SP> {
         function: UnattributableScalarFunction<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::ScalarUnattributable {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarUnattributable {
             store_in,
             function,
             args,
@@ -359,7 +359,7 @@ impl<SP: SessionParameters> Task<SP> {
         function: UnattributableOptionalScalarFunction<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::ScalarUnattributableOptional {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarUnattributableOptional {
             store_in,
             function,
             args,
@@ -371,7 +371,7 @@ impl<SP: SessionParameters> Task<SP> {
         function: UnattributableScalarFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::ComputeWithRng(ComputeWithRngTask(ComputeWithRngTaskEnum::ScalarUnattributable {
+        Self::Randomized(RandomizedTask(RandomizedTaskEnum::ScalarUnattributable {
             store_in,
             function,
             args,
@@ -384,7 +384,7 @@ impl<SP: SessionParameters> Task<SP> {
         function: UnattributableMappingFunction<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::MappingElementUnattributable {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::MappingElementUnattributable {
             store_in,
             source,
             function,
@@ -398,14 +398,12 @@ impl<SP: SessionParameters> Task<SP> {
         function: UnattributableMappingFunctionWithRng<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::ComputeWithRng(ComputeWithRngTask(
-            ComputeWithRngTaskEnum::MappingElementUnattributable {
-                store_in,
-                source,
-                function,
-                args,
-            },
-        ))
+        Self::Randomized(RandomizedTask(RandomizedTaskEnum::MappingElementUnattributable {
+            store_in,
+            source,
+            function,
+            args,
+        }))
     }
 
     pub(crate) fn compute_serialize_and_sign_elem(
@@ -414,7 +412,7 @@ impl<SP: SessionParameters> Task<SP> {
         function: SerializeAndSignFunction<SP>,
         args: SerializeArgs<SP>,
     ) -> Self {
-        Self::ComputeWithRng(ComputeWithRngTask(ComputeWithRngTaskEnum::SerializeAndSignElement {
+        Self::Randomized(RandomizedTask(RandomizedTaskEnum::SerializeAndSignElement {
             store_in,
             source,
             function,
@@ -429,7 +427,7 @@ impl<SP: SessionParameters> Task<SP> {
         args: DeserializeArgs<SP>,
         on_error: OnError,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::DeserializeElement {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::DeserializeElement {
             store_in,
             source,
             function,
@@ -445,13 +443,15 @@ impl<SP: SessionParameters> Task<SP> {
         args: Args<SP>,
         on_error: OnError,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::MappingElementSenderAttributable {
-            store_in,
-            source,
-            function,
-            args,
-            on_error,
-        }))
+        Self::Deterministic(DeterministicTask(
+            DeterministicTaskEnum::MappingElementSenderAttributable {
+                store_in,
+                source,
+                function,
+                args,
+                on_error,
+            },
+        ))
     }
 
     pub(crate) fn compute_mapping_elem_sender_attributable_with_reveal(
@@ -461,8 +461,8 @@ impl<SP: SessionParameters> Task<SP> {
         args: Args<SP>,
         on_error: OnError,
     ) -> Self {
-        Self::Compute(ComputeTask(
-            ComputeTaskEnum::MappingElementSenderAttributableWithReveal {
+        Self::Deterministic(DeterministicTask(
+            DeterministicTaskEnum::MappingElementSenderAttributableWithReveal {
                 store_in,
                 source,
                 function,
@@ -478,12 +478,14 @@ impl<SP: SessionParameters> Task<SP> {
         function: ThirdPartyAttributableMappingFunction<SP>,
         args: Args<SP>,
     ) -> Self {
-        Self::Compute(ComputeTask(ComputeTaskEnum::MappingElementThirdPartyAttributable {
-            store_in,
-            source,
-            function,
-            args,
-        }))
+        Self::Deterministic(DeterministicTask(
+            DeterministicTaskEnum::MappingElementThirdPartyAttributable {
+                store_in,
+                source,
+                function,
+                args,
+            },
+        ))
     }
 }
 
