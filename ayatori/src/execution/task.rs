@@ -21,277 +21,445 @@ use crate::{
 use crate::protocol_user_api::Session;
 
 #[derive_where::derive_where(Debug)]
-enum DeterministicTaskEnum<SP: SessionParameters> {
-    ScalarUnattributable {
-        store_in: ComputedScalarTag,
-        function: UnattributableScalarFunction<SP>,
-        args: Args<SP>,
-    },
-    ScalarUnattributableOptional {
-        store_in: ComputedScalarTag,
-        function: UnattributableOptionalScalarFunction<SP>,
-        args: Args<SP>,
-    },
-    MappingElementUnattributable {
-        store_in: ComputedMappingTag,
-        function: UnattributableMappingFunction<SP>,
-        source: SP::Verifier,
-        args: Args<SP>,
-    },
-    MappingElementSenderAttributable {
-        store_in: ComputedMappingTag,
-        function: SenderAttributableMappingFunction<SP>,
-        source: SP::Verifier,
-        args: Args<SP>,
-        on_error: OnError,
-    },
-    MappingElementSenderAttributableWithReveal {
-        store_in: ComputedMappingTag,
-        function: SenderAttributableWithRevealMappingFunction<SP>,
-        source: SP::Verifier,
-        args: Args<SP>,
-        on_error: OnError,
-    },
-    MappingElementThirdPartyAttributable {
-        store_in: ComputedMappingTag,
-        function: ThirdPartyAttributableMappingFunction<SP>,
-        source: SP::Verifier,
-        args: Args<SP>,
-    },
-    DeserializeElement {
-        store_in: ReceivedTag,
-        function: DeserializeFunction<SP>,
-        source: SP::Verifier,
-        args: DeserializeArgs<SP>,
-        on_error: OnError,
-    },
-    PreprocessMessage(PreprocessingTask<SP>),
+pub(crate) struct ScalarUnattributableTask<SP: SessionParameters> {
+    store_in: ComputedScalarTag,
+    function: UnattributableScalarFunction<SP>,
+    args: Args<SP>,
 }
 
-#[derive_where::derive_where(Debug)]
-pub struct DeterministicTask<SP: SessionParameters>(DeterministicTaskEnum<SP>);
+impl<SP: SessionParameters> ScalarUnattributableTask<SP> {
+    pub fn new(store_in: ComputedScalarTag, function: UnattributableScalarFunction<SP>, args: Args<SP>) -> Self {
+        Self {
+            store_in,
+            function,
+            args,
+        }
+    }
 
-impl<SP: SessionParameters> DeterministicTask<SP> {
     pub fn execute(self) -> TaskResult<SP> {
-        match self.0 {
-            DeterministicTaskEnum::ScalarUnattributable {
-                store_in,
-                function,
-                args,
-            } => {
-                let store_in = ScalarTag::Computed(store_in);
-                match function.call(&args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                }
-            }
-            DeterministicTaskEnum::ScalarUnattributableOptional {
-                store_in,
-                function,
-                args,
-            } => {
-                let store_in = ScalarTag::Computed(store_in);
-                match function.call(&args) {
-                    Ok(result) => TaskResult(result.map_or_else(
-                        || TaskResultEnum::NoActionNeeded,
-                        |value| TaskResultEnum::ComputedScalar {
-                            store_in,
-                            result: value,
-                        },
-                    )),
-                    Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                }
-            }
-            DeterministicTaskEnum::MappingElementUnattributable {
-                store_in,
-                function,
-                source,
-                args,
-            } => {
-                let store_in = MappingTag::Computed(store_in);
-                match function.call(&source, &args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
-                        store_in,
-                        source,
-                        result,
-                    }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                }
-            }
-            DeterministicTaskEnum::MappingElementSenderAttributable {
-                store_in,
-                function,
-                source,
-                args,
-                on_error,
-            } => {
-                let store_in = MappingTag::Computed(store_in);
-                match function.call(&source, &args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
-                        store_in,
-                        source,
-                        result,
-                    }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                    Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
-                        store_in,
-                        guilty_party: source,
-                        error,
-                        on_error,
-                    }),
-                }
-            }
-            DeterministicTaskEnum::MappingElementSenderAttributableWithReveal {
-                store_in,
-                function,
-                source,
-                args,
-                on_error,
-            } => {
-                let store_in = MappingTag::Computed(store_in);
-                match function.call(&source, &args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
-                        store_in,
-                        source,
-                        result,
-                    }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                    Err(MaybeAttributableError::Attributable(error)) => {
-                        TaskResult(TaskResultEnum::SenderErrorWithReveal {
-                            store_in,
-                            guilty_party: source,
-                            error,
-                            on_error,
-                        })
-                    }
-                }
-            }
-            DeterministicTaskEnum::MappingElementThirdPartyAttributable {
-                store_in,
-                function,
-                source,
-                args,
-            } => {
-                let store_in = MappingTag::Computed(store_in);
-                match function.call(&source, &args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
-                        store_in,
-                        source,
-                        result,
-                    }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                    Err(MaybeAttributableError::Attributable(error)) => {
-                        TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
-                    }
-                }
-            }
-            DeterministicTaskEnum::DeserializeElement {
-                store_in,
-                function,
-                source,
-                args,
-                on_error,
-            } => {
-                let store_in = MappingTag::Received(store_in);
-                match function.call(&args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
-                        store_in,
-                        source,
-                        result,
-                    }),
-                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                    Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
-                        store_in,
-                        guilty_party: source,
-                        error,
-                        on_error,
-                    }),
-                }
-            }
-            DeterministicTaskEnum::PreprocessMessage(task) => task.execute(),
+        let store_in = ScalarTag::Computed(self.store_in);
+        match self.function.call(&self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
+            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
         }
     }
 }
 
-#[derive_where::derive_where(Debug)]
-enum RandomizedTaskEnum<SP: SessionParameters> {
-    ScalarUnattributable {
-        store_in: ComputedScalarTag,
-        function: UnattributableScalarFunctionWithRng<SP>,
-        args: Args<SP>,
-    },
-    MappingElementUnattributable {
-        store_in: ComputedMappingTag,
-        function: UnattributableMappingFunctionWithRng<SP>,
-        source: SP::Verifier,
-        args: Args<SP>,
-    },
-    SerializeAndSignElement {
-        store_in: LocalSignedTag,
-        function: SerializeAndSignFunction<SP>,
-        source: SP::Verifier,
-        args: SerializeArgs<SP>,
-    },
+impl<SP: SessionParameters> From<ScalarUnattributableTask<SP>> for Task<SP> {
+    fn from(source: ScalarUnattributableTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarUnattributable(source)))
+    }
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct RandomizedTask<SP: SessionParameters>(RandomizedTaskEnum<SP>);
+pub(crate) struct ScalarUnattributableOptionalTask<SP: SessionParameters> {
+    store_in: ComputedScalarTag,
+    function: UnattributableOptionalScalarFunction<SP>,
+    args: Args<SP>,
+}
 
-impl<SP: SessionParameters> RandomizedTask<SP> {
-    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
-        match self.0 {
-            RandomizedTaskEnum::ScalarUnattributable {
+impl<SP: SessionParameters> ScalarUnattributableOptionalTask<SP> {
+    pub fn new(
+        store_in: ComputedScalarTag,
+        function: UnattributableOptionalScalarFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            args,
+        }
+    }
+
+    pub fn execute(self) -> TaskResult<SP> {
+        let store_in = ScalarTag::Computed(self.store_in);
+        match self.function.call(&self.args) {
+            Ok(result) => TaskResult(result.map_or_else(
+                || TaskResultEnum::NoActionNeeded,
+                |value| TaskResultEnum::ComputedScalar {
+                    store_in,
+                    result: value,
+                },
+            )),
+            Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<ScalarUnattributableOptionalTask<SP>> for Task<SP> {
+    fn from(source: ScalarUnattributableOptionalTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarUnattributableOptional(
+            source,
+        )))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct ElementUnattributableTask<SP: SessionParameters> {
+    store_in: ComputedMappingTag,
+    function: UnattributableMappingFunction<SP>,
+    index: SP::Verifier,
+    args: Args<SP>,
+}
+
+impl<SP: SessionParameters> ElementUnattributableTask<SP> {
+    pub fn new(
+        store_in: ComputedMappingTag,
+        function: UnattributableMappingFunction<SP>,
+        index: SP::Verifier,
+        args: Args<SP>,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            index,
+            args,
+        }
+    }
+
+    pub fn execute(self) -> TaskResult<SP> {
+        let store_in = MappingTag::Computed(self.store_in);
+        match self.function.call(&self.index, &self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
                 store_in,
-                function,
-                args,
-            } => {
-                let store_in = ScalarTag::Computed(store_in);
-                match function.call(rng, &args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                }
-            }
-            RandomizedTaskEnum::MappingElementUnattributable {
+                index: self.index,
+                result,
+            }),
+            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<ElementUnattributableTask<SP>> for Task<SP> {
+    fn from(source: ElementUnattributableTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ElementUnattributable(source)))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct ElementSenderAttributableTask<SP: SessionParameters> {
+    store_in: ComputedMappingTag,
+    function: SenderAttributableMappingFunction<SP>,
+    index: SP::Verifier,
+    args: Args<SP>,
+    on_error: OnError,
+}
+
+impl<SP: SessionParameters> ElementSenderAttributableTask<SP> {
+    pub fn new(
+        store_in: ComputedMappingTag,
+        function: SenderAttributableMappingFunction<SP>,
+        index: SP::Verifier,
+        args: Args<SP>,
+        on_error: OnError,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            index,
+            args,
+            on_error,
+        }
+    }
+
+    pub fn execute(self) -> TaskResult<SP> {
+        let store_in = MappingTag::Computed(self.store_in);
+        match self.function.call(&self.index, &self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
                 store_in,
-                function,
-                source,
-                args,
-            } => {
-                let store_in = MappingTag::Computed(store_in);
-                match function.call(rng, &source, &args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
-                        store_in,
-                        source,
-                        result,
-                    }),
-                    Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                    Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
-                }
-            }
-            RandomizedTaskEnum::SerializeAndSignElement {
+                index: self.index,
+                result,
+            }),
+            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                 store_in,
-                function,
-                source,
-                args,
-            } => {
-                let store_in = MappingTag::LocalSigned(store_in);
-                match function.call(rng, &source, &args) {
-                    Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
-                        store_in,
-                        source,
-                        result,
-                    }),
-                    Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
-                }
+                guilty_party: self.index,
+                error,
+                on_error: self.on_error,
+            }),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<ElementSenderAttributableTask<SP>> for Task<SP> {
+    fn from(source: ElementSenderAttributableTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ElementSenderAttributable(
+            source,
+        )))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct ElementSenderAttributableWithRevealTask<SP: SessionParameters> {
+    store_in: ComputedMappingTag,
+    function: SenderAttributableWithRevealMappingFunction<SP>,
+    index: SP::Verifier,
+    args: Args<SP>,
+    on_error: OnError,
+}
+
+impl<SP: SessionParameters> ElementSenderAttributableWithRevealTask<SP> {
+    pub fn new(
+        store_in: ComputedMappingTag,
+        function: SenderAttributableWithRevealMappingFunction<SP>,
+        index: SP::Verifier,
+        args: Args<SP>,
+        on_error: OnError,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            index,
+            args,
+            on_error,
+        }
+    }
+
+    pub fn execute(self) -> TaskResult<SP> {
+        let store_in = MappingTag::Computed(self.store_in);
+        match self.function.call(&self.index, &self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                store_in,
+                index: self.index,
+                result,
+            }),
+            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderErrorWithReveal {
+                store_in,
+                guilty_party: self.index,
+                error,
+                on_error: self.on_error,
+            }),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<ElementSenderAttributableWithRevealTask<SP>> for Task<SP> {
+    fn from(source: ElementSenderAttributableWithRevealTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(
+            DeterministicTaskEnum::ElementSenderAttributableWithReveal(source),
+        ))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct ElementThirdPartyAttributableTask<SP: SessionParameters> {
+    store_in: ComputedMappingTag,
+    function: ThirdPartyAttributableMappingFunction<SP>,
+    index: SP::Verifier,
+    args: Args<SP>,
+}
+
+impl<SP: SessionParameters> ElementThirdPartyAttributableTask<SP> {
+    pub fn new(
+        store_in: ComputedMappingTag,
+        function: ThirdPartyAttributableMappingFunction<SP>,
+        index: SP::Verifier,
+        args: Args<SP>,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            index,
+            args,
+        }
+    }
+
+    pub fn execute(self) -> TaskResult<SP> {
+        let store_in = MappingTag::Computed(self.store_in);
+        match self.function.call(&self.index, &self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                store_in,
+                index: self.index,
+                result,
+            }),
+            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => {
+                TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
             }
         }
+    }
+}
+
+impl<SP: SessionParameters> From<ElementThirdPartyAttributableTask<SP>> for Task<SP> {
+    fn from(source: ElementThirdPartyAttributableTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ElementThirdPartyAttributable(
+            source,
+        )))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct DeserializeElementTask<SP: SessionParameters> {
+    store_in: ReceivedTag,
+    function: DeserializeFunction<SP>,
+    index: SP::Verifier,
+    args: DeserializeArgs<SP>,
+    on_error: OnError,
+}
+
+impl<SP: SessionParameters> DeserializeElementTask<SP> {
+    pub fn new(
+        store_in: ReceivedTag,
+        function: DeserializeFunction<SP>,
+        index: SP::Verifier,
+        args: DeserializeArgs<SP>,
+        on_error: OnError,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            index,
+            args,
+            on_error,
+        }
+    }
+
+    pub fn execute(self) -> TaskResult<SP> {
+        let store_in = MappingTag::Received(self.store_in);
+        match self.function.call(&self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                store_in,
+                index: self.index,
+                result,
+            }),
+            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
+                store_in,
+                guilty_party: self.index,
+                error,
+                on_error: self.on_error,
+            }),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<DeserializeElementTask<SP>> for Task<SP> {
+    fn from(source: DeserializeElementTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::DeserializeElement(source)))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct RngScalarUnattributableTask<SP: SessionParameters> {
+    store_in: ComputedScalarTag,
+    function: UnattributableScalarFunctionWithRng<SP>,
+    args: Args<SP>,
+}
+
+impl<SP: SessionParameters> RngScalarUnattributableTask<SP> {
+    pub fn new(store_in: ComputedScalarTag, function: UnattributableScalarFunctionWithRng<SP>, args: Args<SP>) -> Self {
+        Self {
+            store_in,
+            function,
+            args,
+        }
+    }
+
+    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+        let store_in = ScalarTag::Computed(self.store_in);
+        match self.function.call(rng, &self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
+            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<RngScalarUnattributableTask<SP>> for Task<SP> {
+    fn from(source: RngScalarUnattributableTask<SP>) -> Self {
+        Self::Randomized(RandomizedTask(RandomizedTaskEnum::ScalarUnattributable(source)))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct RngElementUnattributableTask<SP: SessionParameters> {
+    store_in: ComputedMappingTag,
+    function: UnattributableMappingFunctionWithRng<SP>,
+    index: SP::Verifier,
+    args: Args<SP>,
+}
+
+impl<SP: SessionParameters> RngElementUnattributableTask<SP> {
+    pub fn new(
+        store_in: ComputedMappingTag,
+        function: UnattributableMappingFunctionWithRng<SP>,
+        index: SP::Verifier,
+        args: Args<SP>,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            index,
+            args,
+        }
+    }
+
+    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+        let store_in = MappingTag::Computed(self.store_in);
+        match self.function.call(rng, &self.index, &self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                store_in,
+                index: self.index,
+                result,
+            }),
+            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<RngElementUnattributableTask<SP>> for Task<SP> {
+    fn from(source: RngElementUnattributableTask<SP>) -> Self {
+        Self::Randomized(RandomizedTask(RandomizedTaskEnum::ElementUnattributable(source)))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct SerializeAndSignElementTask<SP: SessionParameters> {
+    store_in: LocalSignedTag,
+    function: SerializeAndSignFunction<SP>,
+    index: SP::Verifier,
+    args: SerializeArgs<SP>,
+}
+
+impl<SP: SessionParameters> SerializeAndSignElementTask<SP> {
+    pub fn new(
+        store_in: LocalSignedTag,
+        function: SerializeAndSignFunction<SP>,
+        index: SP::Verifier,
+        args: SerializeArgs<SP>,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            index,
+            args,
+        }
+    }
+
+    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+        let store_in = MappingTag::LocalSigned(self.store_in);
+        match self.function.call(rng, &self.index, &self.args) {
+            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+                store_in,
+                index: self.index,
+                result,
+            }),
+            Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
+    fn from(source: SerializeAndSignElementTask<SP>) -> Self {
+        Self::Randomized(RandomizedTask(RandomizedTaskEnum::SerializeAndSignElement(source)))
     }
 }
 
@@ -303,6 +471,14 @@ pub struct SendTask<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
+    pub(crate) fn new(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
+        Self {
+            store_in,
+            destination,
+            signed_value,
+        }
+    }
+
     pub fn execute(self) -> (Option<Message<SP>>, TaskResult<SP>) {
         let signed_value = match self.signed_value.downcast::<SignedValue<SP>>() {
             Ok(value) => value,
@@ -318,244 +494,21 @@ impl<SP: SessionParameters> SendTask<SP> {
     }
 }
 
-/// A session task to be executed.
-#[derive_where::derive_where(Debug)]
-pub enum Task<SP: SessionParameters> {
-    /// Send an outgoing message.
-    Send(SendTask<SP>),
-    /// Perform a dererministic computation.
-    Deterministic(DeterministicTask<SP>),
-    /// Perform a computation that needs access to an RNG.
-    Randomized(RandomizedTask<SP>),
-}
-
-impl<SP: SessionParameters> Task<SP> {
-    pub(crate) fn preprocess_message(task: PreprocessingTask<SP>) -> Self {
-        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::PreprocessMessage(task)))
-    }
-
-    pub(crate) fn direct_message(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
-        Self::Send(SendTask {
-            store_in,
-            destination,
-            signed_value,
-        })
-    }
-
-    pub(crate) fn compute_scalar_unattributable(
-        store_in: ComputedScalarTag,
-        function: UnattributableScalarFunction<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarUnattributable {
-            store_in,
-            function,
-            args,
-        }))
-    }
-
-    pub(crate) fn compute_scalar_unattributable_optional(
-        store_in: ComputedScalarTag,
-        function: UnattributableOptionalScalarFunction<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarUnattributableOptional {
-            store_in,
-            function,
-            args,
-        }))
-    }
-
-    pub(crate) fn compute_scalar_unattributable_with_rng(
-        store_in: ComputedScalarTag,
-        function: UnattributableScalarFunctionWithRng<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::Randomized(RandomizedTask(RandomizedTaskEnum::ScalarUnattributable {
-            store_in,
-            function,
-            args,
-        }))
-    }
-
-    pub(crate) fn compute_mapping_elem_unattributable(
-        store_in: ComputedMappingTag,
-        source: SP::Verifier,
-        function: UnattributableMappingFunction<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::MappingElementUnattributable {
-            store_in,
-            source,
-            function,
-            args,
-        }))
-    }
-
-    pub(crate) fn compute_mapping_elem_unattributable_with_rng(
-        store_in: ComputedMappingTag,
-        source: SP::Verifier,
-        function: UnattributableMappingFunctionWithRng<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::Randomized(RandomizedTask(RandomizedTaskEnum::MappingElementUnattributable {
-            store_in,
-            source,
-            function,
-            args,
-        }))
-    }
-
-    pub(crate) fn compute_serialize_and_sign_elem(
-        store_in: LocalSignedTag,
-        source: SP::Verifier,
-        function: SerializeAndSignFunction<SP>,
-        args: SerializeArgs<SP>,
-    ) -> Self {
-        Self::Randomized(RandomizedTask(RandomizedTaskEnum::SerializeAndSignElement {
-            store_in,
-            source,
-            function,
-            args,
-        }))
-    }
-
-    pub(crate) fn compute_deserialize_elem(
-        store_in: ReceivedTag,
-        source: SP::Verifier,
-        function: DeserializeFunction<SP>,
-        args: DeserializeArgs<SP>,
-        on_error: OnError,
-    ) -> Self {
-        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::DeserializeElement {
-            store_in,
-            source,
-            function,
-            args,
-            on_error,
-        }))
-    }
-
-    pub(crate) fn compute_mapping_elem_sender_attributable(
-        store_in: ComputedMappingTag,
-        source: SP::Verifier,
-        function: SenderAttributableMappingFunction<SP>,
-        args: Args<SP>,
-        on_error: OnError,
-    ) -> Self {
-        Self::Deterministic(DeterministicTask(
-            DeterministicTaskEnum::MappingElementSenderAttributable {
-                store_in,
-                source,
-                function,
-                args,
-                on_error,
-            },
-        ))
-    }
-
-    pub(crate) fn compute_mapping_elem_sender_attributable_with_reveal(
-        store_in: ComputedMappingTag,
-        source: SP::Verifier,
-        function: SenderAttributableWithRevealMappingFunction<SP>,
-        args: Args<SP>,
-        on_error: OnError,
-    ) -> Self {
-        Self::Deterministic(DeterministicTask(
-            DeterministicTaskEnum::MappingElementSenderAttributableWithReveal {
-                store_in,
-                source,
-                function,
-                args,
-                on_error,
-            },
-        ))
-    }
-
-    pub(crate) fn compute_mapping_elem_third_party_attributable(
-        store_in: ComputedMappingTag,
-        source: SP::Verifier,
-        function: ThirdPartyAttributableMappingFunction<SP>,
-        args: Args<SP>,
-    ) -> Self {
-        Self::Deterministic(DeterministicTask(
-            DeterministicTaskEnum::MappingElementThirdPartyAttributable {
-                store_in,
-                source,
-                function,
-                args,
-            },
-        ))
+impl<SP: SessionParameters> From<SendTask<SP>> for Task<SP> {
+    fn from(source: SendTask<SP>) -> Self {
+        Self::Send(source)
     }
 }
 
 #[derive_where::derive_where(Debug)]
-pub struct TaskResult<SP: SessionParameters>(TaskResultEnum<SP>);
-
-impl<SP: SessionParameters> TaskResult<SP> {
-    pub(crate) fn into_enum(self) -> TaskResultEnum<SP> {
-        self.0
-    }
-}
-
-#[derive_where::derive_where(Debug)]
-pub(crate) enum TaskResultEnum<SP: SessionParameters> {
-    NoActionNeeded,
-    Sent {
-        store_in: MappingTag,
-        destination: SP::Verifier,
-    },
-    ComputedScalar {
-        store_in: ScalarTag,
-        result: Value,
-    },
-    ComputedMappingElement {
-        store_in: MappingTag,
-        source: SP::Verifier,
-        result: Value,
-    },
-    Preprocessed {
-        store_in: MappingTag,
-        source: SP::Verifier,
-        value: Value,
-    },
-    RuntimeError(RuntimeError),
-    SpuriousError(SpuriousError),
-    SenderError {
-        store_in: MappingTag,
-        guilty_party: SP::Verifier,
-        error: SenderError,
-        on_error: OnError,
-    },
-    SenderErrorWithReveal {
-        store_in: MappingTag,
-        guilty_party: SP::Verifier,
-        error: SenderErrorWithReveal<SP>,
-        on_error: OnError,
-    },
-    ThirdPartyError {
-        store_in: MappingTag,
-        error: ThirdPartyError<SP>,
-    },
-    MessageError {
-        message_id: MessageId<SP>,
-        description: String,
-    },
-}
-
-#[derive_where::derive_where(Debug)]
-pub struct PreprocessingTask<SP: SessionParameters> {
+pub(crate) struct PreprocessMessageTask<SP: SessionParameters> {
     session_data: Arc<SessionData<SP>>,
     message_id: MessageId<SP>,
     signed_value: SignedValue<SP>,
 }
 
-impl<SP: SessionParameters> PreprocessingTask<SP> {
-    pub(crate) fn new(
-        session_data: &Arc<SessionData<SP>>,
-        message_id: MessageId<SP>,
-        signed_value: SignedValue<SP>,
-    ) -> Self {
+impl<SP: SessionParameters> PreprocessMessageTask<SP> {
+    pub fn new(session_data: &Arc<SessionData<SP>>, message_id: MessageId<SP>, signed_value: SignedValue<SP>) -> Self {
         Self {
             session_data: session_data.clone(),
             message_id,
@@ -628,4 +581,125 @@ impl<SP: SessionParameters> PreprocessingTask<SP> {
             value,
         })
     }
+}
+
+impl<SP: SessionParameters> From<PreprocessMessageTask<SP>> for Task<SP> {
+    fn from(source: PreprocessMessageTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::PreprocessMessage(source)))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+enum DeterministicTaskEnum<SP: SessionParameters> {
+    ScalarUnattributable(ScalarUnattributableTask<SP>),
+    ScalarUnattributableOptional(ScalarUnattributableOptionalTask<SP>),
+    ElementUnattributable(ElementUnattributableTask<SP>),
+    ElementSenderAttributable(ElementSenderAttributableTask<SP>),
+    ElementSenderAttributableWithReveal(ElementSenderAttributableWithRevealTask<SP>),
+    ElementThirdPartyAttributable(ElementThirdPartyAttributableTask<SP>),
+    DeserializeElement(DeserializeElementTask<SP>),
+    PreprocessMessage(PreprocessMessageTask<SP>),
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct DeterministicTask<SP: SessionParameters>(DeterministicTaskEnum<SP>);
+
+impl<SP: SessionParameters> DeterministicTask<SP> {
+    pub fn execute(self) -> TaskResult<SP> {
+        match self.0 {
+            DeterministicTaskEnum::ScalarUnattributable(task) => task.execute(),
+            DeterministicTaskEnum::ScalarUnattributableOptional(task) => task.execute(),
+            DeterministicTaskEnum::ElementUnattributable(task) => task.execute(),
+            DeterministicTaskEnum::ElementSenderAttributable(task) => task.execute(),
+            DeterministicTaskEnum::ElementSenderAttributableWithReveal(task) => task.execute(),
+            DeterministicTaskEnum::ElementThirdPartyAttributable(task) => task.execute(),
+            DeterministicTaskEnum::DeserializeElement(task) => task.execute(),
+            DeterministicTaskEnum::PreprocessMessage(task) => task.execute(),
+        }
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+enum RandomizedTaskEnum<SP: SessionParameters> {
+    ScalarUnattributable(RngScalarUnattributableTask<SP>),
+    ElementUnattributable(RngElementUnattributableTask<SP>),
+    SerializeAndSignElement(SerializeAndSignElementTask<SP>),
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct RandomizedTask<SP: SessionParameters>(RandomizedTaskEnum<SP>);
+
+impl<SP: SessionParameters> RandomizedTask<SP> {
+    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+        match self.0 {
+            RandomizedTaskEnum::ScalarUnattributable(task) => task.execute(rng),
+            RandomizedTaskEnum::ElementUnattributable(task) => task.execute(rng),
+            RandomizedTaskEnum::SerializeAndSignElement(task) => task.execute(rng),
+        }
+    }
+}
+
+/// A session task to be executed.
+#[derive_where::derive_where(Debug)]
+pub enum Task<SP: SessionParameters> {
+    /// Send an outgoing message.
+    Send(SendTask<SP>),
+    /// Perform a dererministic computation.
+    Deterministic(DeterministicTask<SP>),
+    /// Perform a computation that needs access to an RNG.
+    Randomized(RandomizedTask<SP>),
+}
+
+#[derive_where::derive_where(Debug)]
+pub struct TaskResult<SP: SessionParameters>(TaskResultEnum<SP>);
+
+impl<SP: SessionParameters> TaskResult<SP> {
+    pub(crate) fn into_inner(self) -> TaskResultEnum<SP> {
+        self.0
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) enum TaskResultEnum<SP: SessionParameters> {
+    NoActionNeeded,
+    Sent {
+        store_in: MappingTag,
+        destination: SP::Verifier,
+    },
+    ComputedScalar {
+        store_in: ScalarTag,
+        result: Value,
+    },
+    ComputedMappingElement {
+        store_in: MappingTag,
+        index: SP::Verifier,
+        result: Value,
+    },
+    Preprocessed {
+        store_in: MappingTag,
+        source: SP::Verifier,
+        value: Value,
+    },
+    RuntimeError(RuntimeError),
+    SpuriousError(SpuriousError),
+    SenderError {
+        store_in: MappingTag,
+        guilty_party: SP::Verifier,
+        error: SenderError,
+        on_error: OnError,
+    },
+    SenderErrorWithReveal {
+        store_in: MappingTag,
+        guilty_party: SP::Verifier,
+        error: SenderErrorWithReveal<SP>,
+        on_error: OnError,
+    },
+    ThirdPartyError {
+        store_in: MappingTag,
+        error: ThirdPartyError<SP>,
+    },
+    MessageError {
+        message_id: MessageId<SP>,
+        description: String,
+    },
 }

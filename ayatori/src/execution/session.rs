@@ -16,7 +16,12 @@ use super::{
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
-    task::{PreprocessingTask, Task, TaskResult, TaskResultEnum},
+    task::{
+        DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
+        ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
+        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarUnattributableOptionalTask,
+        ScalarUnattributableTask, SendTask, SerializeAndSignElementTask, Task, TaskResult, TaskResultEnum,
+    },
 };
 #[cfg(feature = "dev")]
 use crate::dev::Replacement;
@@ -57,7 +62,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
     external_bans: BTreeMap<SP::Verifier, String>,
-    preprocessing_tasks: Vec<PreprocessingTask<SP>>,
+    preprocessing_tasks: Vec<PreprocessMessageTask<SP>>,
     phantom: PhantomData<fn() -> P>,
 }
 
@@ -316,7 +321,7 @@ where
     pub fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
         let tasks = message
             .into_values()
-            .map(|signed_value| PreprocessingTask::new(&self.data, message_id.clone(), signed_value))
+            .map(|signed_value| PreprocessMessageTask::new(&self.data, message_id.clone(), signed_value))
             .collect::<Vec<_>>();
         self.preprocessing_tasks.extend(tasks);
     }
@@ -326,7 +331,7 @@ where
     /// The returned task may be offloaded to a thread pool.
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, RuntimeError> {
         if let Some(task) = self.preprocessing_tasks.pop() {
-            return Ok(Some(Task::preprocess_message(task)));
+            return Ok(Some(task.into()));
         }
 
         while let Some(action) = self.ruleset.pop_action() {
@@ -340,7 +345,7 @@ where
                         .storage
                         .get_elem(&MappingTag::LocalSigned(to_send), &destination)
                         .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-                    return Ok(Some(Task::direct_message(store_in, destination, signed_value)));
+                    return Ok(Some(SendTask::new(store_in, destination, signed_value).into()));
                 }
                 Action::ComputeScalar {
                     store_in,
@@ -354,13 +359,13 @@ where
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         ScalarFunction::Unattributable(function) => {
-                            Task::compute_scalar_unattributable(store_in, function, args)
+                            ScalarUnattributableTask::new(store_in, function, args).into()
                         }
                         ScalarFunction::UnattributableOptional(function) => {
-                            Task::compute_scalar_unattributable_optional(store_in, function, args)
+                            ScalarUnattributableOptionalTask::new(store_in, function, args).into()
                         }
                         ScalarFunction::UnattributableWithRng(function) => {
-                            Task::compute_scalar_unattributable_with_rng(store_in, function, args)
+                            RngScalarUnattributableTask::new(store_in, function, args).into()
                         }
                     }));
                 }
@@ -378,21 +383,20 @@ where
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         MappingFunction::Unattributable(function) => {
-                            Task::compute_mapping_elem_unattributable(store_in, index, function, args)
+                            ElementUnattributableTask::new(store_in, function, index, args).into()
                         }
                         MappingFunction::UnattributableWithRng(function) => {
-                            Task::compute_mapping_elem_unattributable_with_rng(store_in, index, function, args)
+                            RngElementUnattributableTask::new(store_in, function, index, args).into()
                         }
                         MappingFunction::SenderAttributable(function) => {
-                            Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
+                            ElementSenderAttributableTask::new(store_in, function, index, args, on_error).into()
                         }
                         MappingFunction::SenderAttributableWithReveal(function) => {
-                            Task::compute_mapping_elem_sender_attributable_with_reveal(
-                                store_in, index, function, args, on_error,
-                            )
+                            ElementSenderAttributableWithRevealTask::new(store_in, function, index, args, on_error)
+                                .into()
                         }
                         MappingFunction::ThirdPartyAttributable(function) => {
-                            Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
+                            ElementThirdPartyAttributableTask::new(store_in, function, index, args).into()
                         }
                     }));
                 }
@@ -419,9 +423,9 @@ where
                     .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
 
                     let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
-                    return Ok(Some(Task::compute_serialize_and_sign_elem(
-                        store_in, index, function, args,
-                    )));
+                    return Ok(Some(
+                        SerializeAndSignElementTask::new(store_in, function, index, args).into(),
+                    ));
                 }
                 Action::ComputeDeserializeElement {
                     store_in,
@@ -440,9 +444,9 @@ where
                         RuntimeError::expect(format!("{message_name} does not have expected senders"))
                     })?;
                     let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
-                    return Ok(Some(Task::compute_deserialize_elem(
-                        store_in, index, function, args, on_error,
-                    )));
+                    return Ok(Some(
+                        DeserializeElementTask::new(store_in, function, index, args, on_error).into(),
+                    ));
                 }
                 Action::MergeScalar { store_in, left, right } => {
                     self.add_scalar(
@@ -472,7 +476,7 @@ where
 
     /// Registers the result of an executed task.
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
-        match result.into_enum() {
+        match result.into_inner() {
             TaskResultEnum::NoActionNeeded => {}
             TaskResultEnum::RuntimeError(error) => return Err(TaskError::Runtime(error)),
             TaskResultEnum::SpuriousError(error) => return Err(TaskError::Spurious(error)),
@@ -484,10 +488,10 @@ where
             }
             TaskResultEnum::ComputedMappingElement {
                 store_in,
-                source,
+                index,
                 result,
             } => {
-                self.add_element(&store_in, &source, result)?;
+                self.add_element(&store_in, &index, result)?;
             }
             TaskResultEnum::SenderError {
                 store_in,
