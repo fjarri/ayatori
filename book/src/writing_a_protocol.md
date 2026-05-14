@@ -190,7 +190,7 @@ which translates to
 {{#include ../../book-examples/src/distributed_rng.rs:build-check-commitment}}
 ```
 When for some ID, `b[ID]`, `r[ID]`, and `c[ID]` are available, the closure will be called with the arguments `b`, `r`, and `c` set to these values.
-If the check fails, we return a new [`SenderAttributableError`](protocol_author_api::SenderAttributableError), because the party that sent mismatched values is at fault.
+If the check fails, we return a new [`SenderError`](protocol_author_api::SenderError), because the party that sent mismatched values is at fault.
 
 Note that if an error is returned, the result is *not* saved to `commitment_correct`, and therefore the following `collect` will never be able to execute (since it requires elements from all parties).
 The execution environment can detect it, and terminate the execution with the corresponding status.
