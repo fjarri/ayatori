@@ -96,7 +96,7 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                 let store_in = ScalarTag::Computed(store_in);
                 match function.call(&args) {
                     Ok(result) => TaskResult(result.map_or_else(
-                        || TaskResultEnum::Success,
+                        || TaskResultEnum::NoActionNeeded,
                         |value| TaskResultEnum::ComputedScalar {
                             store_in,
                             result: value,
@@ -500,7 +500,7 @@ impl<SP: SessionParameters> TaskResult<SP> {
 
 #[derive_where::derive_where(Debug)]
 pub(crate) enum TaskResultEnum<SP: SessionParameters> {
-    Success,
+    NoActionNeeded,
     Sent {
         store_in: MappingTag,
         destination: SP::Verifier,
@@ -513,6 +513,11 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
         store_in: MappingTag,
         source: SP::Verifier,
         result: Value,
+    },
+    Preprocessed {
+        store_in: MappingTag,
+        source: SP::Verifier,
+        value: Value,
     },
     RuntimeError {
         error: RuntimeError,
@@ -535,11 +540,6 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
     ThirdPartyError {
         store_in: MappingTag,
         error: ThirdPartyError<SP>,
-    },
-    Preprocessed {
-        store_in: MappingTag,
-        source: SP::Verifier,
-        value: Value,
     },
     MessageError {
         message_id: MessageId<SP>,

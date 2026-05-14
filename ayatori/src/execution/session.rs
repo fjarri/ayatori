@@ -473,7 +473,7 @@ where
     /// Registers the result of an executed task.
     pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
         match result.into_enum() {
-            TaskResultEnum::Success => {}
+            TaskResultEnum::NoActionNeeded => {}
             TaskResultEnum::RuntimeError { error } => return Err(TaskError::Runtime(error)),
             TaskResultEnum::SpuriousError { error } => return Err(TaskError::Spurious(error)),
             TaskResultEnum::Sent { store_in, destination } => {
