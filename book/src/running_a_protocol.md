@@ -29,14 +29,15 @@ The whole body of the function is an event loop.
 {{#include ../../book-examples/src/session_runner.rs:event_loop}}
 ```
 In it, we will repeatedly perform the following actions:
-- Drain all the available tasks and execute them;
-- Check if the session is finalizable (if it is, exit the loop);
-- Get incoming messages from the channel and pass them to the session.
+- Get a task from the session;
+- Execute the task;
+- Depending on the new session state finalize it or continue;
+- When there are no more tasks, get incoming messages from the channel and pass them to the session.
 
 
 ### Processing tasks
 
-In an inner loop, we will get tasks from the session until there are any.
+In an inner loop, we will get tasks from the session while there are any.
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_loop}}
 ```
@@ -60,43 +61,43 @@ We extract these tasks to their own variant because offloading such tasks to ano
 ```
 This tasks requests that the user sends the message in the task.
 The destination can be obtained from [`Message::destination()`](protocol_user_api::Message::destination) method.
+`message` can be `None` if there has been some error serializing or signing a message; the error will be reported via `result` to be processed in the host thread.
+
 Note that the destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
 We are also pushing to the channel not a [`Message`](protocol_user_api::Message) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
 
-Incorporating the result of a task back into the session may result in a message-attributable error, which we report to the same outgoing channel:
+
+### Processing the task result
+
+After the task is executed, its result needs to be incorporated back into the session.
+This consumes the session object and may return it back, or finalize the session, depending on the result.
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_result}}
 ```
+
+The most common variant is the result having been successfully stored, and the session is still in progress:
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:task_result_in_progress}}
+```
+
+If there was a message-attributable error, we report it to the same outgoing channel:
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:task_result_message_error}}
+```
 The error contains IDs of offending messages which the calling code may use to identify offending parties, if the chosen transport method allows it.
-Message IDs are sent with incoming messages, as shown in the next snippet.
-
-
-### Attempting to finalize
+Message IDs are sent with incoming messages, as will be demonstrated later.
 
 ```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:try_finalize}}
-```
-Here we attempt to finalize the session.
-Note that the method consumes the session object.
-
-```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:try_finalize_in_progress}}
-```
-If the session is in progress, we will receive back the session object.
-This means we continue on with the event loop.
-
-```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:try_finalize_reached_output}}
+{{#include ../../book-examples/src/session_runner.rs:task_result_reached_output}}
 ```
 This means that the output slot has been filled.
 We can now [`finalize()`](protocol_user_api::ReachedOutputSession::finalize) returning the output, but it is also possible to continue on with the loop, accumulating more information.
 This can be important for protocols with threshold conditions, and it is a decision the calling code must make.
 
 ```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:try_finalize_stalled}}
+{{#include ../../book-examples/src/session_runner.rs:task_result_unfinishable}}
 ```
-This signals that the session cannot possibly reach the result (generally, because some nodes committed malicious actions and were banned, making some collect nodes unreachable), and can thus be finalized.
-Again, the calling code can make the decision to continue on with the loop, potentially accumulating more reports of malicious actions of other nodes.
+This signals that the session cannot possibly reach the result (generally, because some nodes committed malicious actions and were banned, making some collect nodes unreachable), and thus has to be finalized.
 
 
 ### Receiving messages

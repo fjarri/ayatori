@@ -175,14 +175,14 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let my_x_cap = compute_mapping("X", gen_public, &[("x", (&my_x).into())]); // X_i,[]
         let my_y_cap = compute_mapping("Y", gen_dh_public, &[("y", (&my_y).into())]); // Y_i,[]
 
-        let x_cap_sent = direct_message(&message_x, &my_x_cap, all_parties);
-        let y_cap_sent = direct_message(&message_y, &my_y_cap, all_parties);
+        let x_cap_sent = direct_message(&message_x, &my_x_cap);
+        let y_cap_sent = direct_message(&message_y, &my_y_cap);
 
         let x_cap = receive(&message_x); // X_j,[]
         let y_cap = receive(&message_y); // Y_j,[]
 
         let message_y_echo = ProtocolMessage::new::<u64>("Y_echo");
-        let y_echo_sent = direct_message(&message_y_echo, &y_cap, all_parties);
+        let y_echo_sent = direct_message(&message_y_echo, &y_cap);
         let y_echo = receive(&message_y_echo); // Y_i,[]
 
         // for j: C_j,i = x_i,j + Y_j,i^(y_i,j)
@@ -191,7 +191,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             encrypt_secret,
             &[("x", (&my_x).into()), ("y", (&my_y).into()), ("Y", (&y_cap).into())],
         );
-        let c_cap_sent = direct_message(&message_c, &my_c_cap, all_parties);
+        let c_cap_sent = direct_message(&message_c, &my_c_cap);
 
         let c_cap = receive(&message_c); // C_i,[]
         let x_decrypted = compute_mapping(
@@ -218,18 +218,18 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
                 // But for this test it does not matter.
                 ("Y", (&y_echo).into()), // S_j(Y_i,j) (echoed back to us)
             ],
-        );
+        )
+        .with_dependency(&collect(&x_cap_sent, all_parties))
+        .with_dependency(&collect(&y_cap_sent, all_parties))
+        .with_dependency(&collect(&y_echo_sent, all_parties))
+        .with_dependency(&collect(&c_cap_sent, all_parties));
 
         Ok(compute_scalar(
             "output",
             gen_output,
             &[("x", (&collect(&x_decrypted, all_parties)).into())],
         )
-        .with_dependency(&collect(&x_verified, all_parties))
-        .with_dependency(&x_cap_sent)
-        .with_dependency(&y_cap_sent)
-        .with_dependency(&y_echo_sent)
-        .with_dependency(&c_cap_sent))
+        .with_dependency(&collect(&x_verified, all_parties)))
     }
 }
 

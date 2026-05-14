@@ -139,7 +139,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let (message, all_parties) = build_data;
         let my_value = inputs.get("value")?;
 
-        let value_broadcasted = broadcast(message, my_value, all_parties);
+        let value_broadcasted = broadcast(message, my_value);
         let (values_verified, values) = receive_split(message);
 
         let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echo");
@@ -154,7 +154,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         // We don't want to send out values that proved to be incorrect during deserialization checks.
         .with_dependency(&all_values_deserialized);
 
-        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties);
+        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable);
         let echo_pack = receive(&message_echo);
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
@@ -167,6 +167,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
                 ("echoed", (&echo_pack).into()),
             ],
         );
+
+        // Note: we are only verifying the echo contents after sending out all the messages.
+        // This may not what one would want to do in a production environment,
+        // but it helps with testing (allows the malicious node to finish successfully).
         let echo_contents_correct = compute_mapping_third_party_fallible(
             "echo_contents_correct",
             verify_echo_contents,
@@ -175,15 +179,15 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
                 ("echoed", (&echo_pack).into()),
             ],
             verify_echo_contents_error,
-        );
+        )
+        .with_dependency(&collect(&value_broadcasted, all_parties))
+        .with_dependency(&collect(&echo_pack_broadcasted, all_parties));
 
         let all_echo_packs_correct = collect(&echo_packs_correct, all_parties);
         let all_echo_contents_correct = collect(&echo_contents_correct, all_parties);
         let output = mapping_alias("output", &values)
-            .with_dependency(&value_broadcasted)
             .with_dependency(&all_echo_packs_correct)
-            .with_dependency(&all_echo_contents_correct)
-            .with_dependency(&echo_pack_broadcasted);
+            .with_dependency(&all_echo_contents_correct);
 
         Ok(output)
     }

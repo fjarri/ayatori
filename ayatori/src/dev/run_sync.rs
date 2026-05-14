@@ -5,7 +5,7 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     entities::{Message, MessageId, RuntimeError},
     error::TraceableResult,
-    execution::{Session, SessionReport, SessionState, Task, TaskError},
+    execution::{Session, SessionReport, SessionState, Task},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -21,9 +21,6 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
         .collect::<BTreeMap<_, _>>();
     let mut reports = BTreeMap::new();
 
-    let mut finished_with_success = Vec::new();
-    let mut finished_with_stall = Vec::new();
-
     while !sessions.is_empty() {
         let mut task_processed = false;
 
@@ -31,6 +28,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 
         for mut session in sessions_to_process {
             let id = session.verifier().clone();
+
             for message in messages
                 .get_mut(&id)
                 .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the map of message queues")))?
@@ -40,8 +38,15 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 session.add_message(&message_id, message);
             }
 
-            while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
-                let task_result = match task {
+            loop {
+                let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? else {
+                    sessions.push(session);
+                    break;
+                };
+
+                task_processed = true;
+
+                let new_state = match task {
                     Task::Deterministic(task) => session.add_result(task.execute()),
                     Task::Randomized(task) => session.add_result(task.execute(rng)),
                     Task::Send(task) => {
@@ -57,46 +62,34 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                         }
                         session.add_result(result)
                     }
-                };
-                task_processed = true;
+                }?;
 
-                match task_result {
-                    Ok(()) => {}
-                    Err(TaskError::Runtime(error)) => return Err(error),
-                    // TODO: record non-runtime errors per session
-                    Err(TaskError::Spurious(error)) => {
-                        return Err(RuntimeError::new(format!("Spurious error: {error:?}")));
-                    }
-                    Err(TaskError::MessageAttributable(error)) => {
+                session = match new_state {
+                    SessionState::InProgress(session) => session,
+                    SessionState::InProgressWithMessageError { error, .. } => {
                         return Err(RuntimeError::new(format!("Message-attributable error: {error:?}")));
                     }
-                }
-            }
-
-            match session.try_finalize() {
-                SessionState::InProgress(session) => sessions.push(session),
-                SessionState::ReachedOutput(success) => finished_with_success.push(success),
-                SessionState::Stalled(stalled) => finished_with_stall.push(stalled),
+                    SessionState::ReachedOutput(success) => {
+                        let report = success.finalize()?;
+                        reports.insert(id, report);
+                        break;
+                    }
+                    SessionState::Unfinishable(report) => {
+                        reports.insert(id, report);
+                        break;
+                    }
+                };
             }
         }
 
         if !task_processed {
-            return Err(RuntimeError::new(
-                "Sessions are stuck: there are still active sessions, but no tasks are being created",
-            ));
+            // That's where in production the sessions would time out and get terminated externally.
+            for session in sessions {
+                reports.insert(session.verifier().clone(), session.terminate());
+            }
+
+            break;
         }
-    }
-
-    for session in finished_with_success {
-        let id = session.as_ref().verifier().clone();
-        let report = session.finalize()?;
-        reports.insert(id.clone(), report);
-    }
-
-    for session in finished_with_stall {
-        let id = session.as_ref().verifier().clone();
-        let report = session.finalize();
-        reports.insert(id.clone(), report);
     }
 
     Ok(ExecutionResult { reports })

@@ -39,9 +39,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
         let p2 = inputs.get("p2")?;
 
         let my_x = compute_scalar("my_x", make_protocol2_value, &[("p2", p2.into())]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x_broadcasted = broadcast(&message_x, &my_x);
         let x = receive(&message_x);
-        let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
+        let all_x = collect(&x, all_parties).with_dependency(&collect(&x_broadcasted, all_parties));
 
         Ok(compute_scalar(
             "output",
@@ -114,9 +114,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         let p1 = inputs.get("p1")?;
 
         let my_x = compute_scalar("my_x", make_protocol1_value, &[("p1", p1.into())]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x_broadcasted = broadcast(&message_x, &my_x);
         let x = receive(&message_x);
-        let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
+        let all_x = collect(&x, all_parties).with_dependency(&collect(&x_broadcasted, all_parties));
 
         let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", (&all_x).into())]);
 

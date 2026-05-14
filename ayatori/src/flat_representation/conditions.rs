@@ -292,7 +292,7 @@ impl<Id: PartyId> QuorumConditionWithState<Id> {
 
 impl Display for ScalarConditionWithState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "ready({})", self.current_condition)
+        write!(f, "{}", self.current_condition)
     }
 }
 

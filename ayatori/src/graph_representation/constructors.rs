@@ -390,14 +390,13 @@ fn default_serialize_and_sign<SP: SessionParameters>(
     Ok(Value::new(signed_value))
 }
 
-/// Broadcasts the scalar data with the type and name defined by `message` to all the nodes from `group`.
+/// Broadcasts the scalar data with the type and name defined by `message`.
 ///
-/// The return values are the collected outcomes of messages being sent (`()` on success).
+/// The target nodes are determined by the group this mapping is collected into.
 pub fn broadcast<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     scalar: impl Into<BroadcastArg<SP>>,
-    group: &PartyGroup<SP::Verifier>,
-) -> Node<Collect<SP>> {
+) -> Node<DirectMessage<SP>> {
     let scalar: BroadcastArg<SP> = scalar.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
@@ -411,24 +410,21 @@ pub fn broadcast<SP: SessionParameters>(
         dependencies: Vec::new(),
     });
 
-    let send_node = Node::new(DirectMessage {
+    Node::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
         dependencies: Vec::new(),
-    });
-
-    collect(CollectArg::DirectMessage(send_node), group)
+    })
 }
 
-/// Sends a direct message with the corresponding element from the given mapping,
-/// and with the type and name defined by `message`, to all the nodes from `group`.
+/// Sends a direct message with the corresponding element from the given mapping.,
+/// and with the type and name defined by `message`.
 ///
-/// The return values are the collected outcomes of messages being sent (`()` on success).
+/// The target nodes are determined by the group this mapping is collected into.
 pub fn direct_message<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     data: impl Into<DirectMessageArg<SP>>,
-    group: &PartyGroup<SP::Verifier>,
-) -> Node<Collect<SP>> {
+) -> Node<DirectMessage<SP>> {
     let data: DirectMessageArg<SP> = data.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
@@ -442,13 +438,11 @@ pub fn direct_message<SP: SessionParameters>(
         dependencies: Vec::new(),
     });
 
-    let send_node = Node::new(DirectMessage {
+    Node::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
         dependencies: Vec::new(),
-    });
-
-    collect(CollectArg::DirectMessage(send_node), group)
+    })
 }
 
 fn default_deserialize<SP: SessionParameters>(

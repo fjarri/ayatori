@@ -1,7 +1,7 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
-    string::String,
+    string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
@@ -27,11 +27,11 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
-        FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
-        ScalarTag, SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
+        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
+        SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
     },
-    error::TraceableResult,
+    error::{Traceable, TraceableResult},
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
@@ -295,23 +295,6 @@ where
         Ok(self.make_report(SessionOutcome::Success(result)))
     }
 
-    fn finalize_with_stalled(self, tag: &CollectedTag) -> SessionReport<SP, P> {
-        self.make_report(SessionOutcome::Unfinishable(format!("Stalled at {tag}")))
-    }
-
-    /// Attempts to finalize the session.
-    pub fn try_finalize(self) -> SessionState<SP, P> {
-        let state = self.ruleset.state().clone();
-        match state {
-            RulesetState::InProgress => SessionState::InProgress(self),
-            RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
-            RulesetState::StalledAt(stalled_at) => SessionState::Stalled(StalledSession {
-                session: self,
-                stalled_at,
-            }),
-        }
-    }
-
     /// Terminates the session and returns the report containing the recorded failures of remote parties (if any).
     pub fn terminate(self) -> SessionReport<SP, P> {
         self.make_report(SessionOutcome::ManuallyTerminated)
@@ -475,16 +458,44 @@ where
     }
 
     /// Registers the result of an executed task.
-    pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
+    pub fn add_result(mut self, result: TaskResult<SP>) -> Result<SessionState<SP, P>, RuntimeError> {
+        let add_result = self.add_result_inner(result)?;
+        Ok(match add_result {
+            AddTaskResult::StateChanged => {
+                let state = self.ruleset.state().clone();
+                match state {
+                    RulesetState::InProgress => SessionState::InProgress(self),
+                    RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
+                    RulesetState::ImpossibleToCollect(tag) => {
+                        let report = self.make_report(SessionOutcome::ImpossibleToCollect(tag.to_string()));
+                        SessionState::Unfinishable(report)
+                    }
+                }
+            }
+            AddTaskResult::StateDidNotChange => SessionState::InProgress(self),
+            AddTaskResult::MessageAttributableError(error) => {
+                SessionState::InProgressWithMessageError { session: self, error }
+            }
+            AddTaskResult::SpuriousError(error) => {
+                let report = self.make_report(SessionOutcome::SpuriousError(error.to_string()));
+                SessionState::Unfinishable(report)
+            }
+        })
+    }
+
+    /// Registers the result of an executed task.
+    fn add_result_inner(&mut self, result: TaskResult<SP>) -> Result<AddTaskResult<SP>, RuntimeError> {
         match result.into_inner() {
-            TaskResultEnum::NoActionNeeded => {}
-            TaskResultEnum::RuntimeError(error) => return Err(TaskError::Runtime(error)),
-            TaskResultEnum::SpuriousError(error) => return Err(TaskError::Spurious(error)),
+            TaskResultEnum::NoActionNeeded => Ok(AddTaskResult::StateDidNotChange),
+            TaskResultEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
+            TaskResultEnum::SpuriousError(error) => Ok(AddTaskResult::SpuriousError(error)),
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::ComputedScalar { store_in, result } => {
                 self.add_scalar(&store_in, result)?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::ComputedMappingElement {
                 store_in,
@@ -492,6 +503,7 @@ where
                 result,
             } => {
                 self.add_element(&store_in, &index, result)?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::SenderError {
                 store_in,
@@ -499,7 +511,10 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => self.register_attributable_error(guilty_party, &store_in),
+                OnError::Escalate => {
+                    self.register_attributable_error(guilty_party, &store_in);
+                    Ok(AddTaskResult::StateChanged)
+                }
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
@@ -540,6 +555,7 @@ where
                         error,
                     ));
                     self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
+                    Ok(AddTaskResult::StateChanged)
                 }
             },
             TaskResultEnum::SenderErrorWithReveal {
@@ -548,7 +564,10 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => self.register_attributable_error(guilty_party, &store_in),
+                OnError::Escalate => {
+                    self.register_attributable_error(guilty_party, &store_in);
+                    Ok(AddTaskResult::StateChanged)
+                }
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
@@ -589,6 +608,7 @@ where
                         error,
                     ));
                     self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
+                    Ok(AddTaskResult::StateChanged)
                 }
             },
             TaskResultEnum::ThirdPartyError { store_in, error } => {
@@ -596,6 +616,7 @@ where
                 let evidence =
                     EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
                 self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::Preprocessed {
                 store_in,
@@ -623,36 +644,34 @@ where
                             typed_received_value,
                         ));
                         self.register_provable_error(Evidence::new(&self.data.id, &source, evidence));
-                        return Ok(());
+                        return Ok(AddTaskResult::StateChanged);
                     }
 
                     // The message is a duplicate, we cannot do anything at this point.
                     // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
                     // For now we can only report both message IDs that delivered these values,
                     // and let the user deal with it, if possible.
-                    return Err(TaskError::MessageAttributable(
-                        MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
-                            first: typed_existing_value.message_id().clone(),
-                            second: typed_existing_value.message_id().clone(),
-                        }),
-                    ));
+                    let error = MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
+                        first: typed_existing_value.message_id().clone(),
+                        second: typed_existing_value.message_id().clone(),
+                    });
+                    return Ok(AddTaskResult::MessageAttributableError(error));
                 }
 
                 self.add_element(&store_in, &source, value)?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::MessageError {
                 message_id,
                 description,
             } => {
-                return Err(TaskError::MessageAttributable(
-                    MessageAttributableError::InvalidMessage(InvalidMessageError {
-                        message_id,
-                        description,
-                    }),
-                ));
+                let error = MessageAttributableError::InvalidMessage(InvalidMessageError {
+                    message_id,
+                    description,
+                });
+                Ok(AddTaskResult::MessageAttributableError(error))
             }
         }
-        Ok(())
     }
 }
 
@@ -668,6 +687,7 @@ where
     /// Destroys the session and returns the report containing the output
     /// and recorded failures of remote parties (if any).
     pub fn finalize(self) -> Result<SessionReport<SP, P>, RuntimeError> {
+        // TODO: this should be infallible?
         self.0.finalize_with_success()
     }
 
@@ -693,42 +713,6 @@ where
     }
 }
 
-/// A wrapper for a session that is unfinishable.
-#[derive_where::derive_where(Debug)]
-pub struct StalledSession<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    session: Session<SP, P>,
-    stalled_at: CollectedTag,
-}
-
-impl<SP, P> StalledSession<SP, P>
-where
-    SP: SessionParameters,
-    P: ExecutableProtocol<SP>,
-{
-    /// Destroys the session and returns the report containing
-    /// recorded failures of remote parties (if any).
-    pub fn finalize(self) -> SessionReport<SP, P> {
-        self.session.finalize_with_stalled(&self.stalled_at)
-    }
-
-    /// Returns the contained session allowing to continue with the event loop.
-    ///
-    /// Can be used to accumulate more reports of malicious actions.
-    pub fn continue_execution(self) -> Session<SP, P> {
-        self.session
-    }
-}
-
-impl<SP, P> AsRef<Session<SP, P>> for StalledSession<SP, P>
-where
-    SP: SessionParameters,
-    P: ExecutableProtocol<SP>,
-{
-    fn as_ref(&self) -> &Session<SP, P> {
-        &self.session
-    }
-}
-
 /// Possible results of attempting to finalize a session.
 #[derive_where::derive_where(Debug)]
 pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
@@ -736,27 +720,20 @@ pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ///
     /// Continue working with the returned session object.
     InProgress(Session<SP, P>),
+    /// The session is in progress, but a message-attributable error was registered.
+    ///
+    /// Continue working with the returned session object,
+    /// and handle the error according to what your transport level allows.
+    InProgressWithMessageError {
+        /// The session in progress.
+        session: Session<SP, P>,
+        /// The message-attributable error.
+        error: MessageAttributableError<SP>,
+    },
     /// The session has reached the output.
     ReachedOutput(ReachedOutputSession<SP, P>),
     /// The session is unfinishable due to some nodes having been banned.
-    Stalled(StalledSession<SP, P>),
-}
-
-/// A possible error when registering a task's result.
-#[derive_where::derive_where(Debug)]
-pub enum TaskError<SP: SessionParameters> {
-    /// An internal error caused by the environment or a bug in the code.
-    Runtime(RuntimeError),
-    /// A random error that occurred during the protocol execution by no fault of a single party.
-    Spurious(SpuriousError),
-    /// An error that is attributable to a specific message, but not to a specific party.
-    MessageAttributable(MessageAttributableError<SP>),
-}
-
-impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
-    fn from(source: RuntimeError) -> Self {
-        Self::Runtime(source)
-    }
+    Unfinishable(SessionReport<SP, P>),
 }
 
 /// An error that is attributable to a specific message, but not to a specific party.
@@ -837,37 +814,32 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
     /// Returns `true` if the session was terminated due to being unfinishable
     /// (enough nodes were banned to make some collection nodes impossible to trigger).
     pub fn is_unfinishable(&self) -> bool {
-        matches!(self.outcome, SessionOutcome::Unfinishable(..))
+        // TODO: change function name?
+        matches!(self.outcome, SessionOutcome::ImpossibleToCollect(..))
     }
 }
 
+/// Possible session outcomes.
 #[derive_where::derive_where(Debug, Clone)]
+#[derive(displaydoc::Display)]
 pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    /// Reached the output successfully.
+    #[displaydoc("Success: {0:?}")]
     Success(P::Output),
+    /// Was terminated via [`Session::terminate`].
+    #[displaydoc("Manually terminated")]
     ManuallyTerminated,
-    Unfinishable(String),
+    /// Some collect nodes are impossible to finish due to some parties having been banned.
+    #[displaydoc("Impossible to collect: {0}")]
+    ImpossibleToCollect(String), // TODO: specify the number of banned parties or something?
+    /// A [`SpuriousError`] error occurred in one of the computations.
+    #[displaydoc("Spurious error: {0}")]
+    SpuriousError(String), // TODO: specify at which tag it occurred
 }
 
-// TODO: merge into SessionOutcome? Or allow termination where one can return RuntimeError AND all the evidences?
-/// A fatal error that can happen when executing a session.
-#[derive(Debug, Clone, displaydoc::Display)]
-pub enum SessionError {
-    /// See [`RuntimeError`].
-    #[displaydoc("{0}")]
-    Runtime(RuntimeError),
-    /// See [`SpuriousError`].
-    #[displaydoc("{0}")]
-    Spurious(SpuriousError),
-}
-
-impl From<RuntimeError> for SessionError {
-    fn from(source: RuntimeError) -> Self {
-        Self::Runtime(source)
-    }
-}
-
-impl From<SpuriousError> for SessionError {
-    fn from(source: SpuriousError) -> Self {
-        Self::Spurious(source)
-    }
+enum AddTaskResult<SP: SessionParameters> {
+    StateChanged,
+    StateDidNotChange,
+    MessageAttributableError(MessageAttributableError<SP>),
+    SpuriousError(SpuriousError),
 }

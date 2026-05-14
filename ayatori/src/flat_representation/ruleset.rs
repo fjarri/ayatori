@@ -243,7 +243,7 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
 pub(crate) enum RulesetState {
     InProgress,
     ReachedOutput,
-    StalledAt(CollectedTag),
+    ImpossibleToCollect(CollectedTag),
 }
 
 #[derive_where::derive_where(Debug)]
@@ -446,7 +446,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
         for rule in &mut self.collect_rules {
             rule.quorum_condition.update_with_banned_party(id);
             if !rule.quorum_condition.is_satisfiable() {
-                self.state = RulesetState::StalledAt(rule.store_in.clone());
+                // TODO: include all impossible to collect nodes, and the list of banned parties.
+                self.state = RulesetState::ImpossibleToCollect(rule.store_in.clone());
             }
         }
     }

@@ -72,23 +72,22 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
 
         // ANCHOR: build-send-c
         let message_c = ProtocolMessage::new::<u32>("c");
-        let c_broadcasted = broadcast(&message_c, &my_c, all_parties);
+        let c_broadcasted = broadcast(&message_c, &my_c);
         let c = receive(&message_c);
         // ANCHOR_END: build-send-c
 
         // ANCHOR: build-collect-c
-        let all_c = collect(&c, all_parties).with_dependency(&c_broadcasted);
+        let all_c = collect(&c, all_parties)
+            .with_dependency(&collect(&c_broadcasted, all_parties));
         // ANCHOR_END: build-collect-c
 
         // ANCHOR: build-send-b-r
         let message_b = ProtocolMessage::new::<u32>("b");
-        let b_broadcasted =
-            broadcast(&message_b, &my_b, all_parties).with_dependency(&all_c);
+        let b_broadcasted = broadcast(&message_b, &my_b).with_dependency(&all_c);
         let b = receive(&message_b);
 
         let message_r = ProtocolMessage::new::<u32>("r");
-        let r_broadcasted =
-            broadcast(&message_r, &my_r, all_parties).with_dependency(&all_c);
+        let r_broadcasted = broadcast(&message_r, &my_r).with_dependency(&all_c);
         let r = receive(&message_r);
         // ANCHOR_END: build-send-b-r
 
@@ -116,9 +115,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
 
         // ANCHOR: build-finalize
         let all_commitments_correct = collect(&commitment_correct, all_parties)
-            .with_dependency(&b_broadcasted)
-            .with_dependency(&r_broadcasted);
-        let all_b = collect(&b, all_parties).with_dependency(&b_broadcasted);
+            .with_dependency(&collect(&b_broadcasted, all_parties))
+            .with_dependency(&collect(&r_broadcasted, all_parties));
+        let all_b = collect(&b, all_parties);
         let output = compute_scalar(
             "output",
             |args| {
@@ -177,7 +176,8 @@ mod tests {
 
     use ayatori::{
         dev::{
-            BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync,
+            BinaryFormat, Replacement, TestSessionParams, TestSigner,
+            run_sessions_sync,
         },
         protocol_user_api::*,
     };
@@ -206,7 +206,8 @@ mod tests {
         let sessions = signers
             .into_iter()
             .map(|signer| {
-                S::new(session_id.clone(), signer, &private_data, &shared_data).unwrap()
+                S::new(session_id.clone(), signer, &private_data, &shared_data)
+                    .unwrap()
             })
             .collect::<Vec<_>>();
         let results = run_sessions_sync(&mut rng, sessions).unwrap();
@@ -261,7 +262,10 @@ mod tests {
         let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
         let report1 = &results.reports[&ids[0]];
-        assert!(report1.success_ref().is_some());
+        assert!(matches!(
+            report1.outcome,
+            SessionOutcome::ManuallyTerminated
+        ));
         assert!(report1.provable_errors.is_empty());
 
         // ANCHOR: test_report

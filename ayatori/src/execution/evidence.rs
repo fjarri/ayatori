@@ -6,7 +6,7 @@ use alloc::{
 use core::marker::PhantomData;
 
 use super::{
-    session::{Session, SessionState, TaskError},
+    session::{Session, SessionState},
     task::Task,
 };
 use crate::{
@@ -291,8 +291,10 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
     );
 
     while let Some(task) = session.make_task()? {
-        let task_result = match task {
-            Task::Deterministic(task) => session.add_result(task.execute()),
+        let new_state = match task {
+            Task::Deterministic(task) => session
+                .add_result(task.execute())
+                .or_with_context(|| "Failed to execute a task".into())?,
             Task::Randomized(_task) => {
                 return Ok(EvidenceVerdict::invalid(
                     "Unexpected RNG-based computation when reproducing the failure",
@@ -306,31 +308,30 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
             }
         };
 
-        match task_result {
-            Ok(()) => {}
-            Err(TaskError::Runtime(error)) => {
-                return Err(error.with_context("Runtime error when executing a task"));
-            }
-            Err(TaskError::Spurious(error)) => {
-                return Ok(EvidenceVerdict::invalid(format!(
-                    "Unexpected spurious error: {error:?}"
-                )));
-            }
-            Err(TaskError::MessageAttributable(error)) => {
+        session = match new_state {
+            SessionState::InProgress(session) => session,
+            SessionState::InProgressWithMessageError { error, .. } => {
                 return Ok(EvidenceVerdict::invalid(format!(
                     "Unexpected message-attributable error: {error:?}"
+                )));
+            }
+            SessionState::ReachedOutput(success) => {
+                return success
+                    .finalize_with_evidence_verdict()
+                    .or_with_context(|| "Failed to finalize the reproduction session".into());
+            }
+            SessionState::Unfinishable(report) => {
+                return Ok(EvidenceVerdict::invalid(format!(
+                    "The execution was unfinishable (outcome: {})",
+                    report.outcome
                 )));
             }
         }
     }
 
-    match session.try_finalize() {
-        SessionState::InProgress(_session) => Ok(EvidenceVerdict::invalid("The execution did not finish")),
-        SessionState::ReachedOutput(success) => success
-            .finalize_with_evidence_verdict()
-            .or_with_context(|| "Failed to finalize the reproduction session".into()),
-        SessionState::Stalled(_stalled) => Ok(EvidenceVerdict::invalid("The execution was stalled")),
-    }
+    Ok(EvidenceVerdict::invalid(
+        "All tasks were executed, but the session did not reached the result",
+    ))
 }
 
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
