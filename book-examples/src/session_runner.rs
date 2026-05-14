@@ -31,16 +31,16 @@ where
             let task_result = match task {
                 // ANCHOR_END: task_loop
                 // ANCHOR: task_compute
-                Task::Compute(task) => session.add_result(task.compute()),
+                Task::Compute(task) => session.add_result(task.execute()),
                 // ANCHOR_END: task_compute
 
                 // ANCHOR: task_compute_rng
-                Task::ComputeWithRng(task) => session.add_result(task.compute(rng)),
+                Task::ComputeWithRng(task) => session.add_result(task.execute(rng)),
                 // ANCHOR_END: task_compute_rng
 
                 // ANCHOR: task_send
                 Task::Send(task) => {
-                    let (message, result) = task.compute();
+                    let (message, result) = task.execute();
                     if let Some(message) = message {
                         tx.send(MessageOut::Message(message)).await.unwrap();
                     }

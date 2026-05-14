@@ -42,10 +42,10 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
 
             while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
                 let task_result = match task {
-                    Task::Compute(task) => session.add_result(task.compute()),
-                    Task::ComputeWithRng(task) => session.add_result(task.compute(rng)),
+                    Task::Compute(task) => session.add_result(task.execute()),
+                    Task::ComputeWithRng(task) => session.add_result(task.execute(rng)),
                     Task::Send(task) => {
-                        let (message, result) = task.compute();
+                        let (message, result) = task.execute();
                         if let Some(message) = message {
                             let destination = message.destination().clone();
                             messages

@@ -74,7 +74,7 @@ enum ComputeTaskEnum<SP: SessionParameters> {
 pub struct ComputeTask<SP: SessionParameters>(ComputeTaskEnum<SP>);
 
 impl<SP: SessionParameters> ComputeTask<SP> {
-    pub fn compute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> TaskResult<SP> {
         match self.0 {
             ComputeTaskEnum::ScalarUnattributable {
                 store_in,
@@ -246,7 +246,7 @@ enum ComputeWithRngTaskEnum<SP: SessionParameters> {
 pub struct ComputeWithRngTask<SP: SessionParameters>(ComputeWithRngTaskEnum<SP>);
 
 impl<SP: SessionParameters> ComputeWithRngTask<SP> {
-    pub fn compute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
         match self.0 {
             ComputeWithRngTaskEnum::ScalarUnattributable {
                 store_in,
@@ -305,7 +305,7 @@ pub struct SendTask<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
-    pub fn compute(self) -> (Option<Message<SP>>, TaskResult<SP>) {
+    pub fn execute(self) -> (Option<Message<SP>>, TaskResult<SP>) {
         let signed_value = match self.signed_value.downcast::<SignedValue<SP>>() {
             Ok(value) => value,
             Err(error) => return (None, TaskResult(TaskResultEnum::RuntimeError { error })),
