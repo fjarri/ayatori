@@ -20,8 +20,8 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, PartyGroup, RuntimeError,
-        ScalarFunction, ScalarTagRef, SenderAttributableError, SenderAttributableErrorEnum, SimpleMappingFunction,
-        UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
+        ScalarFunction, ScalarTagRef, SenderAttributableError, SimpleMappingFunction, UnattributableError,
+        UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     error::TraceableResult,
     traits::SessionParameters,
@@ -323,13 +323,11 @@ impl<SP: SessionParameters> AnyNode<SP> {
                         move |id, args| {
                             match function.call(id, args) {
                                 Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable { .. })) => {
-                                    Ok(EvidenceVerdict::valid())
-                                }
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Spurious(error))) => {
+                                Err(SenderAttributableError::Attributable { .. }) => Ok(EvidenceVerdict::valid()),
+                                Err(SenderAttributableError::Spurious(error)) => {
                                     Err(UnattributableError::Spurious(error))
                                 }
-                                Err(SenderAttributableError(SenderAttributableErrorEnum::Runtime(error))) => {
+                                Err(SenderAttributableError::Runtime(error)) => {
                                     Err(UnattributableError::Runtime(error))
                                 }
                             }

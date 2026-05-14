@@ -37,16 +37,16 @@ fn verify_echo_pack_correct<SP: SessionParameters>(
     let mut all_ids_except_for_sender = all_ids.clone();
     all_ids_except_for_sender.remove(id);
     if ids_received != all_ids_except_for_sender {
-        return Err(SenderAttributableError::new("Mismatched IDs"));
+        return Err(SenderError::new("Mismatched IDs").into());
     }
 
     // Check that the messages are correctly signed and have correct metadata
     for (from, message) in echoed {
         if from != message.source() {
-            return Err(SenderAttributableError::new("Mismatched source"));
+            return Err(SenderError::new("Mismatched source").into());
         }
         if id != message.metadata().destination() {
-            return Err(SenderAttributableError::new("Mismatched destination"));
+            return Err(SenderError::new("Mismatched destination").into());
         }
 
         let ethalon = received
@@ -54,15 +54,15 @@ fn verify_echo_pack_correct<SP: SessionParameters>(
             .expect("we checked that the ID is present in the message map");
 
         if ethalon.metadata().full_name() != message.metadata().full_name() {
-            return Err(SenderAttributableError::new("Mismatched value name"));
+            return Err(SenderError::new("Mismatched value name").into());
         }
 
         if ethalon.metadata().session_id() != message.metadata().session_id() {
-            return Err(SenderAttributableError::new("Mismatched session ID"));
+            return Err(SenderError::new("Mismatched session ID").into());
         }
 
         if !message.is_signature_correct() {
-            return Err(SenderAttributableError::new("Invalid signature"));
+            return Err(SenderError::new("Invalid signature").into());
         }
     }
 
@@ -95,11 +95,7 @@ fn verify_echo_contents<SP: SessionParameters>(
 
         if !ethalon.payload_hash_matches(message)? {
             let associated_data = ((*ethalon).clone().unverify(), message.clone());
-            return Err(ThirdPartyAttributableError::new(
-                "Mismatched value contents",
-                from,
-                associated_data,
-            ));
+            return Err(ThirdPartyError::new("Mismatched value contents", from, associated_data)?.into());
         }
     }
 

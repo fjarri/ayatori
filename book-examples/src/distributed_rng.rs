@@ -107,7 +107,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
                 if b + r == *c {
                     Ok(())
                 } else {
-                    Err(SenderAttributableError::new("b + r != c"))
+                    Err(SenderError::new("b + r != c").into())
                 }
             },
             &[("c", (&c).into()), ("b", (&b).into()), ("r", (&r).into())],

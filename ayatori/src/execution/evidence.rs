@@ -12,7 +12,7 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
-        SessionId, SignedValue, ThirdPartyError, VerificationError, VerifiedValue,
+        SessionId, SignedValue, StoredThirdPartyError, VerificationError, VerifiedValue,
     },
     error::{Traceable, TraceableResult},
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
@@ -262,7 +262,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvid
             &self.reported_by,
             guilty_party,
             shared_data,
-            Some(&self.error.associated_data),
+            Some(self.error.associated_data()),
         )
         .or_with_context(|| "Failed to build the reproduction subtree".into())?;
 
@@ -337,12 +337,12 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
     failed_at: MappingTag,
-    error: ThirdPartyError<SP>,
+    error: StoredThirdPartyError<SP>,
     phantom: PhantomData<fn() -> (SP, P)>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
-    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, error: ThirdPartyError<SP>) -> Self {
+    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, error: StoredThirdPartyError<SP>) -> Self {
         Self {
             reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
@@ -384,7 +384,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         };
 
         verification
-            .call(guilty_party, session_id, &self.error.associated_data)
+            .call(guilty_party, session_id, self.error.associated_data())
             .or_with_context(|| "Failed to run the associated verification function".into())
     }
 }

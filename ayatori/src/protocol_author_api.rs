@@ -3,9 +3,9 @@
 pub use crate::{
     entities::{
         Args, AssociatedData, Erasable, EvidenceVerdict, FullName, OneOrBoth, PartyGroup, RuntimeError,
-        SenderAttributableError, SenderAttributableErrorWithReveal, SerdeAdapter, SerializeArgs, SerializedValue,
-        SessionId, SignedHash, SignedValue, SpuriousError, ThirdPartyAttributableError, UnattributableError,
-        ValueMetadata, VerificationError, VerifiedValue,
+        SenderAttributableError, SenderAttributableErrorWithReveal, SenderError, SenderErrorWithReveal, SerdeAdapter,
+        SerializeArgs, SerializedValue, SessionId, SignedHash, SignedValue, SpuriousError, ThirdPartyAttributableError,
+        ThirdPartyError, UnattributableError, ValueMetadata, VerificationError, VerifiedValue,
     },
     graph_representation::{
         AnyNode, ArgNodes, BroadcastArg, Collect, CollectArg, ComputeMapping, ComputeMappingArg, ComputeMappingArgs,

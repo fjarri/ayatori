@@ -16,7 +16,7 @@ fn verify<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(
     if id == args.my_id() || *x == 1 {
         Ok(())
     } else {
-        Err(SenderAttributableError::new("Invalid x"))
+        Err(SenderError::new("Invalid x").into())
     }
 }
 

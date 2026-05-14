@@ -37,7 +37,7 @@ fn verify_commitment<SP: SessionParameters>(
     if b + r == *c {
         Ok(())
     } else {
-        Err(SenderAttributableError::new("b + r != c"))
+        Err(SenderError::new("b + r != c").into())
     }
 }
 

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::value::SerializedValue;
 use crate::{
-    error::{Traceable, TracedError},
+    error::{Traceable, TraceableResult, TracedError},
     traits::{SessionParameters, WireFormat},
 };
 
@@ -94,49 +94,51 @@ impl UnattributableError {
     }
 }
 
+/// An error attributable to the party with the element's ID.
 #[derive(displaydoc::Display, Debug, Clone, Serialize, Deserialize)]
 #[displaydoc("Sender error: {description}")]
-pub(crate) struct SenderError {
-    pub(crate) description: String,
+pub struct SenderError {
+    description: String,
 }
 
-/// An error during a mapping element computation that is attributable to the party with the element's ID.
-#[derive(displaydoc::Display, Debug, Clone)]
-pub struct SenderAttributableError(pub(crate) SenderAttributableErrorEnum);
+impl SenderError {
+    /// Creates a new error with the given description.
+    pub fn new(description: impl Into<String>) -> Self {
+        Self {
+            description: description.into(),
+        }
+    }
+}
 
+/// An error during a mapping element computation that may be attributable to the party with the element's ID.
 #[derive(displaydoc::Display, Debug, Clone)]
-pub(crate) enum SenderAttributableErrorEnum {
+pub enum SenderAttributableError {
+    /// See [`RuntimeError`].
     #[displaydoc("{0}")]
     Runtime(RuntimeError),
+    /// See [`SpuriousError`].
     #[displaydoc("{0}")]
     Spurious(SpuriousError),
+    /// See [`SenderError`].
     #[displaydoc("{0}")]
     Attributable(SenderError),
 }
 
 impl From<RuntimeError> for SenderAttributableError {
     fn from(source: RuntimeError) -> Self {
-        Self(SenderAttributableErrorEnum::Runtime(source))
+        Self::Runtime(source)
     }
 }
 
-impl SenderAttributableError {
-    /// Returns the [`UnattributableError::Spurious`] variant.
-    pub fn spurious(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorEnum::Spurious(SpuriousError::new(description)))
+impl From<SpuriousError> for SenderAttributableError {
+    fn from(source: SpuriousError) -> Self {
+        Self::Spurious(source)
     }
+}
 
-    /// Returns the [`UnattributableError::Runtime`] variant.
-    #[track_caller]
-    pub fn runtime(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorEnum::Runtime(RuntimeError::new(description)))
-    }
-
-    /// Creates a new error with the given description.
-    pub fn new(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorEnum::Attributable(SenderError {
-            description: description.into(),
-        }))
+impl From<SenderError> for SenderAttributableError {
+    fn from(source: SenderError) -> Self {
+        Self::Attributable(source)
     }
 }
 
@@ -165,136 +167,159 @@ impl<SP: SessionParameters> AssociatedData<SP> {
     }
 }
 
+/// An error attributable to the party with the element's ID, with associated data.
 #[derive(displaydoc::Display)]
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 #[displaydoc("Sender error (with secret reveal): {description}")]
-pub(crate) struct SenderErrorWithReveal<SP: SessionParameters> {
-    pub(crate) description: String,
-    pub(crate) associated_data: AssociatedData<SP>,
+pub struct SenderErrorWithReveal<SP: SessionParameters> {
+    description: String,
+    associated_data: AssociatedData<SP>,
+}
+
+impl<SP: SessionParameters> SenderErrorWithReveal<SP> {
+    /// Creates a new error with the given description and an associated value (revealed data).
+    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(
+        description: impl Into<String>,
+        associated_value: T,
+    ) -> Result<Self, RuntimeError> {
+        let associated_data = match AssociatedData::new(associated_value) {
+            Ok(data) => data,
+            Err(error) => {
+                return Err(error).or_with_context(|| "Failed to create associated data for a sender error".into());
+            }
+        };
+        Ok(Self {
+            description: description.into(),
+            associated_data,
+        })
+    }
+
+    pub(crate) fn associated_data(&self) -> &AssociatedData<SP> {
+        &self.associated_data
+    }
 }
 
 /// An error during a mapping element computation that is attributable to the party with the element's ID,
 /// and needs additional data to be revealed and stored in the evidence.
 #[derive(displaydoc::Display)]
 #[derive_where::derive_where(Debug, Clone)]
-#[displaydoc("{0}")]
-pub struct SenderAttributableErrorWithReveal<SP: SessionParameters>(
-    pub(crate) SenderAttributableErrorWithRevealEnum<SP>,
-);
-
-#[derive(displaydoc::Display)]
-#[derive_where::derive_where(Debug, Clone)]
-pub(crate) enum SenderAttributableErrorWithRevealEnum<SP: SessionParameters> {
+pub enum SenderAttributableErrorWithReveal<SP: SessionParameters> {
+    /// See [`RuntimeError`].
     #[displaydoc("{0}")]
     Runtime(RuntimeError),
+    /// See [`SpuriousError`].
     #[displaydoc("{0}")]
     Spurious(SpuriousError),
+    /// See [`SenderErrorWithReveal`].
     #[displaydoc("{0}")]
     Attributable(SenderErrorWithReveal<SP>),
 }
 
 impl<SP: SessionParameters> From<RuntimeError> for SenderAttributableErrorWithReveal<SP> {
     fn from(source: RuntimeError) -> Self {
-        Self(SenderAttributableErrorWithRevealEnum::Runtime(source))
+        Self::Runtime(source)
     }
 }
 
-impl<SP: SessionParameters> SenderAttributableErrorWithReveal<SP> {
-    /// Returns the [`UnattributableError::Spurious`] variant.
-    pub fn spurious(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorWithRevealEnum::Spurious(SpuriousError::new(
-            description,
-        )))
-    }
-
-    /// Returns the [`UnattributableError::Runtime`] variant.
-    #[track_caller]
-    pub fn runtime(description: impl Into<String>) -> Self {
-        Self(SenderAttributableErrorWithRevealEnum::Runtime(RuntimeError::new(
-            description,
-        )))
-    }
-
-    /// Creates a new error with the given description and an associated value (revealed data).
-    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(description: impl Into<String>, associated_value: T) -> Self {
-        let associated_data = match AssociatedData::new(associated_value) {
-            Ok(data) => data,
-            Err(error) => return Self::from(error),
-        };
-        Self(SenderAttributableErrorWithRevealEnum::Attributable(
-            SenderErrorWithReveal {
-                description: description.into(),
-                associated_data,
-            },
-        ))
+impl<SP: SessionParameters> From<SpuriousError> for SenderAttributableErrorWithReveal<SP> {
+    fn from(source: SpuriousError) -> Self {
+        Self::Spurious(source)
     }
 }
 
+impl<SP: SessionParameters> From<SenderErrorWithReveal<SP>> for SenderAttributableErrorWithReveal<SP> {
+    fn from(source: SenderErrorWithReveal<SP>) -> Self {
+        Self::Attributable(source)
+    }
+}
+
+/// An error attributable to a third party (not the one that sent the triggering message)   , with associated data.
 #[derive(displaydoc::Display)]
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 #[displaydoc("Third party attributable error: {description}")]
-pub(crate) struct ThirdPartyError<SP: SessionParameters> {
-    pub(crate) description: String,
-    pub(crate) associated_data: AssociatedData<SP>,
+pub struct ThirdPartyError<SP: SessionParameters> {
+    guilty_party: SP::Verifier,
+    description: String,
+    associated_data: AssociatedData<SP>,
+}
+
+impl<SP: SessionParameters> ThirdPartyError<SP> {
+    /// Creates a new error with the given description and an associated value (revealed data).
+    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(
+        description: impl Into<String>,
+        guilty_party: &SP::Verifier,
+        associated_value: T,
+    ) -> Result<Self, RuntimeError> {
+        let associated_data = match AssociatedData::new(associated_value) {
+            Ok(data) => data,
+            Err(error) => {
+                return Err(error)
+                    .or_with_context(|| "Failed to create associated data for a third-party error".into());
+            }
+        };
+        Ok(Self {
+            guilty_party: guilty_party.clone(),
+            description: description.into(),
+            associated_data,
+        })
+    }
+
+    pub(crate) fn unpack(self) -> (SP::Verifier, StoredThirdPartyError<SP>) {
+        (
+            self.guilty_party,
+            StoredThirdPartyError {
+                description: self.description,
+                associated_data: self.associated_data,
+            },
+        )
+    }
 }
 
 /// An error during a mapping element computation that is attributable to a party with the ID
 /// different from that of the element's.
 #[derive(displaydoc::Display)]
 #[derive_where::derive_where(Debug, Clone)]
-#[displaydoc("{0}")]
-pub struct ThirdPartyAttributableError<SP: SessionParameters>(pub(crate) ThirdPartyAttributableErrorEnum<SP>);
-
-#[derive(displaydoc::Display)]
-#[derive_where::derive_where(Debug, Clone)]
-pub(crate) enum ThirdPartyAttributableErrorEnum<SP: SessionParameters> {
+pub enum ThirdPartyAttributableError<SP: SessionParameters> {
+    /// See [`RuntimeError`].
     #[displaydoc("{0}")]
     Runtime(RuntimeError),
+    /// See [`SpuriousError`].
     #[displaydoc("{0}")]
     Spurious(SpuriousError),
-    #[displaydoc("{error}")]
-    Attributable {
-        guilty_party: SP::Verifier,
-        error: ThirdPartyError<SP>,
-    },
+    /// See [`ThirdPartyError`].
+    #[displaydoc("{0}")]
+    Attributable(ThirdPartyError<SP>),
 }
 
 impl<SP: SessionParameters> From<RuntimeError> for ThirdPartyAttributableError<SP> {
     fn from(source: RuntimeError) -> Self {
-        Self(ThirdPartyAttributableErrorEnum::Runtime(source))
+        Self::Runtime(source)
     }
 }
 
-impl<SP: SessionParameters> ThirdPartyAttributableError<SP> {
-    /// Returns the [`UnattributableError::Spurious`] variant.
-    pub fn spurious(description: impl Into<String>) -> Self {
-        Self(ThirdPartyAttributableErrorEnum::Spurious(SpuriousError::new(
-            description,
-        )))
+impl<SP: SessionParameters> From<SpuriousError> for ThirdPartyAttributableError<SP> {
+    fn from(source: SpuriousError) -> Self {
+        Self::Spurious(source)
     }
+}
 
-    /// Returns the [`UnattributableError::Runtime`] variant.
-    #[track_caller]
-    pub fn runtime(description: impl Into<String>) -> Self {
-        Self(ThirdPartyAttributableErrorEnum::Runtime(RuntimeError::new(description)))
+impl<SP: SessionParameters> From<ThirdPartyError<SP>> for ThirdPartyAttributableError<SP> {
+    fn from(source: ThirdPartyError<SP>) -> Self {
+        Self::Attributable(source)
     }
+}
 
-    /// Creates a new error with the given description and an associated value (revealed data).
-    pub fn new<T: Serialize + for<'de> Deserialize<'de>>(
-        description: impl Into<String>,
-        guilty_party: &SP::Verifier,
-        associated_value: T,
-    ) -> Self {
-        let associated_data = match AssociatedData::new(associated_value) {
-            Ok(data) => data,
-            Err(error) => return Self::from(error),
-        };
-        Self(ThirdPartyAttributableErrorEnum::Attributable {
-            guilty_party: guilty_party.clone(),
-            error: ThirdPartyError {
-                description: description.into(),
-                associated_data,
-            },
-        })
+/// Guilty party is stored separately in [`Evidence`], this structure represents the rest of [`ThirdPartyError`].
+#[derive(displaydoc::Display)]
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+#[displaydoc("Third party attributable error: {description}")]
+pub(crate) struct StoredThirdPartyError<SP: SessionParameters> {
+    description: String,
+    associated_data: AssociatedData<SP>,
+}
+
+impl<SP: SessionParameters> StoredThirdPartyError<SP> {
+    pub(crate) fn associated_data(&self) -> &AssociatedData<SP> {
+        &self.associated_data
     }
 }

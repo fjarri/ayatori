@@ -94,12 +94,8 @@ fn verify_secret<SP: SessionParameters>(
     let x_dec = args.get::<u64>("x_dec")?;
     let x_cap = args.get::<u64>("X")?;
     if *x_cap != modpow(GENERATOR, *x_dec) {
-        return Err(SenderAttributableErrorWithReveal::new(
-            "For the decrypted x: g^x != X",
-            *y,
-        ));
+        return Err(SenderErrorWithReveal::new("For the decrypted x: g^x != X", *y)?.into());
     }
-
     Ok(())
 }
 

@@ -587,11 +587,8 @@ where
                     self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
                 }
             },
-            TaskResultEnum::ThirdPartyError {
-                store_in,
-                guilty_party,
-                error,
-            } => {
+            TaskResultEnum::ThirdPartyError { store_in, error } => {
+                let (guilty_party, error) = error.unpack();
                 let evidence =
                     EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
                 self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));

@@ -7,13 +7,12 @@ use crate::{
     entities::{
         Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedTag, MappingTag,
         Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag, SenderAttributableError,
-        SenderAttributableErrorEnum, SenderAttributableErrorWithReveal, SenderAttributableErrorWithRevealEnum,
-        SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SenderError,
-        SenderErrorWithReveal, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError,
-        ThirdPartyAttributableError, ThirdPartyAttributableErrorEnum, ThirdPartyAttributableMappingFunction,
-        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
-        UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
-        VerificationError,
+        SenderAttributableErrorWithReveal, SenderAttributableMappingFunction,
+        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SentTag,
+        SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError, ThirdPartyAttributableError,
+        ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError, UnattributableMappingFunction,
+        UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
+        UnattributableScalarFunctionWithRng, Value, VerificationError,
     },
     flat_representation::OnError,
     traits::SessionParameters,
@@ -138,20 +137,16 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(SenderAttributableError(SenderAttributableErrorEnum::Runtime(error))) => {
-                        TaskResult(TaskResultEnum::RuntimeError { error })
-                    }
-                    Err(SenderAttributableError(SenderAttributableErrorEnum::Spurious(error))) => {
+                    Err(SenderAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(SenderAttributableError::Spurious(error)) => {
                         TaskResult(TaskResultEnum::SpuriousError { error })
                     }
-                    Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable(error))) => {
-                        TaskResult(TaskResultEnum::SenderError {
-                            store_in,
-                            guilty_party: source,
-                            error,
-                            on_error,
-                        })
-                    }
+                    Err(SenderAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
+                        store_in,
+                        guilty_party: source,
+                        error,
+                        on_error,
+                    }),
                 }
             }
             ComputeTaskEnum::MappingElementSenderAttributableWithReveal {
@@ -168,20 +163,20 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(SenderAttributableErrorWithReveal(SenderAttributableErrorWithRevealEnum::Runtime(error))) => {
+                    Err(SenderAttributableErrorWithReveal::Runtime(error)) => {
                         TaskResult(TaskResultEnum::RuntimeError { error })
                     }
-                    Err(SenderAttributableErrorWithReveal(SenderAttributableErrorWithRevealEnum::Spurious(error))) => {
+                    Err(SenderAttributableErrorWithReveal::Spurious(error)) => {
                         TaskResult(TaskResultEnum::SpuriousError { error })
                     }
-                    Err(SenderAttributableErrorWithReveal(SenderAttributableErrorWithRevealEnum::Attributable(
-                        error,
-                    ))) => TaskResult(TaskResultEnum::SenderErrorWithReveal {
-                        store_in,
-                        guilty_party: source,
-                        error,
-                        on_error,
-                    }),
+                    Err(SenderAttributableErrorWithReveal::Attributable(error)) => {
+                        TaskResult(TaskResultEnum::SenderErrorWithReveal {
+                            store_in,
+                            guilty_party: source,
+                            error,
+                            on_error,
+                        })
+                    }
                 }
             }
             ComputeTaskEnum::MappingElementThirdPartyAttributable {
@@ -197,20 +192,15 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(ThirdPartyAttributableError(ThirdPartyAttributableErrorEnum::Runtime(error))) => {
+                    Err(ThirdPartyAttributableError::Runtime(error)) => {
                         TaskResult(TaskResultEnum::RuntimeError { error })
                     }
-                    Err(ThirdPartyAttributableError(ThirdPartyAttributableErrorEnum::Spurious(error))) => {
+                    Err(ThirdPartyAttributableError::Spurious(error)) => {
                         TaskResult(TaskResultEnum::SpuriousError { error })
                     }
-                    Err(ThirdPartyAttributableError(ThirdPartyAttributableErrorEnum::Attributable {
-                        guilty_party,
-                        error,
-                    })) => TaskResult(TaskResultEnum::ThirdPartyError {
-                        store_in,
-                        guilty_party,
-                        error,
-                    }),
+                    Err(ThirdPartyAttributableError::Attributable(error)) => {
+                        TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
+                    }
                 }
             }
             ComputeTaskEnum::DeserializeElement {
@@ -227,20 +217,16 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(SenderAttributableError(SenderAttributableErrorEnum::Runtime(error))) => {
-                        TaskResult(TaskResultEnum::RuntimeError { error })
-                    }
-                    Err(SenderAttributableError(SenderAttributableErrorEnum::Spurious(error))) => {
+                    Err(SenderAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(SenderAttributableError::Spurious(error)) => {
                         TaskResult(TaskResultEnum::SpuriousError { error })
                     }
-                    Err(SenderAttributableError(SenderAttributableErrorEnum::Attributable(error))) => {
-                        TaskResult(TaskResultEnum::SenderError {
-                            store_in,
-                            guilty_party: source,
-                            error,
-                            on_error,
-                        })
-                    }
+                    Err(SenderAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
+                        store_in,
+                        guilty_party: source,
+                        error,
+                        on_error,
+                    }),
                 }
             }
             ComputeTaskEnum::PreprocessMessage { task } => task.execute(),
@@ -561,7 +547,6 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
     },
     ThirdPartyError {
         store_in: MappingTag,
-        guilty_party: SP::Verifier,
         error: ThirdPartyError<SP>,
     },
     Preprocessed {

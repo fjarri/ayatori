@@ -24,11 +24,11 @@ use crate::{
         EvidenceVerdict, FullName, LocalSignedTag, MergedScalarTag, OneOrBoth, PartyGroup, RemoteSignedTag,
         RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError, SenderAttributableErrorWithReveal,
         SenderAttributableMappingFunction, SenderAttributableVerificationFunction,
-        SenderAttributableWithRevealMappingFunction, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId,
-        SignedValue, SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableVerificationFunction, UnattributableError, UnattributableMappingFunction,
-        UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
-        UnattributableScalarFunctionWithRng, Value,
+        SenderAttributableWithRevealMappingFunction, SenderError, SerdeAdapter, SerializeAndSignFunction,
+        SerializeArgs, SessionId, SignedValue, SimpleMappingFunction, ThirdPartyAttributableError,
+        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction, UnattributableError,
+        UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
+        UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
     error::TraceableResult,
     traits::{ComposableProtocol, SessionParameters},
@@ -455,16 +455,13 @@ fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Res
     let expected_senders = args.expected_senders();
 
     if !expected_senders.contains(verified_value.source()) {
-        return Err(SenderAttributableError::new(format!(
-            "Expected senders do not include {:?}",
-            verified_value.source()
-        )));
+        return Err(SenderError::new(format!("Expected senders do not include {:?}", verified_value.source())).into());
     }
 
     let value = args
         .serde_adapter()
         .deserialize(verified_value.serialized_value())
-        .map_err(|error| SenderAttributableError::new(format!("Failed to deserialize the value: {error}")))?;
+        .map_err(|error| SenderError::new(format!("Failed to deserialize the value: {error}")))?;
 
     Ok(value)
 }
