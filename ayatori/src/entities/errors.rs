@@ -94,6 +94,32 @@ impl UnattributableError {
     }
 }
 
+/// An error occuring during a computation that may be attributable to a specific party.
+#[derive(displaydoc::Display, Debug, Clone)]
+pub enum MaybeAttributableError<E> {
+    /// An environment error or a bug. See [`RuntimeError`].
+    #[displaydoc("{0}")]
+    Runtime(RuntimeError),
+    /// A random spurious error (not attributable). See [`SpuriousError`].
+    #[displaydoc("{0}")]
+    Spurious(SpuriousError),
+    /// The attributable variant. See the documentation for the specific type.
+    #[displaydoc("{0}")]
+    Attributable(E),
+}
+
+impl<E> From<RuntimeError> for MaybeAttributableError<E> {
+    fn from(source: RuntimeError) -> Self {
+        Self::Runtime(source)
+    }
+}
+
+impl<E> From<SpuriousError> for MaybeAttributableError<E> {
+    fn from(source: SpuriousError) -> Self {
+        Self::Spurious(source)
+    }
+}
+
 /// An error attributable to the party with the element's ID.
 #[derive(displaydoc::Display, Debug, Clone, Serialize, Deserialize)]
 #[displaydoc("Sender error: {description}")]
@@ -110,33 +136,7 @@ impl SenderError {
     }
 }
 
-/// An error during a mapping element computation that may be attributable to the party with the element's ID.
-#[derive(displaydoc::Display, Debug, Clone)]
-pub enum SenderAttributableError {
-    /// See [`RuntimeError`].
-    #[displaydoc("{0}")]
-    Runtime(RuntimeError),
-    /// See [`SpuriousError`].
-    #[displaydoc("{0}")]
-    Spurious(SpuriousError),
-    /// See [`SenderError`].
-    #[displaydoc("{0}")]
-    Attributable(SenderError),
-}
-
-impl From<RuntimeError> for SenderAttributableError {
-    fn from(source: RuntimeError) -> Self {
-        Self::Runtime(source)
-    }
-}
-
-impl From<SpuriousError> for SenderAttributableError {
-    fn from(source: SpuriousError) -> Self {
-        Self::Spurious(source)
-    }
-}
-
-impl From<SenderError> for SenderAttributableError {
+impl From<SenderError> for MaybeAttributableError<SenderError> {
     fn from(source: SenderError) -> Self {
         Self::Attributable(source)
     }
@@ -199,41 +199,13 @@ impl<SP: SessionParameters> SenderErrorWithReveal<SP> {
     }
 }
 
-/// An error during a mapping element computation that is attributable to the party with the element's ID,
-/// and needs additional data to be revealed and stored in the evidence.
-#[derive(displaydoc::Display)]
-#[derive_where::derive_where(Debug, Clone)]
-pub enum SenderAttributableErrorWithReveal<SP: SessionParameters> {
-    /// See [`RuntimeError`].
-    #[displaydoc("{0}")]
-    Runtime(RuntimeError),
-    /// See [`SpuriousError`].
-    #[displaydoc("{0}")]
-    Spurious(SpuriousError),
-    /// See [`SenderErrorWithReveal`].
-    #[displaydoc("{0}")]
-    Attributable(SenderErrorWithReveal<SP>),
-}
-
-impl<SP: SessionParameters> From<RuntimeError> for SenderAttributableErrorWithReveal<SP> {
-    fn from(source: RuntimeError) -> Self {
-        Self::Runtime(source)
-    }
-}
-
-impl<SP: SessionParameters> From<SpuriousError> for SenderAttributableErrorWithReveal<SP> {
-    fn from(source: SpuriousError) -> Self {
-        Self::Spurious(source)
-    }
-}
-
-impl<SP: SessionParameters> From<SenderErrorWithReveal<SP>> for SenderAttributableErrorWithReveal<SP> {
+impl<SP: SessionParameters> From<SenderErrorWithReveal<SP>> for MaybeAttributableError<SenderErrorWithReveal<SP>> {
     fn from(source: SenderErrorWithReveal<SP>) -> Self {
         Self::Attributable(source)
     }
 }
 
-/// An error attributable to a third party (not the one that sent the triggering message)   , with associated data.
+/// An error attributable to a third party (not the one that sent the triggering message), with associated data.
 #[derive(displaydoc::Display)]
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 #[displaydoc("Third party attributable error: {description}")]
@@ -275,35 +247,7 @@ impl<SP: SessionParameters> ThirdPartyError<SP> {
     }
 }
 
-/// An error during a mapping element computation that is attributable to a party with the ID
-/// different from that of the element's.
-#[derive(displaydoc::Display)]
-#[derive_where::derive_where(Debug, Clone)]
-pub enum ThirdPartyAttributableError<SP: SessionParameters> {
-    /// See [`RuntimeError`].
-    #[displaydoc("{0}")]
-    Runtime(RuntimeError),
-    /// See [`SpuriousError`].
-    #[displaydoc("{0}")]
-    Spurious(SpuriousError),
-    /// See [`ThirdPartyError`].
-    #[displaydoc("{0}")]
-    Attributable(ThirdPartyError<SP>),
-}
-
-impl<SP: SessionParameters> From<RuntimeError> for ThirdPartyAttributableError<SP> {
-    fn from(source: RuntimeError) -> Self {
-        Self::Runtime(source)
-    }
-}
-
-impl<SP: SessionParameters> From<SpuriousError> for ThirdPartyAttributableError<SP> {
-    fn from(source: SpuriousError) -> Self {
-        Self::Spurious(source)
-    }
-}
-
-impl<SP: SessionParameters> From<ThirdPartyError<SP>> for ThirdPartyAttributableError<SP> {
+impl<SP: SessionParameters> From<ThirdPartyError<SP>> for MaybeAttributableError<ThirdPartyError<SP>> {
     fn from(source: ThirdPartyError<SP>) -> Self {
         Self::Attributable(source)
     }

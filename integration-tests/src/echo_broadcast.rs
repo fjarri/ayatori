@@ -20,7 +20,7 @@ fn prepare_echo_pack<SP: SessionParameters>(
 fn verify_echo_pack_correct<SP: SessionParameters>(
     id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<(), SenderAttributableError> {
+) -> Result<(), MaybeAttributableError<SenderError>> {
     let all_ids = args.get::<BTreeSet<SP::Verifier>>("all_ids")?;
 
     // The messages we received from all nodes
@@ -72,7 +72,7 @@ fn verify_echo_pack_correct<SP: SessionParameters>(
 fn verify_echo_contents<SP: SessionParameters>(
     id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<(), ThirdPartyAttributableError<SP>> {
+) -> Result<(), MaybeAttributableError<ThirdPartyError<SP>>> {
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
     if id == args.my_id() {
@@ -274,7 +274,9 @@ mod tests {
 
     use ayatori::{
         dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
-        protocol_author_api::{Args, RuntimeError, SerializeArgs, SignedValue, ThirdPartyAttributableError},
+        protocol_author_api::{
+            Args, MaybeAttributableError, RuntimeError, SerializeArgs, SignedValue, ThirdPartyError,
+        },
         protocol_user_api::*,
     };
 
@@ -321,10 +323,10 @@ mod tests {
     }
 
     fn dummy_verification(
-        _orig_value: Result<&(), ThirdPartyAttributableError<SP>>,
+        _orig_value: Result<&(), MaybeAttributableError<ThirdPartyError<SP>>>,
         _id: &<SP as SessionParameters>::Verifier,
         _args: &Args<SP>,
-    ) -> Result<(), ThirdPartyAttributableError<SP>> {
+    ) -> Result<(), MaybeAttributableError<ThirdPartyError<SP>>> {
         Ok(())
     }
 

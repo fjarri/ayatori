@@ -30,7 +30,7 @@ fn commit_to_value<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, Unattr
 fn verify_commitment<SP: SessionParameters>(
     _id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<(), SenderAttributableError> {
+) -> Result<(), MaybeAttributableError<SenderError>> {
     let b = args.get::<u64>("b")?;
     let r = args.get::<u64>("r")?;
     let c = args.get::<u64>("c")?;

@@ -9,7 +9,10 @@ fn gen_value<SP: SessionParameters>(_args: &Args<SP>) -> Result<u64, Unattributa
     Ok(1)
 }
 
-fn verify<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderAttributableError> {
+fn verify<SP: SessionParameters>(
+    id: &SP::Verifier,
+    args: &Args<SP>,
+) -> Result<(), MaybeAttributableError<SenderError>> {
     let x = args.get::<u64>("x")?;
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.

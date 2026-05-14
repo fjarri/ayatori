@@ -89,7 +89,7 @@ fn decrypt_secret<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) ->
 fn verify_secret<SP: SessionParameters>(
     _id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<(), SenderAttributableErrorWithReveal<SP>> {
+) -> Result<(), MaybeAttributableError<SenderErrorWithReveal<SP>>> {
     let y = args.get::<u64>("y")?;
     let x_dec = args.get::<u64>("x_dec")?;
     let x_cap = args.get::<u64>("X")?;

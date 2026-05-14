@@ -6,9 +6,9 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingTag,
-        RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
-        SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, UnattributableError,
-        UnattributableMappingFunction, UnattributableScalarFunction, Value,
+        MaybeAttributableError, RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs,
+        SignedValue, SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyError,
+        UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     error::TraceableResult,
     graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, ShallowClone},
@@ -50,10 +50,10 @@ enum ReplacementEnum<SP: SessionParameters> {
     ComputeMappingThirdPartyAttributable {
         function: Arc<
             dyn Fn(
-                    Result<Value, ThirdPartyAttributableError<SP>>,
+                    Result<Value, MaybeAttributableError<ThirdPartyError<SP>>>,
                     &SP::Verifier,
                     &Args<SP>,
-                ) -> Result<Value, ThirdPartyAttributableError<SP>>
+                ) -> Result<Value, MaybeAttributableError<ThirdPartyError<SP>>>
                 + Send
                 + Sync,
         >,
@@ -105,7 +105,7 @@ impl<SP: SessionParameters> Replacement<SP> {
         Ok(Self {
             tag: AnyTag::Mapping(MappingTag::Computed(tag.clone())),
             kind: ReplacementEnum::ComputeMapping {
-                function: Arc::new(move |value: Value, id, args| {
+                function: Arc::new(move |value, id, args| {
                     let typed_value = value
                         .downcast_ref::<Ret>()
                         .or_with_context(|| format!("Failed to downcast the result of the node `{tag}`"))?;
@@ -124,10 +124,10 @@ impl<SP: SessionParameters> Replacement<SP> {
             + Send
             + Sync
             + Fn(
-                Result<&Ret, ThirdPartyAttributableError<SP>>,
+                Result<&Ret, MaybeAttributableError<ThirdPartyError<SP>>>,
                 &SP::Verifier,
                 &Args<SP>,
-            ) -> Result<Ret, ThirdPartyAttributableError<SP>>,
+            ) -> Result<Ret, MaybeAttributableError<ThirdPartyError<SP>>>,
     {
         let tag = ComputedMappingTag::new_with_full_name(
             FullName::new_with_prefix(name)
@@ -136,16 +136,14 @@ impl<SP: SessionParameters> Replacement<SP> {
         Ok(Self {
             tag: AnyTag::Mapping(MappingTag::Computed(tag)),
             kind: ReplacementEnum::ComputeMappingThirdPartyAttributable {
-                function: Arc::new(
-                    move |maybe_value: Result<Value, ThirdPartyAttributableError<SP>>, id, args| {
-                        let typed_value = maybe_value
-                            .as_ref()
-                            .map_err(Clone::clone)
-                            .and_then(|value| value.downcast_ref::<Ret>().map_err(ThirdPartyAttributableError::from));
-                        let typed_result = function(typed_value, id, args)?;
-                        Ok(Value::new(typed_result))
-                    },
-                ),
+                function: Arc::new(move |maybe_value, id, args| {
+                    let typed_value = maybe_value
+                        .as_ref()
+                        .map_err(Clone::clone)
+                        .and_then(|value| value.downcast_ref::<Ret>().map_err(MaybeAttributableError::from));
+                    let typed_result = function(typed_value, id, args)?;
+                    Ok(Value::new(typed_result))
+                }),
             },
         })
     }

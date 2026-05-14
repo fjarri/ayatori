@@ -21,14 +21,13 @@ use super::{
 use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, FullName, LocalSignedTag, MergedScalarTag, OneOrBoth, PartyGroup, RemoteSignedTag,
-        RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError, SenderAttributableErrorWithReveal,
-        SenderAttributableMappingFunction, SenderAttributableVerificationFunction,
-        SenderAttributableWithRevealMappingFunction, SenderError, SerdeAdapter, SerializeAndSignFunction,
-        SerializeArgs, SessionId, SignedValue, SimpleMappingFunction, ThirdPartyAttributableError,
-        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction, UnattributableError,
-        UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
-        UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
+        EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError, MergedScalarTag, OneOrBoth, PartyGroup,
+        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction,
+        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SenderError,
+        SenderErrorWithReveal, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
+        SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
+        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
     error::TraceableResult,
     traits::{ComposableProtocol, SessionParameters},
@@ -277,7 +276,7 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
 /// caused by the data provided by the party with the ID it is called for.
 pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
+    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, MaybeAttributableError<SenderError>>,
     args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();
@@ -319,7 +318,10 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
 /// (that is, not the one which whose ID it is called).
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyAttributableError<SP>>,
+    function: impl 'static
+    + Send
+    + Sync
+    + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, MaybeAttributableError<ThirdPartyError<SP>>>,
     args: impl Into<ComputeMappingArgs<SP>>,
     verification: impl 'static
     + Send
@@ -345,7 +347,7 @@ pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: E
     function: impl 'static
     + Send
     + Sync
-    + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
+    + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, MaybeAttributableError<SenderErrorWithReveal<SP>>>,
     args: impl Into<ComputeMappingArgs<SP>>,
     verification: impl 'static
     + Send
@@ -449,7 +451,9 @@ pub fn direct_message<SP: SessionParameters>(
     collect(CollectArg::DirectMessage(send_node), group)
 }
 
-fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderAttributableError> {
+fn default_deserialize<SP: SessionParameters>(
+    args: &DeserializeArgs<SP>,
+) -> Result<Value, MaybeAttributableError<SenderError>> {
     let verified_value = args.verified_value();
 
     let expected_senders = args.expected_senders();

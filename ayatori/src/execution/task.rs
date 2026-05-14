@@ -6,10 +6,9 @@ use super::session::SessionData;
 use crate::{
     entities::{
         Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedTag, MappingTag,
-        Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag, SenderAttributableError,
-        SenderAttributableErrorWithReveal, SenderAttributableMappingFunction,
-        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SentTag,
-        SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError, ThirdPartyAttributableError,
+        MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag,
+        SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SenderError,
+        SenderErrorWithReveal, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError,
         ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError, UnattributableMappingFunction,
         UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
         UnattributableScalarFunctionWithRng, Value, VerificationError,
@@ -137,11 +136,9 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(SenderAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(SenderAttributableError::Spurious(error)) => {
-                        TaskResult(TaskResultEnum::SpuriousError { error })
-                    }
-                    Err(SenderAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                         store_in,
                         guilty_party: source,
                         error,
@@ -163,13 +160,9 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(SenderAttributableErrorWithReveal::Runtime(error)) => {
-                        TaskResult(TaskResultEnum::RuntimeError { error })
-                    }
-                    Err(SenderAttributableErrorWithReveal::Spurious(error)) => {
-                        TaskResult(TaskResultEnum::SpuriousError { error })
-                    }
-                    Err(SenderAttributableErrorWithReveal::Attributable(error)) => {
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Attributable(error)) => {
                         TaskResult(TaskResultEnum::SenderErrorWithReveal {
                             store_in,
                             guilty_party: source,
@@ -192,13 +185,9 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(ThirdPartyAttributableError::Runtime(error)) => {
-                        TaskResult(TaskResultEnum::RuntimeError { error })
-                    }
-                    Err(ThirdPartyAttributableError::Spurious(error)) => {
-                        TaskResult(TaskResultEnum::SpuriousError { error })
-                    }
-                    Err(ThirdPartyAttributableError::Attributable(error)) => {
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Attributable(error)) => {
                         TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
                     }
                 }
@@ -217,11 +206,9 @@ impl<SP: SessionParameters> ComputeTask<SP> {
                         source,
                         result,
                     }),
-                    Err(SenderAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
-                    Err(SenderAttributableError::Spurious(error)) => {
-                        TaskResult(TaskResultEnum::SpuriousError { error })
-                    }
-                    Err(SenderAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
+                    Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError { error }),
+                    Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError { error }),
+                    Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                         store_in,
                         guilty_party: source,
                         error,
