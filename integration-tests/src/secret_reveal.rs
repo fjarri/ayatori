@@ -308,7 +308,10 @@ mod tests {
         assert!(results.reports[&ids[0]].success_ref().is_some());
         assert!(results.reports[&ids[0]].provable_errors.is_empty());
 
-        assert!(results.reports[&ids[1]].is_unfinishable());
+        assert!(matches!(
+            results.reports[&ids[1]].outcome,
+            SessionOutcome::Unfinishable(..)
+        ));
         assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
         assert!(
             results.reports[&ids[1]].provable_errors[&ids[0]]

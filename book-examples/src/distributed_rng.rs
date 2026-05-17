@@ -270,7 +270,7 @@ mod tests {
 
         // ANCHOR: test_report
         let report2 = &results.reports[&ids[1]];
-        assert!(report2.is_unfinishable());
+        assert!(matches!(report2.outcome, SessionOutcome::Unfinishable(..)));
         let evidence = &report2.provable_errors[&ids[0]];
         assert!(
             evidence
@@ -281,7 +281,7 @@ mod tests {
         // ANCHOR_END: test_report
 
         let report3 = &results.reports[&ids[1]];
-        assert!(report3.is_unfinishable());
+        assert!(matches!(report3.outcome, SessionOutcome::Unfinishable(..)));
         let evidence = &report3.provable_errors[&ids[0]];
         assert!(
             evidence

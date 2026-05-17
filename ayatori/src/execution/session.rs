@@ -467,7 +467,7 @@ where
                     RulesetState::InProgress => SessionState::InProgress(self),
                     RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
                     RulesetState::ImpossibleToCollect(tag) => {
-                        let report = self.make_report(SessionOutcome::ImpossibleToCollect(tag.to_string()));
+                        let report = self.make_report(SessionOutcome::Unfinishable(tag.to_string()));
                         SessionState::Unfinishable(report)
                     }
                 }
@@ -687,7 +687,6 @@ where
     /// Destroys the session and returns the report containing the output
     /// and recorded failures of remote parties (if any).
     pub fn finalize(self) -> Result<SessionReport<SP, P>, RuntimeError> {
-        // TODO: this should be infallible?
         self.0.finalize_with_success()
     }
 
@@ -810,13 +809,6 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
             None
         }
     }
-
-    /// Returns `true` if the session was terminated due to being unfinishable
-    /// (enough nodes were banned to make some collection nodes impossible to trigger).
-    pub fn is_unfinishable(&self) -> bool {
-        // TODO: change function name?
-        matches!(self.outcome, SessionOutcome::ImpossibleToCollect(..))
-    }
 }
 
 /// Possible session outcomes.
@@ -830,8 +822,8 @@ pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     #[displaydoc("Manually terminated")]
     ManuallyTerminated,
     /// Some collect nodes are impossible to finish due to some parties having been banned.
-    #[displaydoc("Impossible to collect: {0}")]
-    ImpossibleToCollect(String), // TODO: specify the number of banned parties or something?
+    #[displaydoc("Unfinishable: {0}")]
+    Unfinishable(String), // TODO: specify the number of banned parties or something?
     /// A [`SpuriousError`] error occurred in one of the computations.
     #[displaydoc("Spurious error: {0}")]
     SpuriousError(String), // TODO: specify at which tag it occurred

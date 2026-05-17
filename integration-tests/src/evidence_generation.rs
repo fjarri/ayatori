@@ -147,7 +147,10 @@ mod tests {
         assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &4);
         assert!(results.reports[&ids[0]].provable_errors.is_empty());
 
-        assert!(results.reports[&ids[1]].is_unfinishable());
+        assert!(matches!(
+            results.reports[&ids[1]].outcome,
+            SessionOutcome::Unfinishable(..)
+        ));
         assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
         assert!(
             results.reports[&ids[1]].provable_errors[&ids[0]]
@@ -155,7 +158,10 @@ mod tests {
                 .is_ok()
         );
 
-        assert!(results.reports[&ids[2]].is_unfinishable());
+        assert!(matches!(
+            results.reports[&ids[2]].outcome,
+            SessionOutcome::Unfinishable(..)
+        ));
         assert!(results.reports[&ids[2]].provable_errors.contains_key(&ids[0]));
         assert!(
             results.reports[&ids[2]].provable_errors[&ids[0]]
