@@ -448,7 +448,7 @@ pub fn direct_message<SP: SessionParameters>(
 fn default_deserialize<SP: SessionParameters>(
     args: &DeserializeArgs<SP>,
 ) -> Result<Value, MaybeAttributableError<SenderError>> {
-    let verified_value = args.verified_value();
+    let verified_value = args.verified_value()?;
 
     let expected_senders = args.expected_senders();
 

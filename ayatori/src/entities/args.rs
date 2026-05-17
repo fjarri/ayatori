@@ -102,11 +102,10 @@ impl<SP: SessionParameters> DeserializeArgs<SP> {
         &self.serde_adapter
     }
 
-    pub(crate) fn verified_value(&self) -> &VerifiedValue<SP> {
+    pub(crate) fn verified_value(&self) -> Result<&VerifiedValue<SP>, RuntimeError> {
         self.value
             .downcast_ref::<VerifiedValue<SP>>()
-            // TODO: was it checked?
-            .expect("the value type was already checked in the constructor")
+            .or_with_context(|| "Failed to downcast a `VerifiedValue`".into())
     }
 }
 
