@@ -31,8 +31,8 @@ use crate::dev::Replacement;
 use crate::{
     entities::{
         AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
-        FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
-        ScalarTag, SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
+        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
+        SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
     },
     error::{Traceable, TraceableResult},
     flat_representation::{Action, OnError, Ruleset, RulesetState},
@@ -45,13 +45,6 @@ pub(crate) struct SessionData<SP: SessionParameters> {
     pub(crate) id: SessionId<SP>,
     pub(crate) participants: BTreeSet<SP::Verifier>,
     pub(crate) local_participants: BTreeSet<SP::Verifier>,
-    pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
-}
-
-impl<SP: SessionParameters> SessionData<SP> {
-    pub fn expected_senders(&self, message_name: &FullName) -> Option<BTreeSet<SP::Verifier>> {
-        self.expected_messages.get(message_name).cloned()
-    }
 }
 
 /// A state of a protocol being executed.
@@ -102,12 +95,10 @@ where
             .or_with_context(|| "Failed to build the ruleset".into())?;
         let storage = Storage::new();
 
-        let expected_messages = ruleset.expected_messages().clone();
         let data = Arc::new(SessionData {
             id,
             participants,
             local_participants,
-            expected_messages,
         });
         let mut session = Self {
             ruleset,
@@ -418,17 +409,14 @@ where
                     function,
                     index,
                     data,
-                    message_name,
                     serde_adapter,
+                    expected_senders,
                     on_error,
                 } => {
                     let value = self
                         .storage
                         .get_elem(&MappingTag::RemoteSigned(data), &index)
                         .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-                    let expected_senders = self.data.expected_senders(&message_name).ok_or_else(|| {
-                        RuntimeError::expect(format!("{message_name} does not have expected senders"))
-                    })?;
                     let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
                     return Ok(Some(
                         DeserializeElementTask::new(store_in, function, index, args, on_error).into(),
