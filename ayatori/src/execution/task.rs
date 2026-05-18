@@ -5,8 +5,8 @@ use signature::rand_core::CryptoRngCore;
 use super::session::SessionData;
 use crate::{
     entities::{
-        Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedTag, MappingTag,
-        MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedTag,
+        MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag,
         SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SenderError,
         SenderErrorWithReveal, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError,
         ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError, UnattributableMappingFunction,
@@ -41,7 +41,10 @@ impl<SP: SessionParameters> ScalarUnattributableTask<SP> {
         match self.function.call(&self.args) {
             Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
             Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Scalar(store_in),
+                error,
+            }),
         }
     }
 }
@@ -127,7 +130,10 @@ impl<SP: SessionParameters> ElementUnattributableTask<SP> {
                 result,
             }),
             Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Mapping(store_in),
+                error,
+            }),
         }
     }
 }
@@ -173,7 +179,10 @@ impl<SP: SessionParameters> ElementSenderAttributableTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Mapping(store_in),
+                error,
+            }),
             Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                 store_in,
                 guilty_party: self.index,
@@ -227,7 +236,10 @@ impl<SP: SessionParameters> ElementSenderAttributableWithRevealTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Mapping(store_in),
+                error,
+            }),
             Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderErrorWithReveal {
                 store_in,
                 guilty_party: self.index,
@@ -278,7 +290,10 @@ impl<SP: SessionParameters> ElementThirdPartyAttributableTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Mapping(store_in),
+                error,
+            }),
             Err(MaybeAttributableError::Attributable(error)) => {
                 TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
             }
@@ -329,7 +344,10 @@ impl<SP: SessionParameters> DeserializeElementTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Mapping(store_in),
+                error,
+            }),
             Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                 store_in,
                 guilty_party: self.index,
@@ -367,7 +385,10 @@ impl<SP: SessionParameters> RngScalarUnattributableTask<SP> {
         match self.function.call(rng, &self.args) {
             Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
             Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Scalar(store_in),
+                error,
+            }),
         }
     }
 }
@@ -410,7 +431,10 @@ impl<SP: SessionParameters> RngElementUnattributableTask<SP> {
                 result,
             }),
             Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError(error)),
+            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+                store_in: AnyTag::Mapping(store_in),
+                error,
+            }),
         }
     }
 }
@@ -681,7 +705,10 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
         value: Value,
     },
     RuntimeError(RuntimeError),
-    SpuriousError(SpuriousError),
+    SpuriousError {
+        store_in: AnyTag,
+        error: SpuriousError,
+    },
     SenderError {
         store_in: MappingTag,
         guilty_party: SP::Verifier,

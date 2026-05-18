@@ -1,7 +1,7 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
-    string::{String, ToString},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -479,8 +479,8 @@ where
             AddTaskResult::MessageAttributableError(error) => {
                 SessionState::InProgressWithMessageError { session: self, error }
             }
-            AddTaskResult::SpuriousError(error) => {
-                let report = self.make_report(SessionOutcome::SpuriousError(error.to_string()));
+            AddTaskResult::SpuriousError { store_in, error } => {
+                let report = self.make_report(SessionOutcome::SpuriousError(SpuriousErrorOutcome { store_in, error }));
                 SessionState::Unfinishable(report)
             }
         })
@@ -491,7 +491,7 @@ where
         match result.into_inner() {
             TaskResultEnum::NoActionNeeded => Ok(AddTaskResult::StateDidNotChange),
             TaskResultEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
-            TaskResultEnum::SpuriousError(error) => Ok(AddTaskResult::SpuriousError(error)),
+            TaskResultEnum::SpuriousError { store_in, error } => Ok(AddTaskResult::SpuriousError { store_in, error }),
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
                 Ok(AddTaskResult::StateChanged)
@@ -829,14 +829,14 @@ pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     Unfinishable(UnfinishableOutcome),
     /// A [`SpuriousError`] error occurred in one of the computations.
     #[displaydoc("Spurious error: {0}")]
-    SpuriousError(String), // TODO: specify at which tag it occurred
+    SpuriousError(SpuriousErrorOutcome),
 }
 
 enum AddTaskResult<SP: SessionParameters> {
     StateChanged,
     StateDidNotChange,
     MessageAttributableError(MessageAttributableError<SP>),
-    SpuriousError(SpuriousError),
+    SpuriousError { store_in: AnyTag, error: SpuriousError },
 }
 
 /// Contains the specifics about why the session was impossible to finalize.
@@ -846,5 +846,18 @@ pub struct UnfinishableOutcome(Vec<CollectedTag>);
 impl Display for UnfinishableOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "Impossible to collect: {}", self.0.iter().join(", "))
+    }
+}
+
+/// Contains the specifics about why the session was impossible to finalize.
+#[derive(Debug, Clone)]
+pub struct SpuriousErrorOutcome {
+    store_in: AnyTag,
+    error: SpuriousError,
+}
+
+impl Display for SpuriousErrorOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "Spurious error when calculating {}: {}", self.store_in, self.error)
     }
 }
