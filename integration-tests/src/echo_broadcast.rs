@@ -20,7 +20,7 @@ fn prepare_echo_pack<SP: SessionParameters>(
 fn verify_echo_pack_correct<SP: SessionParameters>(
     id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<(), SenderAttributableError> {
+) -> Result<(), MaybeAttributableError<SenderError>> {
     let all_ids = args.get::<BTreeSet<SP::Verifier>>("all_ids")?;
 
     // The messages we received from all nodes
@@ -37,16 +37,16 @@ fn verify_echo_pack_correct<SP: SessionParameters>(
     let mut all_ids_except_for_sender = all_ids.clone();
     all_ids_except_for_sender.remove(id);
     if ids_received != all_ids_except_for_sender {
-        return Err(SenderAttributableError::new("Mismatched IDs"));
+        return Err(SenderError::new("Mismatched IDs").into());
     }
 
     // Check that the messages are correctly signed and have correct metadata
     for (from, message) in echoed {
         if from != message.source() {
-            return Err(SenderAttributableError::new("Mismatched source"));
+            return Err(SenderError::new("Mismatched source").into());
         }
         if id != message.metadata().destination() {
-            return Err(SenderAttributableError::new("Mismatched destination"));
+            return Err(SenderError::new("Mismatched destination").into());
         }
 
         let ethalon = received
@@ -54,15 +54,15 @@ fn verify_echo_pack_correct<SP: SessionParameters>(
             .expect("we checked that the ID is present in the message map");
 
         if ethalon.metadata().full_name() != message.metadata().full_name() {
-            return Err(SenderAttributableError::new("Mismatched value name"));
+            return Err(SenderError::new("Mismatched value name").into());
         }
 
         if ethalon.metadata().session_id() != message.metadata().session_id() {
-            return Err(SenderAttributableError::new("Mismatched session ID"));
+            return Err(SenderError::new("Mismatched session ID").into());
         }
 
         if !message.is_signature_correct() {
-            return Err(SenderAttributableError::new("Invalid signature"));
+            return Err(SenderError::new("Invalid signature").into());
         }
     }
 
@@ -72,7 +72,7 @@ fn verify_echo_pack_correct<SP: SessionParameters>(
 fn verify_echo_contents<SP: SessionParameters>(
     id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<(), ThirdPartyAttributableError<SP>> {
+) -> Result<(), MaybeAttributableError<ThirdPartyError<SP>>> {
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
     if id == args.my_id() {
@@ -95,11 +95,7 @@ fn verify_echo_contents<SP: SessionParameters>(
 
         if !ethalon.payload_hash_matches(message)? {
             let associated_data = ((*ethalon).clone().unverify(), message.clone());
-            return Err(ThirdPartyAttributableError::new(
-                "Mismatched value contents",
-                from,
-                associated_data,
-            ));
+            return Err(ThirdPartyError::new("Mismatched value contents", from, associated_data)?.into());
         }
     }
 
@@ -143,7 +139,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         let (message, all_parties) = build_data;
         let my_value = inputs.get("value")?;
 
-        let value_broadcasted = broadcast(message, my_value, all_parties);
+        let value_broadcasted = broadcast(message, my_value);
         let (values_verified, values) = receive_split(message);
 
         let message_echo = ProtocolMessage::new::<BTreeMap<SP::Verifier, SignedHash<SP>>>("echo");
@@ -158,7 +154,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
         // We don't want to send out values that proved to be incorrect during deserialization checks.
         .with_dependency(&all_values_deserialized);
 
-        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable, all_parties);
+        let echo_pack_broadcasted = broadcast(&message_echo, &my_echo_pack_sendable);
         let echo_pack = receive(&message_echo);
 
         let all_ids = constant("all_ids", all_parties.ids().cloned().collect::<BTreeSet<_>>());
@@ -171,6 +167,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
                 ("echoed", (&echo_pack).into()),
             ],
         );
+
+        // Note: we are only verifying the echo contents after sending out all the messages.
+        // This may not what one would want to do in a production environment,
+        // but it helps with testing (allows the malicious node to finish successfully).
         let echo_contents_correct = compute_mapping_third_party_fallible(
             "echo_contents_correct",
             verify_echo_contents,
@@ -179,15 +179,15 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for EchoBroadcast {
                 ("echoed", (&echo_pack).into()),
             ],
             verify_echo_contents_error,
-        );
+        )
+        .with_dependency(&collect(&value_broadcasted, all_parties))
+        .with_dependency(&collect(&echo_pack_broadcasted, all_parties));
 
         let all_echo_packs_correct = collect(&echo_packs_correct, all_parties);
         let all_echo_contents_correct = collect(&echo_contents_correct, all_parties);
         let output = mapping_alias("output", &values)
-            .with_dependency(&value_broadcasted)
             .with_dependency(&all_echo_packs_correct)
-            .with_dependency(&all_echo_contents_correct)
-            .with_dependency(&echo_pack_broadcasted);
+            .with_dependency(&all_echo_contents_correct);
 
         Ok(output)
     }
@@ -278,7 +278,9 @@ mod tests {
 
     use ayatori::{
         dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
-        protocol_author_api::{Args, RuntimeError, SerializeArgs, SignedValue, ThirdPartyAttributableError},
+        protocol_author_api::{
+            Args, MaybeAttributableError, RuntimeError, SerializeArgs, SignedValue, ThirdPartyError,
+        },
         protocol_user_api::*,
     };
 
@@ -325,10 +327,10 @@ mod tests {
     }
 
     fn dummy_verification(
-        _orig_value: Result<&(), ThirdPartyAttributableError<SP>>,
+        _orig_value: Result<&(), MaybeAttributableError<ThirdPartyError<SP>>>,
         _id: &<SP as SessionParameters>::Verifier,
         _args: &Args<SP>,
-    ) -> Result<(), ThirdPartyAttributableError<SP>> {
+    ) -> Result<(), MaybeAttributableError<ThirdPartyError<SP>>> {
         Ok(())
     }
 
@@ -371,7 +373,10 @@ mod tests {
         assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &());
         assert!(results.reports[&ids[0]].provable_errors.is_empty());
 
-        assert!(results.reports[&ids[1]].is_unfinishable());
+        assert!(matches!(
+            results.reports[&ids[1]].outcome,
+            SessionOutcome::Unfinishable(..)
+        ));
         assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
         assert!(
             results.reports[&ids[1]].provable_errors[&ids[0]]
@@ -379,7 +384,10 @@ mod tests {
                 .is_ok()
         );
 
-        assert!(results.reports[&ids[2]].is_unfinishable());
+        assert!(matches!(
+            results.reports[&ids[2]].outcome,
+            SessionOutcome::Unfinishable(..)
+        ));
         assert!(results.reports[&ids[2]].provable_errors.contains_key(&ids[0]));
         assert!(
             results.reports[&ids[2]].provable_errors[&ids[0]]

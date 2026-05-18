@@ -9,7 +9,10 @@ use signature::{
 };
 
 use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
-use crate::traits::{SessionParameters, WireFormat};
+use crate::{
+    error::TraceableResult,
+    traits::{SessionParameters, WireFormat},
+};
 
 /// Metadata of a signed value.
 #[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +56,8 @@ impl From<RuntimeError> for VerificationError {
     }
 }
 
+impl core::error::Error for VerificationError {}
+
 fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::Output<D>, RuntimeError> {
     let value_len =
         u64::try_from(value.as_ref().len()).map_err(|_| RuntimeError::new("Message size exceeds 2^64 bytes"))?;
@@ -67,7 +72,10 @@ fn hash_value_hash_and_metadata<SP: SessionParameters>(
     metadata: &ValueMetadata<SP>,
 ) -> Result<SP::Digest, RuntimeError> {
     Ok(SP::Digest::new_with_prefix(b"SignedValueDigest")
-        .chain_update(<SP::WireFormat as WireFormat>::serialize(metadata)?)
+        .chain_update(
+            <SP::WireFormat as WireFormat>::serialize(metadata)
+                .or_with_context(|| format!("Failed to serialize metadata for value `{}`", metadata.full_name()))?,
+        )
         .chain_update(value_hash.as_ref()))
 }
 
@@ -124,7 +132,8 @@ impl<SP: SessionParameters> SignedValue<SP> {
             destination: destination.clone(),
             session_id: session_id.clone(),
         };
-        let digest = hash_value_and_metadata::<SP>(&value, &metadata)?;
+        let digest = hash_value_and_metadata::<SP>(&value, &metadata)
+            .or_with_context(|| format!("Failed to create a signed value `{name}`"))?;
         let mut typed_rng = Rng(rng);
         let signature = signer
             .try_sign_digest_with_rng(&mut typed_rng, digest)
@@ -143,7 +152,8 @@ impl<SP: SessionParameters> SignedValue<SP> {
     }
 
     fn verify_inner(&self) -> Result<(), VerificationError> {
-        let digest = hash_value_and_metadata::<SP>(&self.value, &self.metadata)?;
+        let digest = hash_value_and_metadata::<SP>(&self.value, &self.metadata)
+            .or_with_context(|| format!("Failed to verify a signed value `{}`", self.metadata.full_name()))?;
         self.source
             .verify_digest(digest, &self.signature)
             .map_err(|_err| VerificationError::SignatureMismatch)
@@ -194,7 +204,8 @@ impl<SP: SessionParameters> SignedHash<SP> {
     }
 
     fn verify_inner(&self) -> Result<(), VerificationError> {
-        let digest = hash_value_hash_and_metadata::<SP>(&self.hash, &self.metadata)?;
+        let digest = hash_value_hash_and_metadata::<SP>(&self.hash, &self.metadata)
+            .or_with_context(|| format!("Failed to verify a signed hash {}", self.metadata.full_name()))?;
         self.source
             .verify_digest(digest, &self.signature)
             .map_err(|_err| VerificationError::SignatureMismatch)
@@ -237,7 +248,12 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
 
     /// Returns `true` if the hash in `other` is equal to the hash of this value.
     pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> Result<bool, RuntimeError> {
-        let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
+        let value_hash = hash_serialized_value::<SP::Digest>(&self.value).or_with_context(|| {
+            format!(
+                "Failed to check if payload's hash matches for value `{}`",
+                self.metadata.full_name()
+            )
+        })?;
         Ok(value_hash.as_ref() == other.hash.as_ref())
     }
 
@@ -254,7 +270,12 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
     /// Turns this into a signed hash (essentially replacing the actual value with its hash,
     /// keeping the metadata intact).
     pub fn to_signed_hash(&self) -> Result<SignedHash<SP>, RuntimeError> {
-        let value_hash = hash_serialized_value::<SP::Digest>(&self.value)?;
+        let value_hash = hash_serialized_value::<SP::Digest>(&self.value).or_with_context(|| {
+            format!(
+                "Failed to convert verified value `{}` to signed hash",
+                self.metadata.full_name()
+            )
+        })?;
         Ok(SignedHash {
             signature: self.signature.clone(),
             source: self.source.clone(),

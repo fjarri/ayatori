@@ -5,7 +5,10 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::marker::PhantomData;
+use core::{
+    fmt::{self, Display},
+    marker::PhantomData,
+};
 
 use itertools::Itertools;
 use signature::Keypair;
@@ -16,16 +19,22 @@ use super::{
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
-    task::{PreprocessingTask, Task, TaskResult, TaskResultEnum},
+    task::{
+        DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
+        ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
+        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarUnattributableOptionalTask,
+        ScalarUnattributableTask, SendTask, SerializeAndSignElementTask, Task, TaskResult, TaskResultEnum,
+    },
 };
 #[cfg(feature = "dev")]
 use crate::dev::Replacement;
 use crate::{
     entities::{
         AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
-        FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
-        ScalarTag, SerializeArgs, SessionId, UnattributableError, Value, VerifiedValue,
+        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
+        SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
     },
+    error::{Traceable, TraceableResult},
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traits::{ExecutableProtocol, SessionParameters},
@@ -36,13 +45,6 @@ pub(crate) struct SessionData<SP: SessionParameters> {
     pub(crate) id: SessionId<SP>,
     pub(crate) participants: BTreeSet<SP::Verifier>,
     pub(crate) local_participants: BTreeSet<SP::Verifier>,
-    pub(crate) expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
-}
-
-impl<SP: SessionParameters> SessionData<SP> {
-    pub fn expected_senders(&self, message_name: &FullName) -> Option<BTreeSet<SP::Verifier>> {
-        self.expected_messages.get(message_name).cloned()
-    }
 }
 
 /// A state of a protocol being executed.
@@ -56,7 +58,7 @@ pub struct Session<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     provable_errors: BTreeMap<SP::Verifier, Evidence<SP, P>>,
     attributable_errors: BTreeMap<SP::Verifier, String>,
     external_bans: BTreeMap<SP::Verifier, String>,
-    preprocessing_tasks: Vec<PreprocessingTask<SP>>,
+    preprocessing_tasks: Vec<PreprocessMessageTask<SP>>,
     phantom: PhantomData<fn() -> P>,
 }
 
@@ -89,15 +91,14 @@ where
         let local_participants = BTreeSet::from([verifier.clone()]);
         let public_inputs = P::make_public_inputs(shared_data);
 
-        let ruleset = Ruleset::new(output_node, &private_inputs.names())?;
+        let ruleset = Ruleset::new(output_node, &private_inputs.names())
+            .or_with_context(|| "Failed to build the ruleset".into())?;
         let storage = Storage::new();
 
-        let expected_messages = ruleset.expected_messages().clone();
         let data = Arc::new(SessionData {
             id,
             participants,
             local_participants,
-            expected_messages,
         });
         let mut session = Self {
             ruleset,
@@ -112,7 +113,9 @@ where
             phantom: PhantomData,
         };
 
-        session.fill_inputs(public_inputs, private_inputs)?;
+        session
+            .fill_inputs(public_inputs, private_inputs)
+            .or_with_context(|| "Failed to associate protocol inputs with the input nodes".into())?;
 
         Ok(session)
     }
@@ -148,13 +151,15 @@ where
 
         for (name, value) in public_values {
             if let Some(store_in) = arguments.get(&name) {
-                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)
+                    .or_with_context(|| format!("Failed to add the private input `{store_in}` to the storage"))?;
             }
         }
 
         for (name, value) in private_values {
             if let Some(store_in) = arguments.get(&name) {
-                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)?;
+                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)
+                    .or_with_context(|| format!("Failed to add the public input `{store_in}` to the storage"))?;
             }
         }
 
@@ -169,7 +174,8 @@ where
         shared_data: &P::SharedData,
     ) -> Result<Self, RuntimeError> {
         let verifier = signer.verifying_key();
-        let output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        let output_node = make_tree::<SP, P>(&verifier, shared_data)
+            .or_with_context(|| "Failed to build the protocol graph".into())?;
         let private_inputs = P::make_private_inputs(private_data);
         Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
     }
@@ -182,11 +188,11 @@ where
         shared_data: &P::SharedData,
         associated_data: Option<&AssociatedData<SP>>,
     ) -> Result<Self, RuntimeError> {
-        let output_node = AnyNode::from(make_tree::<SP, P>(reported_by, shared_data)?).get_reproduction_subtree(
-            subtree_root,
-            guilty_party,
-            associated_data,
-        )?;
+        let full_graph = make_tree::<SP, P>(reported_by, shared_data)
+            .or_with_context(|| "Failed to build the protocol graph".into())?;
+        let output_node = AnyNode::from(full_graph)
+            .get_reproduction_subtree(subtree_root, guilty_party, associated_data)
+            .or_with_context(|| format!("Failed to extract the reproduction subtree for node `{subtree_root}`"))?;
         Self::new_inner(id, None, reported_by, &output_node, PrivateInputs::new(), shared_data)
     }
 
@@ -200,9 +206,15 @@ where
         replacements: &[&Replacement<SP>],
     ) -> Result<Self, RuntimeError> {
         let verifier = signer.verifying_key();
-        let mut output_node = make_tree::<SP, P>(&verifier, shared_data)?;
+        let mut output_node = make_tree::<SP, P>(&verifier, shared_data)
+            .or_with_context(|| "Failed to build the protocol graph".into())?;
         for replacement in replacements {
-            output_node = replacement.apply(&output_node)?;
+            output_node = replacement.apply(&output_node).or_with_context(|| {
+                format!(
+                    "Failed to build apply the replacement for node `{}`",
+                    output_node.store_in()
+                )
+            })?;
         }
         let private_inputs = P::make_private_inputs(private_data);
         Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
@@ -214,13 +226,17 @@ where
     }
 
     fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), RuntimeError> {
-        self.storage.set_scalar(store_in, value)?;
+        self.storage
+            .set_scalar(store_in, value)
+            .or_with_context(|| format!("Failed to store the scalar result of `{store_in}`"))?;
         self.ruleset.update_with_scalar_ready(store_in);
         Ok(())
     }
 
     fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), RuntimeError> {
-        self.storage.set_elem(store_in, id, value)?;
+        self.storage
+            .set_elem(store_in, id, value)
+            .or_with_context(|| format!("Failed to store a mapping element result of `{store_in}`"))?;
         self.ruleset.update_with_element_ready(store_in, id);
         Ok(())
     }
@@ -253,35 +269,24 @@ where
     }
 
     pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
-        let value = self.storage.get_scalar(&ScalarTag::Computed(output_tag.clone()))?;
-        value.downcast::<T>()
+        let tag = ScalarTag::Computed(output_tag.clone());
+        let value = self
+            .storage
+            .get_scalar(&tag)
+            .or_with_context(|| "Failed to get the output value from storage".into())?;
+        value
+            .downcast::<T>()
+            .or_with_context(|| "Failed to downcast the output value".into())
     }
 
     pub(crate) fn finalize_with_evidence_verdict(self) -> Result<EvidenceVerdict, RuntimeError> {
-        let verdict = self.get_output::<EvidenceVerdict>(self.ruleset.output_tag())?;
-        Ok(verdict)
+        self.get_output::<EvidenceVerdict>(self.ruleset.output_tag())
+            .or_with_context(|| "Failed to extract the evidence verdict".into())
     }
 
     fn finalize_with_success(self) -> Result<SessionReport<SP, P>, RuntimeError> {
         let result = self.get_output::<P::Output>(self.ruleset.output_tag())?;
         Ok(self.make_report(SessionOutcome::Success(result)))
-    }
-
-    fn finalize_with_stalled(self, tag: &CollectedTag) -> SessionReport<SP, P> {
-        self.make_report(SessionOutcome::Unfinishable(format!("Stalled at {tag}")))
-    }
-
-    /// Attempts to finalize the session.
-    pub fn try_finalize(self) -> SessionState<SP, P> {
-        let state = self.ruleset.state().clone();
-        match state {
-            RulesetState::InProgress => SessionState::InProgress(self),
-            RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
-            RulesetState::StalledAt(stalled_at) => SessionState::Stalled(StalledSession {
-                session: self,
-                stalled_at,
-            }),
-        }
     }
 
     /// Terminates the session and returns the report containing the recorded failures of remote parties (if any).
@@ -293,7 +298,7 @@ where
     pub fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
         let tasks = message
             .into_values()
-            .map(|signed_value| PreprocessingTask::new(&self.data, message_id.clone(), signed_value))
+            .map(|signed_value| PreprocessMessageTask::new(&self.data, message_id.clone(), signed_value))
             .collect::<Vec<_>>();
         self.preprocessing_tasks.extend(tasks);
     }
@@ -303,7 +308,7 @@ where
     /// The returned task may be offloaded to a thread pool.
     pub fn make_task(&mut self) -> Result<Option<Task<SP>>, RuntimeError> {
         if let Some(task) = self.preprocessing_tasks.pop() {
-            return Ok(Some(Task::preprocess_message(task)));
+            return Ok(Some(task.into()));
         }
 
         while let Some(action) = self.ruleset.pop_action() {
@@ -313,25 +318,31 @@ where
                     to_send,
                     destination,
                 } => {
-                    let signed_value = self.storage.get_elem(&MappingTag::LocalSigned(to_send), &destination)?;
-                    return Ok(Some(Task::direct_message(store_in, destination, signed_value)));
+                    let signed_value = self
+                        .storage
+                        .get_elem(&MappingTag::LocalSigned(to_send), &destination)
+                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+                    return Ok(Some(SendTask::new(store_in, destination, signed_value).into()));
                 }
                 Action::ComputeScalar {
                     store_in,
                     function,
                     args,
                 } => {
-                    let arg_values = self.storage.get_scalar_args(args)?;
+                    let arg_values = self
+                        .storage
+                        .get_scalar_args(args)
+                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         ScalarFunction::Unattributable(function) => {
-                            Task::compute_scalar_unattributable(store_in, function, args)
+                            ScalarUnattributableTask::new(store_in, function, args).into()
                         }
                         ScalarFunction::UnattributableOptional(function) => {
-                            Task::compute_scalar_unattributable_optional(store_in, function, args)
+                            ScalarUnattributableOptionalTask::new(store_in, function, args).into()
                         }
                         ScalarFunction::UnattributableWithRng(function) => {
-                            Task::compute_scalar_unattributable_with_rng(store_in, function, args)
+                            RngScalarUnattributableTask::new(store_in, function, args).into()
                         }
                     }));
                 }
@@ -342,25 +353,27 @@ where
                     args,
                     on_error,
                 } => {
-                    let arg_values = self.storage.get_scalar_or_mapping_args(&index, args)?;
+                    let arg_values = self
+                        .storage
+                        .get_scalar_or_mapping_args(&index, args)
+                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(match function {
                         MappingFunction::Unattributable(function) => {
-                            Task::compute_mapping_elem_unattributable(store_in, index, function, args)
+                            ElementUnattributableTask::new(store_in, function, index, args).into()
                         }
                         MappingFunction::UnattributableWithRng(function) => {
-                            Task::compute_mapping_elem_unattributable_with_rng(store_in, index, function, args)
+                            RngElementUnattributableTask::new(store_in, function, index, args).into()
                         }
                         MappingFunction::SenderAttributable(function) => {
-                            Task::compute_mapping_elem_sender_attributable(store_in, index, function, args, on_error)
+                            ElementSenderAttributableTask::new(store_in, function, index, args, on_error).into()
                         }
                         MappingFunction::SenderAttributableWithReveal(function) => {
-                            Task::compute_mapping_elem_sender_attributable_with_reveal(
-                                store_in, index, function, args, on_error,
-                            )
+                            ElementSenderAttributableWithRevealTask::new(store_in, function, index, args, on_error)
+                                .into()
                         }
                         MappingFunction::ThirdPartyAttributable(function) => {
-                            Task::compute_mapping_elem_third_party_attributable(store_in, index, function, args)
+                            ElementThirdPartyAttributableTask::new(store_in, function, index, args).into()
                         }
                     }));
                 }
@@ -372,41 +385,49 @@ where
                     message_name,
                     serde_adapter,
                 } => {
-                    let signer = self
-                        .signer
-                        .as_ref()
-                        .ok_or_else(|| RuntimeError::new("This session does not contain a signer"))?;
+                    let signer = self.signer.as_ref().ok_or_else(|| {
+                        // This can happen if a serialization node somehow remains
+                        // in an evidence verification subtree.
+                        RuntimeError::new(
+                            "Attempted to execute a serialize-and-sign node in a session without a signer",
+                        )
+                    })?;
+
                     let value = match data {
-                        AnyTag::Scalar(tag) => self.storage.get_scalar(&tag)?,
-                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index)?,
-                    };
+                        AnyTag::Scalar(tag) => self.storage.get_scalar(&tag),
+                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index),
+                    }
+                    .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+
                     let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
-                    return Ok(Some(Task::compute_serialize_and_sign_elem(
-                        store_in, index, function, args,
-                    )));
+                    return Ok(Some(
+                        SerializeAndSignElementTask::new(store_in, function, index, args).into(),
+                    ));
                 }
                 Action::ComputeDeserializeElement {
                     store_in,
                     function,
                     index,
                     data,
-                    message_name,
                     serde_adapter,
+                    expected_senders,
                     on_error,
                 } => {
-                    let value = self.storage.get_elem(&MappingTag::RemoteSigned(data), &index)?;
-                    let expected_senders = self.data.expected_senders(&message_name).ok_or_else(|| {
-                        RuntimeError::expect(format!("{message_name} does not have expected senders"))
-                    })?;
+                    let value = self
+                        .storage
+                        .get_elem(&MappingTag::RemoteSigned(data), &index)
+                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
                     let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
-                    return Ok(Some(Task::compute_deserialize_elem(
-                        store_in, index, function, args, on_error,
-                    )));
+                    return Ok(Some(
+                        DeserializeElementTask::new(store_in, function, index, args, on_error).into(),
+                    ));
                 }
                 Action::MergeScalar { store_in, left, right } => {
                     self.add_scalar(
                         &ScalarTag::Merged(store_in.clone()),
-                        self.storage.get_one_or_both_as_value(&left, &right)?,
+                        self.storage
+                            .get_one_or_both_as_value(&left, &right)
+                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
                     )?;
                 }
                 Action::Collect {
@@ -416,7 +437,9 @@ where
                 } => {
                     self.add_scalar(
                         &ScalarTag::Collected(store_in.clone()),
-                        self.storage.get_mapping_as_value(&values, &indices)?,
+                        self.storage
+                            .get_mapping_as_value(&values, &indices)
+                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
                     )?;
                 }
             }
@@ -426,22 +449,52 @@ where
     }
 
     /// Registers the result of an executed task.
-    pub fn add_result(&mut self, result: TaskResult<SP>) -> Result<(), TaskError<SP>> {
-        match result.into_enum() {
-            TaskResultEnum::Success => {}
-            TaskResultEnum::UnattributableError { error } => return Err(TaskError::Unattributable(error)),
+    pub fn add_result(mut self, result: TaskResult<SP>) -> Result<SessionState<SP, P>, RuntimeError> {
+        let add_result = self.add_result_inner(result)?;
+        Ok(match add_result {
+            AddTaskResult::StateChanged => {
+                let state = self.ruleset.state().clone();
+                match state {
+                    RulesetState::InProgress => SessionState::InProgress(self),
+                    RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
+                    RulesetState::ImpossibleToCollect(tags) => {
+                        let report = self.make_report(SessionOutcome::Unfinishable(UnfinishableOutcome(tags)));
+                        SessionState::Unfinishable(report)
+                    }
+                }
+            }
+            AddTaskResult::StateDidNotChange => SessionState::InProgress(self),
+            AddTaskResult::MessageAttributableError(error) => {
+                SessionState::InProgressWithMessageError { session: self, error }
+            }
+            AddTaskResult::SpuriousError { store_in, error } => {
+                let report = self.make_report(SessionOutcome::SpuriousError(SpuriousErrorOutcome { store_in, error }));
+                SessionState::Unfinishable(report)
+            }
+        })
+    }
+
+    /// Registers the result of an executed task.
+    fn add_result_inner(&mut self, result: TaskResult<SP>) -> Result<AddTaskResult<SP>, RuntimeError> {
+        match result.into_inner() {
+            TaskResultEnum::NoActionNeeded => Ok(AddTaskResult::StateDidNotChange),
+            TaskResultEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
+            TaskResultEnum::SpuriousError { store_in, error } => Ok(AddTaskResult::SpuriousError { store_in, error }),
             TaskResultEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::ComputedScalar { store_in, result } => {
                 self.add_scalar(&store_in, result)?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::ComputedMappingElement {
                 store_in,
-                source,
+                index,
                 result,
             } => {
-                self.add_element(&store_in, &source, result)?;
+                self.add_element(&store_in, &index, result)?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::SenderError {
                 store_in,
@@ -449,15 +502,41 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => self.register_attributable_error(guilty_party, &store_in),
+                OnError::Escalate => {
+                    self.register_attributable_error(guilty_party, &store_in);
+                    Ok(AddTaskResult::StateChanged)
+                }
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self.storage.get_elem(
-                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &guilty_party,
-                        )?;
-                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        let value = self
+                            .storage
+                            .get_elem(
+                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &guilty_party,
+                            )
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to get the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?;
+                        let signed_value = value
+                            .downcast_ref::<VerifiedValue<SP>>()
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to downcast the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?
+                            .clone()
+                            .unverify();
                         signed_values.push(signed_value);
                     }
                     let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
@@ -467,6 +546,7 @@ where
                         error,
                     ));
                     self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
+                    Ok(AddTaskResult::StateChanged)
                 }
             },
             TaskResultEnum::SenderErrorWithReveal {
@@ -475,15 +555,41 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => self.register_attributable_error(guilty_party, &store_in),
+                OnError::Escalate => {
+                    self.register_attributable_error(guilty_party, &store_in);
+                    Ok(AddTaskResult::StateChanged)
+                }
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
                     for name in message_names {
-                        let value = self.storage.get_elem(
-                            &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
-                            &guilty_party,
-                        )?;
-                        let signed_value = value.downcast_ref::<VerifiedValue<SP>>()?.clone().unverify();
+                        let value = self
+                            .storage
+                            .get_elem(
+                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &guilty_party,
+                            )
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to get the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?;
+                        let signed_value = value
+                            .downcast_ref::<VerifiedValue<SP>>()
+                            .or_with_context(|| {
+                                format!(
+                                    concat!(
+                                        "Failed to downcast the signed message `{}` ",
+                                        "to attach to the evidence of `{}` failure"
+                                    ),
+                                    name, store_in
+                                )
+                            })?
+                            .clone()
+                            .unverify();
                         signed_values.push(signed_value);
                     }
                     let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
@@ -493,16 +599,15 @@ where
                         error,
                     ));
                     self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
+                    Ok(AddTaskResult::StateChanged)
                 }
             },
-            TaskResultEnum::ThirdPartyError {
-                store_in,
-                guilty_party,
-                error,
-            } => {
+            TaskResultEnum::ThirdPartyError { store_in, error } => {
+                let (guilty_party, error) = error.unpack();
                 let evidence =
                     EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
                 self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::Preprocessed {
                 store_in,
@@ -510,8 +615,12 @@ where
                 value,
             } => {
                 if let Ok(existing_value) = self.storage.get_elem(&store_in, &source) {
-                    let typed_existing_value = existing_value.downcast_ref::<VerifiedValue<SP>>()?;
-                    let typed_received_value = value.downcast_ref::<VerifiedValue<SP>>()?;
+                    let typed_existing_value = existing_value
+                        .downcast_ref::<VerifiedValue<SP>>()
+                        .or_with_context(|| format!("Failed to downcast a stored signed message `{store_in}`"))?;
+                    let typed_received_value = value
+                        .downcast_ref::<VerifiedValue<SP>>()
+                        .or_with_context(|| format!("Failed to downcast a newly received message `{store_in}`"))?;
 
                     // Both values are signed, contain the same named value, but are different.
                     // This is a provable failure.
@@ -526,36 +635,34 @@ where
                             typed_received_value,
                         ));
                         self.register_provable_error(Evidence::new(&self.data.id, &source, evidence));
-                        return Ok(());
+                        return Ok(AddTaskResult::StateChanged);
                     }
 
                     // The message is a duplicate, we cannot do anything at this point.
                     // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
                     // For now we can only report both message IDs that delivered these values,
                     // and let the user deal with it, if possible.
-                    return Err(TaskError::MessageAttributable(
-                        MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
-                            first: typed_existing_value.message_id().clone(),
-                            second: typed_existing_value.message_id().clone(),
-                        }),
-                    ));
+                    let error = MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
+                        first: typed_existing_value.message_id().clone(),
+                        second: typed_existing_value.message_id().clone(),
+                    });
+                    return Ok(AddTaskResult::MessageAttributableError(error));
                 }
 
                 self.add_element(&store_in, &source, value)?;
+                Ok(AddTaskResult::StateChanged)
             }
             TaskResultEnum::MessageError {
                 message_id,
                 description,
             } => {
-                return Err(TaskError::MessageAttributable(
-                    MessageAttributableError::InvalidMessage(InvalidMessageError {
-                        message_id,
-                        description,
-                    }),
-                ));
+                let error = MessageAttributableError::InvalidMessage(InvalidMessageError {
+                    message_id,
+                    description,
+                });
+                Ok(AddTaskResult::MessageAttributableError(error))
             }
         }
-        Ok(())
     }
 }
 
@@ -596,42 +703,6 @@ where
     }
 }
 
-/// A wrapper for a session that is unfinishable.
-#[derive_where::derive_where(Debug)]
-pub struct StalledSession<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    session: Session<SP, P>,
-    stalled_at: CollectedTag,
-}
-
-impl<SP, P> StalledSession<SP, P>
-where
-    SP: SessionParameters,
-    P: ExecutableProtocol<SP>,
-{
-    /// Destroys the session and returns the report containing
-    /// recorded failures of remote parties (if any).
-    pub fn finalize(self) -> SessionReport<SP, P> {
-        self.session.finalize_with_stalled(&self.stalled_at)
-    }
-
-    /// Returns the contained session allowing to continue with the event loop.
-    ///
-    /// Can be used to accumulate more reports of malicious actions.
-    pub fn continue_execution(self) -> Session<SP, P> {
-        self.session
-    }
-}
-
-impl<SP, P> AsRef<Session<SP, P>> for StalledSession<SP, P>
-where
-    SP: SessionParameters,
-    P: ExecutableProtocol<SP>,
-{
-    fn as_ref(&self) -> &Session<SP, P> {
-        &self.session
-    }
-}
-
 /// Possible results of attempting to finalize a session.
 #[derive_where::derive_where(Debug)]
 pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
@@ -639,25 +710,20 @@ pub enum SessionState<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ///
     /// Continue working with the returned session object.
     InProgress(Session<SP, P>),
+    /// The session is in progress, but a message-attributable error was registered.
+    ///
+    /// Continue working with the returned session object,
+    /// and handle the error according to what your transport level allows.
+    InProgressWithMessageError {
+        /// The session in progress.
+        session: Session<SP, P>,
+        /// The message-attributable error.
+        error: MessageAttributableError<SP>,
+    },
     /// The session has reached the output.
     ReachedOutput(ReachedOutputSession<SP, P>),
     /// The session is unfinishable due to some nodes having been banned.
-    Stalled(StalledSession<SP, P>),
-}
-
-/// A possible error when registering a task's result.
-#[derive_where::derive_where(Debug)]
-pub enum TaskError<SP: SessionParameters> {
-    /// An error that is not attributable to a specific party or message.
-    Unattributable(UnattributableError),
-    /// An error that is attributable to a specific message, but not to a specific party.
-    MessageAttributable(MessageAttributableError<SP>),
-}
-
-impl<SP: SessionParameters> From<RuntimeError> for TaskError<SP> {
-    fn from(source: RuntimeError) -> Self {
-        Self::Unattributable(source.into())
-    }
+    Unfinishable(SessionReport<SP, P>),
 }
 
 /// An error that is attributable to a specific message, but not to a specific party.
@@ -672,6 +738,8 @@ pub enum MessageAttributableError<SP: SessionParameters> {
     DuplicateMessages(DuplicateMessagesError<SP>),
 }
 
+impl<SP: SessionParameters> core::error::Error for MessageAttributableError<SP> {}
+
 /// A registered message was found to be invalid.
 #[derive_where::derive_where(Debug)]
 #[derive(displaydoc::Display)]
@@ -685,6 +753,8 @@ pub struct InvalidMessageError<SP: SessionParameters> {
     /// The description of the error.
     pub description: String,
 }
+
+impl<SP: SessionParameters> core::error::Error for InvalidMessageError<SP> {}
 
 /// A registered message was found to be a duplicate of a previously registered message.
 #[derive_where::derive_where(Debug)]
@@ -702,6 +772,8 @@ pub struct DuplicateMessagesError<SP: SessionParameters> {
     /// in which case it should be penalized.
     pub second: MessageId<SP>,
 }
+
+impl<SP: SessionParameters> core::error::Error for DuplicateMessagesError<SP> {}
 
 /// The results of a session.
 #[derive_where::derive_where(Debug, Clone)]
@@ -734,17 +806,52 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SessionReport<SP, P> {
             None
         }
     }
+}
 
-    /// Returns `true` if the session was terminated due to being unfinishable
-    /// (enough nodes were banned to make some collection nodes impossible to trigger).
-    pub fn is_unfinishable(&self) -> bool {
-        matches!(self.outcome, SessionOutcome::Unfinishable(..))
+/// Possible session outcomes.
+#[derive_where::derive_where(Debug, Clone)]
+#[derive(displaydoc::Display)]
+pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
+    /// Reached the output successfully.
+    #[displaydoc("Success: {0:?}")]
+    Success(P::Output),
+    /// Was terminated via [`Session::terminate`].
+    #[displaydoc("Manually terminated")]
+    ManuallyTerminated,
+    /// Some collect nodes are impossible to finish due to some parties having been banned.
+    #[displaydoc("Unfinishable: {0}")]
+    Unfinishable(UnfinishableOutcome),
+    /// A [`SpuriousError`] error occurred in one of the computations.
+    #[displaydoc("Spurious error: {0}")]
+    SpuriousError(SpuriousErrorOutcome),
+}
+
+enum AddTaskResult<SP: SessionParameters> {
+    StateChanged,
+    StateDidNotChange,
+    MessageAttributableError(MessageAttributableError<SP>),
+    SpuriousError { store_in: AnyTag, error: SpuriousError },
+}
+
+/// Contains the specifics about why the session was impossible to finalize.
+#[derive(Debug, Clone)]
+pub struct UnfinishableOutcome(Vec<CollectedTag>);
+
+impl Display for UnfinishableOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "Impossible to collect: {}", self.0.iter().join(", "))
     }
 }
 
-#[derive_where::derive_where(Debug, Clone)]
-pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
-    Success(P::Output),
-    ManuallyTerminated,
-    Unfinishable(String),
+/// Contains the specifics about why the session was impossible to finalize.
+#[derive(Debug, Clone)]
+pub struct SpuriousErrorOutcome {
+    store_in: AnyTag,
+    error: SpuriousError,
+}
+
+impl Display for SpuriousErrorOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "Spurious error when calculating {}: {}", self.store_in, self.error)
+    }
 }

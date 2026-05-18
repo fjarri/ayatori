@@ -9,6 +9,6 @@ pub mod tokio;
 pub use evidence::Evidence;
 pub use session::{
     DuplicateMessagesError, InvalidMessageError, MessageAttributableError, ReachedOutputSession, Session,
-    SessionReport, SessionState, StalledSession, TaskError,
+    SessionOutcome, SessionReport, SessionState, UnfinishableOutcome,
 };
 pub use task::Task;

@@ -98,20 +98,20 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let all_parties = build_data;
 
         let my_x = compute_scalar("my_x", make_scalar_value, &[]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x_broadcasted = broadcast(&message_x, &my_x);
         let x = receive(&message_x);
-        let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
+        let all_x = collect(&x, all_parties).with_dependency(&collect(&x_broadcasted, all_parties));
 
         let my_y = compute_mapping("my_y", make_mapping_elem, &[]);
-        let y_sent = direct_message(&message_y, &my_y, all_parties);
+        let y_sent = direct_message(&message_y, &my_y);
         let y = receive(&message_y);
-        let all_y = collect(&y, all_parties).with_dependency(&y_sent);
+        let all_y = collect(&y, all_parties).with_dependency(&collect(&y_sent, all_parties));
 
         let my_z_group = all_parties.except(party_build_data.id());
         let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[]);
-        let z_sent = direct_message(&message_z, &my_z, &my_z_group);
+        let z_sent = direct_message(&message_z, &my_z);
         let z = receive(&message_z);
-        let all_z = collect(&z, &my_z_group).with_dependency(&z_sent);
+        let all_z = collect(&z, &my_z_group).with_dependency(&collect(&z_sent, &my_z_group));
 
         Ok(compute_scalar(
             "output",

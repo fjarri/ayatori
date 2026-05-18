@@ -9,8 +9,8 @@ use signature::rand_core::CryptoRngCore;
 use super::{
     args::{Args, DeserializeArgs, SerializeArgs},
     errors::{
-        AssociatedData, RuntimeError, SenderAttributableError, SenderAttributableErrorWithReveal,
-        ThirdPartyAttributableError, UnattributableError,
+        AssociatedData, MaybeAttributableError, RuntimeError, SenderError, SenderErrorWithReveal, ThirdPartyError,
+        UnattributableError,
     },
     session_id::SessionId,
     value::{Erasable, Value},
@@ -144,17 +144,17 @@ define_typed_function_type!(
 
 define_typed_function_type!(
     SenderAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: &Args<SP>) -> SenderAttributableError
+    (id: &SP::Verifier, args: &Args<SP>) -> MaybeAttributableError<SenderError>
 );
 
 define_typed_function_type!(
     SenderAttributableWithRevealMappingFunction<SP>,
-    (id: &SP::Verifier, args: &Args<SP>) -> SenderAttributableErrorWithReveal<SP>
+    (id: &SP::Verifier, args: &Args<SP>) -> MaybeAttributableError<SenderErrorWithReveal<SP>>
 );
 
 define_typed_function_type!(
     ThirdPartyAttributableMappingFunction<SP>,
-    (id: &SP::Verifier, args: &Args<SP>) -> ThirdPartyAttributableError<SP>
+    (id: &SP::Verifier, args: &Args<SP>) -> MaybeAttributableError<ThirdPartyError<SP>>
 );
 
 define_erased_function_type!(
@@ -176,7 +176,7 @@ define_erased_function_type!(
 
 define_erased_function_type!(
     DeserializeFunction<SP>,
-    (args: &DeserializeArgs<SP>) -> Result<Value, SenderAttributableError>
+    (args: &DeserializeArgs<SP>) -> Result<Value, MaybeAttributableError<SenderError>>
 );
 
 #[derive_where::derive_where(Debug, Clone)]

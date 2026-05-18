@@ -2,10 +2,10 @@
 
 pub use crate::{
     entities::{
-        Args, AssociatedData, Erasable, EvidenceVerdict, FullName, OneOrBoth, PartyGroup, RuntimeError,
-        SenderAttributableError, SenderAttributableErrorWithReveal, SerdeAdapter, SerializeArgs, SerializedValue,
-        SessionId, SignedHash, SignedValue, SpuriousError, ThirdPartyAttributableError, UnattributableError,
-        ValueMetadata, VerificationError, VerifiedValue,
+        Args, AssociatedData, Erasable, EvidenceVerdict, FullName, MaybeAttributableError, OneOrBoth, PartyGroup,
+        RuntimeError, SenderError, SenderErrorWithReveal, SerdeAdapter, SerializeArgs, SerializedValue, SessionId,
+        SignedHash, SignedValue, SpuriousError, ThirdPartyError, UnattributableError, ValueMetadata, VerificationError,
+        VerifiedValue,
     },
     graph_representation::{
         AnyNode, ArgNodes, BroadcastArg, Collect, CollectArg, ComputeMapping, ComputeMappingArg, ComputeMappingArgs,

@@ -9,14 +9,17 @@ fn gen_value<SP: SessionParameters>(_args: &Args<SP>) -> Result<u64, Unattributa
     Ok(1)
 }
 
-fn verify<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> Result<(), SenderAttributableError> {
+fn verify<SP: SessionParameters>(
+    id: &SP::Verifier,
+    args: &Args<SP>,
+) -> Result<(), MaybeAttributableError<SenderError>> {
     let x = args.get::<u64>("x")?;
     // TODO (#9): since we're sending a message to ourself too, we need to account for that.
     // When short-circuiting is implemented, this function won't be called at all if `id == args.my_id()`.
     if id == args.my_id() || *x == 1 {
         Ok(())
     } else {
-        Err(SenderAttributableError::new("Invalid x"))
+        Err(SenderError::new("Invalid x").into())
     }
 }
 
@@ -64,10 +67,15 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 
         let all_parties = build_data;
         let my_x = compute_scalar("my_x", gen_value, &[]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties);
+        let x_broadcasted = broadcast(&message_x, &my_x);
         let x = receive(&message_x);
-        let x_correct = compute_mapping_sender_fallible("x_correct", verify, &[("x", (&x).into())]);
-        let all_x_correct = collect(&x_correct, all_parties).with_dependency(&x_broadcasted);
+        // Note that this dependency ensures that the node will send out its messages
+        // before checking correctness of incoming values.
+        // This means that in the test where we make one node send out incorrect values,
+        // it will be able to correctly finish while the others won't.
+        let x_correct = compute_mapping_sender_fallible("x_correct", verify, &[("x", (&x).into())])
+            .with_dependency(&collect(&x_broadcasted, all_parties));
+        let all_x_correct = collect(&x_correct, all_parties);
         let all_x = collect(&x, all_parties);
         Ok(compute_scalar("output", gen_output, &[("x", (&all_x).into())]).with_dependency(&all_x_correct))
     }
@@ -139,7 +147,10 @@ mod tests {
         assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &4);
         assert!(results.reports[&ids[0]].provable_errors.is_empty());
 
-        assert!(results.reports[&ids[1]].is_unfinishable());
+        assert!(matches!(
+            results.reports[&ids[1]].outcome,
+            SessionOutcome::Unfinishable(..)
+        ));
         assert!(results.reports[&ids[1]].provable_errors.contains_key(&ids[0]));
         assert!(
             results.reports[&ids[1]].provable_errors[&ids[0]]
@@ -147,7 +158,10 @@ mod tests {
                 .is_ok()
         );
 
-        assert!(results.reports[&ids[2]].is_unfinishable());
+        assert!(matches!(
+            results.reports[&ids[2]].outcome,
+            SessionOutcome::Unfinishable(..)
+        ));
         assert!(results.reports[&ids[2]].provable_errors.contains_key(&ids[0]));
         assert!(
             results.reports[&ids[2]].provable_errors[&ids[0]]

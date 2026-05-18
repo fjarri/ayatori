@@ -3,8 +3,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
-    ExecutableProtocol, Session, SessionParameters, SessionReport, SessionState, Task,
-    TaskError, UnattributableError,
+    ExecutableProtocol, RuntimeError, Session, SessionParameters, SessionReport,
+    SessionState, Task,
     tokio::{MessageIn, MessageOut},
 };
 
@@ -15,7 +15,7 @@ pub async fn run_session<SP, P>(
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
-) -> Result<SessionReport<SP, P>, UnattributableError>
+) -> Result<SessionReport<SP, P>, RuntimeError>
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
@@ -28,19 +28,19 @@ where
 
         // ANCHOR: task_loop
         while let Some(task) = session.make_task()? {
-            let task_result = match task {
+            let new_state = match task {
                 // ANCHOR_END: task_loop
-                // ANCHOR: task_compute
-                Task::Compute(task) => session.add_result(task.compute()),
-                // ANCHOR_END: task_compute
+                // ANCHOR: task_deterministic
+                Task::Deterministic(task) => session.add_result(task.execute()),
+                // ANCHOR_END: task_deterministic
 
-                // ANCHOR: task_compute_rng
-                Task::ComputeWithRng(task) => session.add_result(task.compute(rng)),
-                // ANCHOR_END: task_compute_rng
+                // ANCHOR: task_randomized
+                Task::Randomized(task) => session.add_result(task.execute(rng)),
+                // ANCHOR_END: task_randomized
 
                 // ANCHOR: task_send
                 Task::Send(task) => {
-                    let (message, result) = task.compute();
+                    let (message, result) = task.execute();
                     if let Some(message) = message {
                         tx.send(MessageOut::Message(message)).await.unwrap();
                     }
@@ -49,29 +49,28 @@ where
             };
 
             // ANCHOR: task_result
-            match task_result {
-                Ok(()) => {}
-                Err(TaskError::Unattributable(error)) => return Err(error),
-                Err(TaskError::MessageAttributable(error)) => {
+            session = match new_state? {
+                // ANCHOR_END: task_result
+                // ANCHOR: task_result_in_progress
+                SessionState::InProgress(session) => session,
+                // ANCHOR_END: task_result_in_progress
+                // ANCHOR: task_result_message_error
+                SessionState::InProgressWithMessageError { error, session } => {
                     tx.send(MessageOut::Error(error)).await.unwrap();
+                    session
                 }
+                // ANCHOR_END: task_result_message_error
+                // ANCHOR: task_result_reached_output
+                SessionState::ReachedOutput(success) => {
+                    return success.finalize();
+                }
+                // ANCHOR_END: task_result_reached_output
+                // ANCHOR: task_result_unfinishable
+                SessionState::Unfinishable(report) => {
+                    return Ok(report);
+                } // ANCHOR_END: task_result_unfinishable
             }
-            // ANCHOR_END: task_result
         }
-
-        // ANCHOR: try_finalize
-        session = match session.try_finalize() {
-            // ANCHOR_END: try_finalize
-            // ANCHOR: try_finalize_in_progress
-            SessionState::InProgress(session) => session,
-            // ANCHOR_END: try_finalize_in_progress
-            // ANCHOR: try_finalize_reached_output
-            SessionState::ReachedOutput(success) => return Ok(success.finalize()?),
-            // ANCHOR_END: try_finalize_reached_output
-            // ANCHOR: try_finalize_stalled
-            SessionState::Stalled(stalled) => return Ok(stalled.finalize()),
-            // ANCHOR_END: try_finalize_stalled
-        };
 
         // ANCHOR: get_message
         let message_in = tokio::select! {
@@ -81,7 +80,9 @@ where
 
         match message_in {
             MessageIn::Message { message, id } => session.add_message(&id, message),
-            MessageIn::Ban { id, reason } => session.register_banned_party(id, reason),
+            MessageIn::Ban { id, reason } => {
+                session.register_banned_party(id, reason)
+            }
         }
         // ANCHOR_END: get_message
     }
@@ -92,7 +93,9 @@ mod tests {
     use alloc::vec::Vec;
 
     use ayatori::{
-        dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async},
+        dev::{
+            BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async,
+        },
         protocol_user_api::{PartyGroup, Session, SessionId},
     };
     use rand_chacha::ChaCha8Rng;

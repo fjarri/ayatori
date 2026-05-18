@@ -7,10 +7,7 @@ mod session_id;
 mod tag;
 mod value;
 
-pub(crate) use errors::{
-    SenderAttributableErrorEnum, SenderAttributableErrorWithRevealEnum, SenderError, SenderErrorWithReveal,
-    ThirdPartyAttributableErrorEnum, ThirdPartyError,
-};
+pub(crate) use errors::StoredThirdPartyError;
 pub(crate) use function::{
     DeserializeFunction, MappingFunction, ScalarFunction, SenderAttributableMappingFunction,
     SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
@@ -26,8 +23,8 @@ pub(crate) use value::Value;
 
 pub use args::{Args, DeserializeArgs, OneOrBoth, SerializeArgs};
 pub use errors::{
-    AssociatedData, RuntimeError, SenderAttributableError, SenderAttributableErrorWithReveal, SpuriousError,
-    ThirdPartyAttributableError, UnattributableError,
+    AssociatedData, MaybeAttributableError, RuntimeError, SenderError, SenderErrorWithReveal, SpuriousError,
+    ThirdPartyError, UnattributableError,
 };
 pub use function::EvidenceVerdict;
 pub use message::{Message, MessageId, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedValue};

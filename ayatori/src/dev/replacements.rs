@@ -6,10 +6,11 @@ use signature::rand_core::CryptoRngCore;
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingTag,
-        RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
-        SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction, UnattributableError,
-        UnattributableMappingFunction, UnattributableScalarFunction, Value,
+        MaybeAttributableError, RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs,
+        SignedValue, SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyError,
+        UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
+    error::TraceableResult,
     graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, ShallowClone},
     traits::SessionParameters,
 };
@@ -49,10 +50,10 @@ enum ReplacementEnum<SP: SessionParameters> {
     ComputeMappingThirdPartyAttributable {
         function: Arc<
             dyn Fn(
-                    Result<Value, ThirdPartyAttributableError<SP>>,
+                    Result<Value, MaybeAttributableError<ThirdPartyError<SP>>>,
                     &SP::Verifier,
                     &Args<SP>,
-                ) -> Result<Value, ThirdPartyAttributableError<SP>>
+                ) -> Result<Value, MaybeAttributableError<ThirdPartyError<SP>>>
                 + Send
                 + Sync,
         >,
@@ -73,12 +74,17 @@ impl<SP: SessionParameters> Replacement<SP> {
         Ret: Erasable,
         F: 'static + Send + Sync + Fn(&Ret, &Args<SP>) -> Result<Ret, UnattributableError>,
     {
-        let tag = ComputedScalarTag::new_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = ComputedScalarTag::new_with_full_name(
+            FullName::new_with_prefix(name)
+                .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
+        );
         Ok(Self {
-            tag: AnyTag::Scalar(ScalarTag::Computed(tag)),
+            tag: AnyTag::Scalar(ScalarTag::Computed(tag.clone())),
             kind: ReplacementEnum::ComputeScalar {
                 function: Arc::new(move |value, args| {
-                    let typed_value = value.downcast_ref::<Ret>()?;
+                    let typed_value = value
+                        .downcast_ref::<Ret>()
+                        .or_with_context(|| format!("Failed to downcast the result of the node `{tag}`"))?;
                     let typed_result = function(typed_value, args)?;
                     Ok(Value::new(typed_result))
                 }),
@@ -92,12 +98,17 @@ impl<SP: SessionParameters> Replacement<SP> {
         Ret: Erasable,
         F: 'static + Send + Sync + Fn(&Ret, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     {
-        let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = ComputedMappingTag::new_with_full_name(
+            FullName::new_with_prefix(name)
+                .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
+        );
         Ok(Self {
-            tag: AnyTag::Mapping(MappingTag::Computed(tag)),
+            tag: AnyTag::Mapping(MappingTag::Computed(tag.clone())),
             kind: ReplacementEnum::ComputeMapping {
-                function: Arc::new(move |value: Value, id, args| {
-                    let typed_value = value.downcast_ref::<Ret>()?;
+                function: Arc::new(move |value, id, args| {
+                    let typed_value = value
+                        .downcast_ref::<Ret>()
+                        .or_with_context(|| format!("Failed to downcast the result of the node `{tag}`"))?;
                     let typed_result = function(typed_value, id, args)?;
                     Ok(Value::new(typed_result))
                 }),
@@ -113,25 +124,26 @@ impl<SP: SessionParameters> Replacement<SP> {
             + Send
             + Sync
             + Fn(
-                Result<&Ret, ThirdPartyAttributableError<SP>>,
+                Result<&Ret, MaybeAttributableError<ThirdPartyError<SP>>>,
                 &SP::Verifier,
                 &Args<SP>,
-            ) -> Result<Ret, ThirdPartyAttributableError<SP>>,
+            ) -> Result<Ret, MaybeAttributableError<ThirdPartyError<SP>>>,
     {
-        let tag = ComputedMappingTag::new_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = ComputedMappingTag::new_with_full_name(
+            FullName::new_with_prefix(name)
+                .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
+        );
         Ok(Self {
             tag: AnyTag::Mapping(MappingTag::Computed(tag)),
             kind: ReplacementEnum::ComputeMappingThirdPartyAttributable {
-                function: Arc::new(
-                    move |maybe_value: Result<Value, ThirdPartyAttributableError<SP>>, id, args| {
-                        let typed_value = maybe_value
-                            .as_ref()
-                            .map_err(Clone::clone)
-                            .and_then(|value| value.downcast_ref::<Ret>().map_err(ThirdPartyAttributableError::from));
-                        let typed_result = function(typed_value, id, args)?;
-                        Ok(Value::new(typed_result))
-                    },
-                ),
+                function: Arc::new(move |maybe_value, id, args| {
+                    let typed_value = maybe_value
+                        .as_ref()
+                        .map_err(Clone::clone)
+                        .and_then(|value| value.downcast_ref::<Ret>().map_err(MaybeAttributableError::from));
+                    let typed_result = function(typed_value, id, args)?;
+                    Ok(Value::new(typed_result))
+                }),
             },
         })
     }
@@ -149,12 +161,17 @@ impl<SP: SessionParameters> Replacement<SP> {
                 &SerializeArgs<SP>,
             ) -> Result<SignedValue<SP>, RuntimeError>,
     {
-        let tag = LocalSignedTag::new_with_full_name(FullName::new_with_prefix(name)?);
+        let tag = LocalSignedTag::new_with_full_name(
+            FullName::new_with_prefix(name)
+                .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
+        );
         Ok(Self {
-            tag: AnyTag::Mapping(MappingTag::LocalSigned(tag)),
+            tag: AnyTag::Mapping(MappingTag::LocalSigned(tag.clone())),
             kind: ReplacementEnum::Message {
                 function: Arc::new(move |rng, orig_value, destination, args| {
-                    let typed_value = orig_value.downcast_ref::<SignedValue<SP>>()?;
+                    let typed_value = orig_value
+                        .downcast_ref::<SignedValue<SP>>()
+                        .or_with_context(|| format!("Failed to downcast the result of the node `{tag}`"))?;
                     let typed_result = function(rng, typed_value, destination, args)?;
                     Ok(Value::new(typed_result))
                 }),
@@ -165,7 +182,7 @@ impl<SP: SessionParameters> Replacement<SP> {
     pub(crate) fn apply(&self, node: &OutputNode<SP>) -> Result<OutputNode<SP>, RuntimeError> {
         let subnode = AnyNode::from(node.get_strong_ref())
             .find_subnode(self.tag.as_ref())
-            .ok_or_else(|| RuntimeError::new("Node not found"))?;
+            .ok_or_else(|| RuntimeError::new(format!("Failed to find subnode `{}` to replace", self.tag)))?;
         let new_subnode = match (&subnode, &self.kind) {
             (
                 AnyNode::ComputeScalar(node),
@@ -184,7 +201,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                         },
                     ))
                 } else {
-                    return Err(RuntimeError::new("Invalid function type"));
+                    return Err(RuntimeError::new(format!(
+                        "Invalid function type in the subnode `{}` - expected unattributable scalar function",
+                        self.tag
+                    )));
                 };
 
                 AnyNode::from(node.get_strong_ref().mutated(|inner| {
@@ -214,7 +234,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                         ));
                     ComputeMappingKind::Simple { function: new_function }
                 } else {
-                    return Err(RuntimeError::new("Invalid function type"));
+                    return Err(RuntimeError::new(format!(
+                        "Invalid function type in the subnode `{}` - expected unattributable mapping function",
+                        self.tag
+                    )));
                 };
 
                 AnyNode::from(node.get_strong_ref().mutated(|inner| {
@@ -247,7 +270,10 @@ impl<SP: SessionParameters> Replacement<SP> {
                         verification: verification.clone(),
                     }
                 } else {
-                    return Err(RuntimeError::new("Invalid function type"));
+                    return Err(RuntimeError::new(format!(
+                        "Invalid function type in the subnode `{}` - expected third party attributable mapping function",
+                        self.tag
+                    )));
                 };
 
                 AnyNode::from(node.get_strong_ref().mutated(|inner| {
@@ -275,7 +301,12 @@ impl<SP: SessionParameters> Replacement<SP> {
                     inner
                 }))
             }
-            _ => return Err(RuntimeError::new("Not supported")),
+            _ => {
+                return Err(RuntimeError::new(format!(
+                    "The type of the subnode `{}` does not match the replacement type",
+                    self.tag
+                )));
+            }
         };
         Ok(AnyNode::from(node.get_strong_ref())
             .with_replaced_subnode(&subnode, &new_subnode)

@@ -21,15 +21,15 @@ use super::{
 use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, FullName, LocalSignedTag, MergedScalarTag, OneOrBoth, PartyGroup, RemoteSignedTag,
-        RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableError, SenderAttributableErrorWithReveal,
-        SenderAttributableMappingFunction, SenderAttributableVerificationFunction,
-        SenderAttributableWithRevealMappingFunction, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId,
-        SignedValue, SimpleMappingFunction, ThirdPartyAttributableError, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableVerificationFunction, UnattributableError, UnattributableMappingFunction,
-        UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
-        UnattributableScalarFunctionWithRng, Value,
+        EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError, MergedScalarTag, OneOrBoth, PartyGroup,
+        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction,
+        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SenderError,
+        SenderErrorWithReveal, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
+        SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
+        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
+    error::TraceableResult,
     traits::{ComposableProtocol, SessionParameters},
 };
 
@@ -276,7 +276,7 @@ pub fn compute_mapping<SP: SessionParameters, Ret: Erasable>(
 /// caused by the data provided by the party with the ID it is called for.
 pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableError>,
+    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, MaybeAttributableError<SenderError>>,
     args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();
@@ -318,7 +318,10 @@ pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
 /// (that is, not the one which whose ID it is called).
 pub fn compute_mapping_third_party_fallible<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Send + Sync + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, ThirdPartyAttributableError<SP>>,
+    function: impl 'static
+    + Send
+    + Sync
+    + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, MaybeAttributableError<ThirdPartyError<SP>>>,
     args: impl Into<ComputeMappingArgs<SP>>,
     verification: impl 'static
     + Send
@@ -344,7 +347,7 @@ pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: E
     function: impl 'static
     + Send
     + Sync
-    + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, SenderAttributableErrorWithReveal<SP>>,
+    + Fn(&SP::Verifier, &Args<SP>) -> Result<Ret, MaybeAttributableError<SenderErrorWithReveal<SP>>>,
     args: impl Into<ComputeMappingArgs<SP>>,
     verification: impl 'static
     + Send
@@ -371,7 +374,10 @@ fn default_serialize_and_sign<SP: SessionParameters>(
     destination: &SP::Verifier,
     args: &SerializeArgs<SP>,
 ) -> Result<Value, RuntimeError> {
-    let serialized_value = args.serde_adapter().serialize(args.value())?;
+    let serialized_value = args
+        .serde_adapter()
+        .serialize(args.value())
+        .or_with_context(|| format!("Failed to serialize an outgoing value `{}`", args.message_name()))?;
     let signed_value = SignedValue::<SP>::new(
         rng,
         args.signer(),
@@ -379,18 +385,18 @@ fn default_serialize_and_sign<SP: SessionParameters>(
         args.message_name(),
         destination,
         serialized_value,
-    )?;
+    )
+    .or_with_context(|| format!("Failed to sign an outgoing value `{}`", args.message_name()))?;
     Ok(Value::new(signed_value))
 }
 
-/// Broadcasts the scalar data with the type and name defined by `message` to all the nodes from `group`.
+/// Broadcasts the scalar data with the type and name defined by `message`.
 ///
-/// The return values are the collected outcomes of messages being sent (`()` on success).
+/// The target nodes are determined by the group this mapping is collected into.
 pub fn broadcast<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     scalar: impl Into<BroadcastArg<SP>>,
-    group: &PartyGroup<SP::Verifier>,
-) -> Node<Collect<SP>> {
+) -> Node<DirectMessage<SP>> {
     let scalar: BroadcastArg<SP> = scalar.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
@@ -404,24 +410,21 @@ pub fn broadcast<SP: SessionParameters>(
         dependencies: Vec::new(),
     });
 
-    let send_node = Node::new(DirectMessage {
+    Node::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
         dependencies: Vec::new(),
-    });
-
-    collect(CollectArg::DirectMessage(send_node), group)
+    })
 }
 
-/// Sends a direct message with the corresponding element from the given mapping,
-/// and with the type and name defined by `message`, to all the nodes from `group`.
+/// Sends a direct message with the corresponding element from the given mapping.,
+/// and with the type and name defined by `message`.
 ///
-/// The return values are the collected outcomes of messages being sent (`()` on success).
+/// The target nodes are determined by the group this mapping is collected into.
 pub fn direct_message<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     data: impl Into<DirectMessageArg<SP>>,
-    group: &PartyGroup<SP::Verifier>,
-) -> Node<Collect<SP>> {
+) -> Node<DirectMessage<SP>> {
     let data: DirectMessageArg<SP> = data.into();
     let signed_tag = LocalSignedTag::new(message.name());
     let sent_tag = signed_tag.to_sent();
@@ -435,31 +438,28 @@ pub fn direct_message<SP: SessionParameters>(
         dependencies: Vec::new(),
     });
 
-    let send_node = Node::new(DirectMessage {
+    Node::new(DirectMessage {
         store_in: sent_tag,
         data: serialize_and_sign,
         dependencies: Vec::new(),
-    });
-
-    collect(CollectArg::DirectMessage(send_node), group)
+    })
 }
 
-fn default_deserialize<SP: SessionParameters>(args: &DeserializeArgs<SP>) -> Result<Value, SenderAttributableError> {
-    let verified_value = args.verified_value();
+fn default_deserialize<SP: SessionParameters>(
+    args: &DeserializeArgs<SP>,
+) -> Result<Value, MaybeAttributableError<SenderError>> {
+    let verified_value = args.verified_value()?;
 
     let expected_senders = args.expected_senders();
 
     if !expected_senders.contains(verified_value.source()) {
-        return Err(SenderAttributableError::new(format!(
-            "Expected senders do not include {:?}",
-            verified_value.source()
-        )));
+        return Err(SenderError::new(format!("Expected senders do not include {:?}", verified_value.source())).into());
     }
 
     let value = args
         .serde_adapter()
         .deserialize(verified_value.serialized_value())
-        .map_err(|error| SenderAttributableError::new(format!("Failed to deserialize the value: {error}")))?;
+        .map_err(|error| SenderError::new(format!("Failed to deserialize the value: {error}")))?;
 
     Ok(value)
 }
@@ -533,10 +533,13 @@ pub fn call_protocol<SP: SessionParameters, P: ComposableProtocol<SP>>(
 ) -> Result<P::OutputNode, RuntimeError> {
     let signature = P::signature();
     let arg_nodes = ArgNodes::new(&signature);
-    let output = P::build(party_build_data, build_data, arg_nodes)?;
+    let output = P::build(party_build_data, build_data, arg_nodes)
+        .or_with_context(|| "Failed to build the protocol graph".into())?;
     let any_node = Into::<AnyNode<SP>>::into(output).get_strong_ref();
     let prefixed = any_node.tree_with_added_prefix(prefix);
-    let bound_args = signature.bind(args)?;
+    let bound_args = signature
+        .bind(args)
+        .or_with_context(|| "Failed to bind protocol arguments".into())?;
     let with_args = prefixed.with_substituted_arguments(&bound_args)?;
     let downcasted = P::OutputNode::try_from(with_args)
         .map_err(|_err| RuntimeError::new("Adding a prefix changed the root node type"))?;

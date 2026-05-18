@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -77,8 +78,8 @@ enum MappingRuleKind<SP: SessionParameters> {
         store_in: ReceivedTag,
         function: DeserializeFunction<SP>,
         data: RemoteSignedTag,
-        message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
+        expected_senders: BTreeSet<SP::Verifier>,
         on_error: OnError,
     },
 }
@@ -125,8 +126,8 @@ pub(crate) enum Action<SP: SessionParameters> {
         index: SP::Verifier,
         function: DeserializeFunction<SP>,
         data: RemoteSignedTag,
-        message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
+        expected_senders: BTreeSet<SP::Verifier>,
         on_error: OnError,
     },
     DirectMessage {
@@ -176,9 +177,14 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
     }
 
     fn get(&self, tag: MappingTagRef<'_>) -> Result<&BTreeSet<SP::Verifier>, RuntimeError> {
-        self.0
-            .get(&tag.to_owned())
-            .ok_or_else(|| RuntimeError::expect("The required IDs were propagated to this node"))
+        // This is an internal method which we only call in the places where by construction it cannot fail
+        // (in `Self::new()`, because of the order in which we process nodes;
+        // in `Ruleset::new()`, because we call it for the nodes of the tree that was used to create `Self`).
+        self.0.get(&tag.to_owned()).ok_or_else(|| {
+            RuntimeError::new(format!(
+                "Expected the node {tag} to be present in the propagated groups"
+            ))
+        })
     }
 
     fn new(root: &AnyNode<SP>) -> Result<Self, RuntimeError> {
@@ -240,7 +246,7 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
 pub(crate) enum RulesetState {
     InProgress,
     ReachedOutput,
-    StalledAt(CollectedTag),
+    ImpossibleToCollect(Vec<CollectedTag>),
 }
 
 #[derive_where::derive_where(Debug)]
@@ -250,7 +256,6 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     collect_rules: Vec<CollectRule<SP>>,
     mapping_rules: Vec<MappingRule<SP>>,
     send_rules: Vec<SendRule<SP>>,
-    expected_messages: BTreeMap<FullName, BTreeSet<SP::Verifier>>,
     arguments: BTreeMap<String, ScalarArgumentTag>,
     state: RulesetState,
 }
@@ -368,6 +373,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     let element_condition = ElementCondition::from_deserialize_and_check(node);
 
+                    // We expect the expected senders to be present because they are added by the `Receive` node,
+                    // which is an argument to this node, so it would have been processed previously.
+                    let expected_senders = expected_messages.get(&node.message_name).cloned().ok_or_else(|| {
+                        RuntimeError::new(format!("Expected senders for `{}` to be available", node.message_name))
+                    })?;
+
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
                         scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
@@ -376,8 +387,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
                             store_in: node.store_in.clone(),
                             function: node.function.clone(),
                             data: node.data.as_ref().store_in.clone(),
-                            message_name: node.message_name.clone(),
                             serde_adapter: node.serde_adapter.clone(),
+                            expected_senders,
                             on_error,
                         },
                     });
@@ -433,18 +444,22 @@ impl<SP: SessionParameters> Ruleset<SP> {
             collect_rules,
             mapping_rules,
             send_rules,
-            expected_messages,
             arguments,
             state: RulesetState::InProgress,
         })
     }
 
     pub fn update_with_banned_party(&mut self, id: &SP::Verifier) {
+        let mut impossible_collects = Vec::new();
         for rule in &mut self.collect_rules {
             rule.quorum_condition.update_with_banned_party(id);
             if !rule.quorum_condition.is_satisfiable() {
-                self.state = RulesetState::StalledAt(rule.store_in.clone());
+                impossible_collects.push(rule.store_in.clone());
             }
+        }
+
+        if !impossible_collects.is_empty() {
+            self.state = RulesetState::ImpossibleToCollect(impossible_collects);
         }
     }
 
@@ -578,16 +593,16 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         store_in,
                         function,
                         data,
-                        message_name,
                         serde_adapter,
+                        expected_senders,
                         on_error,
                     } => Action::ComputeDeserializeElement {
                         store_in: store_in.clone(),
                         index: id,
                         function: function.clone(),
                         data: data.clone(),
-                        message_name: message_name.clone(),
                         serde_adapter: serde_adapter.clone(),
+                        expected_senders: expected_senders.clone(),
                         on_error: on_error.clone(),
                     },
                 });
@@ -602,10 +617,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
             .or_else(|| self.pop_collect_action())
             .or_else(|| self.pop_mapping_action())
             .or_else(|| self.pop_send_action())
-    }
-
-    pub fn expected_messages(&self) -> &BTreeMap<FullName, BTreeSet<SP::Verifier>> {
-        &self.expected_messages
     }
 
     pub fn arguments(&self) -> &BTreeMap<String, ScalarArgumentTag> {

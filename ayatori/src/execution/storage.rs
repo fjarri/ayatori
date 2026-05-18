@@ -64,7 +64,9 @@ impl<Id: PartyId> Storage<Id> {
         let maybe_right = self.scalars.get(right).cloned();
         let result = match (maybe_left, maybe_right) {
             (None, None) => {
-                return Err(RuntimeError::expect(format!(
+                // If this error fires, it means that somehow the merge node is being executed
+                // without either of the paths leading to it having stored its results successfully.
+                return Err(RuntimeError::new(format!(
                     "Expected either {left} or {right} to be in storage"
                 )));
             }
