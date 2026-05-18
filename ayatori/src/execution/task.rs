@@ -179,10 +179,6 @@ impl<SP: SessionParameters> ElementSenderAttributableTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
-                store_in: AnyTag::Mapping(store_in),
-                error,
-            }),
             Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                 store_in,
                 guilty_party: self.index,
@@ -236,10 +232,6 @@ impl<SP: SessionParameters> ElementSenderAttributableWithRevealTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
-                store_in: AnyTag::Mapping(store_in),
-                error,
-            }),
             Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderErrorWithReveal {
                 store_in,
                 guilty_party: self.index,
@@ -290,10 +282,6 @@ impl<SP: SessionParameters> ElementThirdPartyAttributableTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
-                store_in: AnyTag::Mapping(store_in),
-                error,
-            }),
             Err(MaybeAttributableError::Attributable(error)) => {
                 TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
             }
@@ -344,10 +332,6 @@ impl<SP: SessionParameters> DeserializeElementTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
-                store_in: AnyTag::Mapping(store_in),
-                error,
-            }),
             Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
                 store_in,
                 guilty_party: self.index,

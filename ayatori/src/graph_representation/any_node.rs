@@ -324,9 +324,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
                             match function.call(id, args) {
                                 Ok(_) => Ok(EvidenceVerdict::invalid("The target function finished successfully")),
                                 Err(MaybeAttributableError::Attributable { .. }) => Ok(EvidenceVerdict::valid()),
-                                Err(MaybeAttributableError::Spurious(error)) => {
-                                    Err(UnattributableError::Spurious(error))
-                                }
                                 Err(MaybeAttributableError::Runtime(error)) => Err(UnattributableError::Runtime(error)),
                             }
                             .map(Value::new)

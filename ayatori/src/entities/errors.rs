@@ -100,9 +100,6 @@ pub enum MaybeAttributableError<E> {
     /// An environment error or a bug. See [`RuntimeError`].
     #[displaydoc("{0}")]
     Runtime(RuntimeError),
-    /// A random spurious error (not attributable). See [`SpuriousError`].
-    #[displaydoc("{0}")]
-    Spurious(SpuriousError),
     /// The attributable variant. See the documentation for the specific type.
     #[displaydoc("{0}")]
     Attributable(E),
@@ -111,12 +108,6 @@ pub enum MaybeAttributableError<E> {
 impl<E> From<RuntimeError> for MaybeAttributableError<E> {
     fn from(source: RuntimeError) -> Self {
         Self::Runtime(source)
-    }
-}
-
-impl<E> From<SpuriousError> for MaybeAttributableError<E> {
-    fn from(source: SpuriousError) -> Self {
-        Self::Spurious(source)
     }
 }
 
