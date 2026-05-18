@@ -4,7 +4,7 @@ pub use crate::{
     entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, SpuriousError},
     execution::{
         DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError, ReachedOutputSession, Session,
-        SessionOutcome, SessionReport, SessionState, Task,
+        SessionOutcome, SessionReport, SessionState, Task, UnfinishableOutcome,
     },
     traits::{ExecutableProtocol, SessionParameters},
 };

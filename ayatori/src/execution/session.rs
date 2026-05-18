@@ -5,7 +5,10 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::marker::PhantomData;
+use core::{
+    fmt::{self, Display},
+    marker::PhantomData,
+};
 
 use itertools::Itertools;
 use signature::Keypair;
@@ -27,9 +30,9 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
+        FullName, MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction,
+        ScalarTag, SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
     },
     error::{Traceable, TraceableResult},
     flat_representation::{Action, OnError, Ruleset, RulesetState},
@@ -466,8 +469,8 @@ where
                 match state {
                     RulesetState::InProgress => SessionState::InProgress(self),
                     RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
-                    RulesetState::ImpossibleToCollect(tag) => {
-                        let report = self.make_report(SessionOutcome::Unfinishable(tag.to_string()));
+                    RulesetState::ImpossibleToCollect(tags) => {
+                        let report = self.make_report(SessionOutcome::Unfinishable(UnfinishableOutcome(tags)));
                         SessionState::Unfinishable(report)
                     }
                 }
@@ -823,7 +826,7 @@ pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     ManuallyTerminated,
     /// Some collect nodes are impossible to finish due to some parties having been banned.
     #[displaydoc("Unfinishable: {0}")]
-    Unfinishable(String), // TODO: specify the number of banned parties or something?
+    Unfinishable(UnfinishableOutcome),
     /// A [`SpuriousError`] error occurred in one of the computations.
     #[displaydoc("Spurious error: {0}")]
     SpuriousError(String), // TODO: specify at which tag it occurred
@@ -834,4 +837,14 @@ enum AddTaskResult<SP: SessionParameters> {
     StateDidNotChange,
     MessageAttributableError(MessageAttributableError<SP>),
     SpuriousError(SpuriousError),
+}
+
+/// Contains the specifics about why the session was impossible to finalize.
+#[derive(Debug, Clone)]
+pub struct UnfinishableOutcome(Vec<CollectedTag>);
+
+impl Display for UnfinishableOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "Impossible to collect: {}", self.0.iter().join(", "))
+    }
 }
