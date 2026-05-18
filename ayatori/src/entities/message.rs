@@ -56,6 +56,8 @@ impl From<RuntimeError> for VerificationError {
     }
 }
 
+impl core::error::Error for VerificationError {}
+
 fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::Output<D>, RuntimeError> {
     let value_len =
         u64::try_from(value.as_ref().len()).map_err(|_| RuntimeError::new("Message size exceeds 2^64 bytes"))?;

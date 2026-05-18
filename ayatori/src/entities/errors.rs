@@ -1,5 +1,8 @@
 use alloc::{format, string::String};
-use core::{fmt::Debug, marker::PhantomData};
+use core::{
+    fmt::{Debug, Display},
+    marker::PhantomData,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +32,8 @@ impl SpuriousError {
     }
 }
 
+impl core::error::Error for SpuriousError {}
+
 /// An error where some check that couldn't be ensured via the type system failed ar runtime.
 ///
 /// This error indicates that there is either a problem with the environment, or there is a bug in the code.
@@ -57,6 +62,8 @@ impl Traceable for RuntimeError {
         Self(self.0.with_context(context))
     }
 }
+
+impl core::error::Error for RuntimeError {}
 
 /// An error during computation that is not attributable to a specific party.
 #[derive(displaydoc::Display, Debug, Clone)]
@@ -94,6 +101,8 @@ impl UnattributableError {
     }
 }
 
+impl core::error::Error for UnattributableError {}
+
 /// An error occuring during a computation that may be attributable to a specific party.
 #[derive(displaydoc::Display, Debug, Clone)]
 pub enum MaybeAttributableError<E> {
@@ -118,6 +127,8 @@ pub struct SenderError {
     description: String,
 }
 
+impl<E: Debug + Display> core::error::Error for MaybeAttributableError<E> {}
+
 impl SenderError {
     /// Creates a new error with the given description.
     pub fn new(description: impl Into<String>) -> Self {
@@ -132,6 +143,8 @@ impl From<SenderError> for MaybeAttributableError<SenderError> {
         Self::Attributable(source)
     }
 }
+
+impl core::error::Error for SenderError {}
 
 /// Additional data (not calculated in the nodes leading to the error) to be attached to the evidence.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +209,8 @@ impl<SP: SessionParameters> From<SenderErrorWithReveal<SP>> for MaybeAttributabl
     }
 }
 
+impl<SP: SessionParameters> core::error::Error for SenderErrorWithReveal<SP> {}
+
 /// An error attributable to a third party (not the one that sent the triggering message), with associated data.
 #[derive(displaydoc::Display)]
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
@@ -243,6 +258,8 @@ impl<SP: SessionParameters> From<ThirdPartyError<SP>> for MaybeAttributableError
         Self::Attributable(source)
     }
 }
+
+impl<SP: SessionParameters> core::error::Error for ThirdPartyError<SP> {}
 
 /// Guilty party is stored separately in [`Evidence`], this structure represents the rest of [`ThirdPartyError`].
 #[derive(displaydoc::Display)]

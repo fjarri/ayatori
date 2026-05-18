@@ -750,6 +750,8 @@ pub enum MessageAttributableError<SP: SessionParameters> {
     DuplicateMessages(DuplicateMessagesError<SP>),
 }
 
+impl<SP: SessionParameters> core::error::Error for MessageAttributableError<SP> {}
+
 /// A registered message was found to be invalid.
 #[derive_where::derive_where(Debug)]
 #[derive(displaydoc::Display)]
@@ -763,6 +765,8 @@ pub struct InvalidMessageError<SP: SessionParameters> {
     /// The description of the error.
     pub description: String,
 }
+
+impl<SP: SessionParameters> core::error::Error for InvalidMessageError<SP> {}
 
 /// A registered message was found to be a duplicate of a previously registered message.
 #[derive_where::derive_where(Debug)]
@@ -780,6 +784,8 @@ pub struct DuplicateMessagesError<SP: SessionParameters> {
     /// in which case it should be penalized.
     pub second: MessageId<SP>,
 }
+
+impl<SP: SessionParameters> core::error::Error for DuplicateMessagesError<SP> {}
 
 /// The results of a session.
 #[derive_where::derive_where(Debug, Clone)]
