@@ -177,8 +177,11 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
     }
 
     fn get(&self, tag: MappingTagRef<'_>) -> Result<&BTreeSet<SP::Verifier>, RuntimeError> {
+        // This is an internal method which we only call in the places where by construction it cannot fail
+        // (in `Self::new()`, because of the order in which we process nodes;
+        // in `Ruleset::new()`, because we call it for the nodes of the tree that was used to create `Self`).
         self.0.get(&tag.to_owned()).ok_or_else(|| {
-            RuntimeError::expect(format!(
+            RuntimeError::new(format!(
                 "Expected the node {tag} to be present in the propagated groups"
             ))
         })

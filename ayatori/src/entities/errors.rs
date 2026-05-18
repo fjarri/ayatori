@@ -48,12 +48,6 @@ impl RuntimeError {
     pub fn new(description: impl Into<String>) -> Self {
         Self(TracedError::new(description))
     }
-
-    /// Indicates a runtime error that is unreachable in tests.
-    #[track_caller]
-    pub(crate) fn expect(description: impl Into<String>) -> Self {
-        Self(TracedError::new(description))
-    }
 }
 
 impl Traceable for RuntimeError {

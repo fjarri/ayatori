@@ -347,11 +347,11 @@ impl<SP: SessionParameters> AnyNode<SP> {
         // This is a bit of a hack.
         // To make the node tree suitable for a ruleset generation, the root node must be a scalar computation node.
         // But we cannot just assign a random name to it since there will always be a possiblity of a clash.
-        // So we take the original root name (which is guaranteed to not be present in the subtree),
-        // and use it for the new root.
+        // So we take the original root name (which is guaranteed to not be present in the subtree,
+        // because we cannot build a reproduction subtree for a scalar node), and use it for the new root.
         let AnyTagRef::Scalar(ScalarTagRef::Computed(original_output_tag)) = self.store_in() else {
-            return Err(RuntimeError::expect(
-                "We only get the reproduction subtree from a valid root node",
+            return Err(RuntimeError::new(
+                "Expected the root node to have a `ComputedScalar` tag",
             ));
         };
         let arg_name = "value";
