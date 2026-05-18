@@ -34,9 +34,9 @@ use crate::{
         MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
         SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
     },
-    error::{Traceable, TraceableResult},
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
+    traced_error::{Traceable, TraceableResult},
     traits::{ExecutableProtocol, SessionParameters},
 };
 

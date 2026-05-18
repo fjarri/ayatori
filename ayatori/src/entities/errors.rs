@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::value::SerializedValue;
 use crate::{
-    error::{Traceable, TraceableResult, TracedError},
+    traced_error::{Traceable, TraceableResult, TracedError},
     traits::{SessionParameters, WireFormat},
 };
 

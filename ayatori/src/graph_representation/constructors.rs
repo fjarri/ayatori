@@ -29,7 +29,7 @@ use crate::{
         ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
-    error::TraceableResult,
+    traced_error::TraceableResult,
     traits::{ComposableProtocol, SessionParameters},
 };
 

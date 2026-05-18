@@ -5,10 +5,10 @@
 extern crate alloc;
 
 mod entities;
-mod error;
 mod execution;
 mod flat_representation;
 mod graph_representation;
+mod traced_error;
 mod traits;
 
 pub mod protocol_author_api;

@@ -14,7 +14,7 @@ use super::{
     tag::FullName,
     value::{Erasable, SerdeAdapter, Value},
 };
-use crate::{error::TraceableResult, traits::SessionParameters};
+use crate::{traced_error::TraceableResult, traits::SessionParameters};
 
 #[cfg(doc)]
 use crate::protocol_author_api::{

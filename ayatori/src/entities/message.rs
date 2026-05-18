@@ -10,7 +10,7 @@ use signature::{
 
 use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
 use crate::{
-    error::TraceableResult,
+    traced_error::TraceableResult,
     traits::{SessionParameters, WireFormat},
 };
 

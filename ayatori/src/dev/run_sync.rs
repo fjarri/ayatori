@@ -4,8 +4,8 @@ use signature::rand_core::CryptoRngCore;
 
 use crate::{
     entities::{Message, MessageId, RuntimeError},
-    error::TraceableResult,
     execution::{Session, SessionReport, SessionState, Task},
+    traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
 

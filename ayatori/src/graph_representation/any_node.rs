@@ -23,7 +23,7 @@ use crate::{
         PartyGroup, RuntimeError, ScalarFunction, ScalarTagRef, SimpleMappingFunction, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
-    error::TraceableResult,
+    traced_error::TraceableResult,
     traits::SessionParameters,
 };
 

@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     entities::{Message, MessageId, RuntimeError},
-    error::TraceableResult,
+    traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
 

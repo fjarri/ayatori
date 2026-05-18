@@ -10,8 +10,8 @@ use crate::{
         SignedValue, SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyError,
         UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
-    error::TraceableResult,
     graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, ShallowClone},
+    traced_error::TraceableResult,
     traits::SessionParameters,
 };
 

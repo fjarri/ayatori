@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{Hex, SliceLike};
 
 use super::errors::RuntimeError;
-use crate::{error::TraceableResult, traits::WireFormat};
+use crate::{traced_error::TraceableResult, traits::WireFormat};
 
 /*
 We need a dyn trait that both supports downcast for `Arc`s (like `Any` does),

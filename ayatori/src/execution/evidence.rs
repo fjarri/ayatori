@@ -14,8 +14,8 @@ use crate::{
         AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
         SessionId, SignedValue, StoredThirdPartyError, VerificationError, VerifiedValue,
     },
-    error::{Traceable, TraceableResult},
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
+    traced_error::{Traceable, TraceableResult},
     traits::{ExecutableProtocol, SessionParameters},
 };
 
