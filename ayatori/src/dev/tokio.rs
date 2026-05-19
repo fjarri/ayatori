@@ -2,7 +2,7 @@
 
 use alloc::{collections::BTreeMap, format, sync::Arc, vec::Vec};
 
-use rand::Rng;
+use rand::RngExt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -52,7 +52,7 @@ where
         while !messages.is_empty() {
             // Pull a random message from the list,
             // to increase the chances that they are delivered out of order.
-            let message_idx = rng.gen_range(0..messages.len());
+            let message_idx = rng.random_range(0..messages.len());
             let outgoing = messages.swap_remove(message_idx);
 
             let tx = txs.get(outgoing.destination()).ok_or_else(|| {

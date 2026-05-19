@@ -1,16 +1,16 @@
 use alloc::collections::BTreeSet;
 
-use ayatori::{protocol_author_api::*, signature::rand_core::RngCore};
+use ayatori::{protocol_author_api::*, signature::rand_core::TryRng};
 
 #[derive(Debug)]
 pub struct TestProtocol;
 
 fn sample_value<SP: SessionParameters>(rng: &mut SP::Rng, _args: &Args<SP>) -> Result<u64, UnattributableError> {
-    Ok(u64::from(rng.next_u32()))
+    Ok(u64::from(rng.try_next_u32().unwrap()))
 }
 
 fn sample_nonce<SP: SessionParameters>(rng: &mut SP::Rng, _args: &Args<SP>) -> Result<u64, UnattributableError> {
-    Ok(u64::from(rng.next_u32()))
+    Ok(u64::from(rng.try_next_u32().unwrap()))
 }
 
 fn commit_to_value<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, UnattributableError> {
@@ -122,7 +122,7 @@ mod tests {
         let party_group = PartyGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()

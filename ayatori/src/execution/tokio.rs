@@ -7,7 +7,7 @@ use alloc::{
 };
 
 use itertools::Itertools;
-use signature::rand_core::{RngCore, SeedableRng};
+use signature::rand_core::{SeedableRng, TryRng};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -221,7 +221,8 @@ where
                 }
                 Task::Randomized(task) => {
                     let mut seed = <SP::Rng as SeedableRng>::Seed::default();
-                    rng.fill_bytes(seed.as_mut());
+                    rng.try_fill_bytes(seed.as_mut())
+                        .map_err(|err| RuntimeError::new(format!("Failed to fill buffer with random data: {err}")))?;
                     let mut task_rng = SP::Rng::from_seed(seed);
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }

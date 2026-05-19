@@ -1,15 +1,19 @@
 use core::fmt::{self, Debug};
 
-use serde_encoded_bytes::{GenericArray014, Hex};
-use signature::digest::{self, Digest};
-#[cfg(feature = "dev")]
-use signature::rand_core::RngCore;
+use serde_encoded_bytes::{Hex, SliceLike};
+use signature::digest::{self, FixedOutput, Update};
 
 use crate::traits::SessionParameters;
 
+#[cfg(feature = "dev")]
+use ::{alloc::format, signature::rand_core::TryRng};
+
+#[cfg(feature = "dev")]
+use crate::entities::RuntimeError;
+
 /// A session identifier shared between the parties.
 #[derive_where::derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct SessionId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
+pub struct SessionId<SP: SessionParameters>(#[serde(with = "SliceLike::<Hex>")] digest::Output<SP::Digest>);
 
 /// A session ID.
 ///
@@ -22,11 +26,11 @@ impl<SP: SessionParameters> SessionId<SP> {
     /// **Warning:** this should generally be used for testing; creating a random session ID in a centralized way
     /// usually defeats the purpose of having a distributed protocol.
     #[cfg(feature = "dev")]
-    #[must_use]
-    pub fn random(rng: &mut SP::Rng) -> Self {
+    pub fn random(rng: &mut SP::Rng) -> Result<Self, RuntimeError> {
         let mut buffer = digest::Output::<SP::Digest>::default();
-        rng.fill_bytes(&mut buffer);
-        Self(buffer)
+        rng.try_fill_bytes(&mut buffer)
+            .map_err(|err| RuntimeError::new(format!("Failed to invoke the RNG: {err}")))?;
+        Ok(Self(buffer))
     }
 
     /// Creates a session identifier deterministically from the given bytestring.
@@ -39,9 +43,18 @@ impl<SP: SessionParameters> SessionId<SP> {
     ///
     /// In a blockchain setting, it may be some combination of the current block hash with the public parameters
     /// (identities of the parties, hash of the inputs).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the seed is 2^128 bytes or larger.
     #[must_use]
     pub fn from_seed(bytes: &[u8]) -> Self {
-        Self(SP::Digest::new_with_prefix(b"SessionId").chain_update(bytes).finalize())
+        let bytes_len = u128::try_from(bytes.len()).expect("Seed length is less than 2^128 bytes");
+        let mut digest = SP::Digest::default();
+        digest.update(b"SessionId");
+        digest.update(&bytes_len.to_be_bytes());
+        digest.update(bytes);
+        Self(digest.finalize_fixed())
     }
 }
 
@@ -53,6 +66,6 @@ impl<SP: SessionParameters> AsRef<[u8]> for SessionId<SP> {
 
 impl<SP: SessionParameters> Debug for SessionId<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "SessionId({})", hex::encode(self.0.as_ref()))
+        write!(f, "SessionId({})", hex::encode(&self.0))
     }
 }

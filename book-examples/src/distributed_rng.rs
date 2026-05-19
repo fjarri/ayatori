@@ -1,5 +1,5 @@
 use alloc::collections::BTreeSet;
-use ayatori::{protocol_author_api::*, signature::rand_core::RngCore};
+use ayatori::{protocol_author_api::*, signature::rand_core::TryRng};
 
 // ANCHOR: composable
 #[derive(Debug)]
@@ -41,7 +41,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
             "my_b",
             |rng, args| {
                 let x = args.get::<u32>("x")?;
-                Ok(rng.next_u32() % x)
+                Ok(rng.try_next_u32().unwrap() % x)
             },
             &[("x", x.into())],
         );
@@ -52,7 +52,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
             "my_r",
             |rng, args| {
                 let y = args.get::<u32>("y")?;
-                Ok(rng.next_u32() % y)
+                Ok(rng.try_next_u32().unwrap() % y)
             },
             &[("y", y.into())],
         );
@@ -201,7 +201,7 @@ mod tests {
         let shared_data = (1001, PartyGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()
@@ -230,7 +230,7 @@ mod tests {
         let shared_data = (1001, PartyGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         // ANCHOR: replace_node
         let sessions = signers

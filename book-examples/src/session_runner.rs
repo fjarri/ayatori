@@ -118,7 +118,7 @@ mod tests {
         let shared_data = (1001, PartyGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()

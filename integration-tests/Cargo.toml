@@ -8,6 +8,6 @@ description = "Integration tests"
 
 [dependencies]
 ayatori = { path = "../ayatori", features = ["dev", "tokio"] }
-rand_chacha = { version = "0.3", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 tokio = { version = "1", default-features = false }

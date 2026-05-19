@@ -1,16 +1,16 @@
-use alloc::{format, vec::Vec};
+use alloc::{boxed::Box, format, vec::Vec};
 use core::fmt::{self, Debug};
 
-use serde_encoded_bytes::{GenericArray014, Hex};
+use serde_encoded_bytes::{Hex, SliceLike};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
-    digest::{self, Digest},
-    rand_core::RngCore,
+    digest::{self, FixedOutput, Update},
+    rand_core::Rng,
 };
 
 use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
 use crate::{
-    traced_error::TraceableResult,
+    traced_error::Traceable,
     traits::{SessionParameters, WireFormat},
 };
 
@@ -58,33 +58,45 @@ impl From<RuntimeError> for VerificationError {
 
 impl core::error::Error for VerificationError {}
 
-fn hash_serialized_value<D: Digest>(value: &SerializedValue) -> Result<digest::Output<D>, RuntimeError> {
-    let value_len =
-        u64::try_from(value.as_ref().len()).map_err(|_| RuntimeError::new("Message size exceeds 2^64 bytes"))?;
-    Ok(D::new_with_prefix(b"SerializedValueDigest")
-        .chain_update(value_len.to_be_bytes())
-        .chain_update(value.as_ref())
-        .finalize())
+fn hash_serialized_value<D: Update + FixedOutput + Default>(value: &SerializedValue) -> digest::Output<D> {
+    let value_len = u128::try_from(value.as_ref().len()).expect("Serialized value length is less than 2^128 bytes");
+    let mut digest = D::default();
+    digest.update(b"SerializedValueDigest");
+    digest.update(&value_len.to_be_bytes());
+    digest.update(value.as_ref());
+    digest.finalize_fixed()
 }
 
-fn hash_value_hash_and_metadata<SP: SessionParameters>(
+fn update_with_hash_and_metadata<SP: SessionParameters>(
+    digest: &mut SP::Digest,
     value_hash: &digest::Output<SP::Digest>,
     metadata: &ValueMetadata<SP>,
-) -> Result<SP::Digest, RuntimeError> {
-    Ok(SP::Digest::new_with_prefix(b"SignedValueDigest")
-        .chain_update(
-            <SP::WireFormat as WireFormat>::serialize(metadata)
-                .or_with_context(|| format!("Failed to serialize metadata for value `{}`", metadata.full_name()))?,
-        )
-        .chain_update(value_hash.as_ref()))
+) -> Result<(), signature::Error> {
+    let serialized_metadata = <SP::WireFormat as WireFormat>::serialize(metadata).map_err(|err| {
+        let err = err.with_context(format!(
+            "Failed to serialize metadata for value `{}`",
+            metadata.full_name()
+        ));
+        signature::Error::from_source(Box::new(err))
+    })?;
+
+    let metadata_len = u128::try_from(serialized_metadata.as_ref().len())
+        .expect("Serialized metadata length is less than 2^128 bytes");
+
+    digest.update(b"SignedValueDigest");
+    digest.update(&metadata_len.to_be_bytes());
+    digest.update(&serialized_metadata);
+    digest.update(value_hash);
+    Ok(())
 }
 
-fn hash_value_and_metadata<SP: SessionParameters>(
+fn update_with_value_and_metadata<SP: SessionParameters>(
+    digest: &mut SP::Digest,
     value: &SerializedValue,
     metadata: &ValueMetadata<SP>,
-) -> Result<SP::Digest, RuntimeError> {
-    let value_hash = hash_serialized_value::<SP::Digest>(value)?;
-    hash_value_hash_and_metadata::<SP>(&value_hash, metadata)
+) -> Result<(), signature::Error> {
+    let value_hash = hash_serialized_value::<SP::Digest>(value);
+    update_with_hash_and_metadata(digest, &value_hash, metadata)
 }
 
 /// A signed value with metadata.
@@ -111,10 +123,10 @@ impl<SP: SessionParameters> SignedValue<SP> {
             destination: destination.clone(),
             session_id: session_id.clone(),
         };
-        let digest = hash_value_and_metadata::<SP>(&value, &metadata)
-            .or_with_context(|| format!("Failed to create a signed value `{name}`"))?;
+        //let digest = hash_value_and_metadata::<SP>(&value, &metadata)
+        //    .or_with_context(|| format!("Failed to create a signed value `{name}`"))?;
         let signature = signer
-            .try_sign_digest_with_rng(rng, digest)
+            .try_sign_digest_with_rng(rng, |digest| update_with_value_and_metadata(digest, &value, &metadata))
             .map_err(|err| RuntimeError::new(format!("Signing failed: {err}")))?;
         Ok(Self {
             signature,
@@ -130,10 +142,11 @@ impl<SP: SessionParameters> SignedValue<SP> {
     }
 
     fn verify_inner(&self) -> Result<(), VerificationError> {
-        let digest = hash_value_and_metadata::<SP>(&self.value, &self.metadata)
-            .or_with_context(|| format!("Failed to verify a signed value `{}`", self.metadata.full_name()))?;
         self.source
-            .verify_digest(digest, &self.signature)
+            .verify_digest(
+                |digest| update_with_value_and_metadata(digest, &self.value, &self.metadata),
+                &self.signature,
+            )
             .map_err(|_err| VerificationError::SignatureMismatch)
     }
 
@@ -166,7 +179,8 @@ pub struct SignedHash<SP: SessionParameters> {
     signature: SP::Signature,
     source: SP::Verifier,
     metadata: ValueMetadata<SP>,
-    #[serde(with = "GenericArray014::<Hex>")]
+    // TODO: need an array support
+    #[serde(with = "SliceLike::<Hex>")]
     hash: digest::Output<SP::Digest>,
 }
 
@@ -182,10 +196,11 @@ impl<SP: SessionParameters> SignedHash<SP> {
     }
 
     fn verify_inner(&self) -> Result<(), VerificationError> {
-        let digest = hash_value_hash_and_metadata::<SP>(&self.hash, &self.metadata)
-            .or_with_context(|| format!("Failed to verify a signed hash {}", self.metadata.full_name()))?;
         self.source
-            .verify_digest(digest, &self.signature)
+            .verify_digest(
+                |digest| update_with_hash_and_metadata(digest, &self.hash, &self.metadata),
+                &self.signature,
+            )
             .map_err(|_err| VerificationError::SignatureMismatch)
     }
 
@@ -225,14 +240,9 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
     }
 
     /// Returns `true` if the hash in `other` is equal to the hash of this value.
-    pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> Result<bool, RuntimeError> {
-        let value_hash = hash_serialized_value::<SP::Digest>(&self.value).or_with_context(|| {
-            format!(
-                "Failed to check if payload's hash matches for value `{}`",
-                self.metadata.full_name()
-            )
-        })?;
-        Ok(value_hash.as_ref() == other.hash.as_ref())
+    pub fn payload_hash_matches(&self, other: &SignedHash<SP>) -> bool {
+        let value_hash = hash_serialized_value::<SP::Digest>(&self.value);
+        value_hash == other.hash
     }
 
     /// Turns this back into non-verified value (to send over the wire).
@@ -247,19 +257,14 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
 
     /// Turns this into a signed hash (essentially replacing the actual value with its hash,
     /// keeping the metadata intact).
-    pub fn to_signed_hash(&self) -> Result<SignedHash<SP>, RuntimeError> {
-        let value_hash = hash_serialized_value::<SP::Digest>(&self.value).or_with_context(|| {
-            format!(
-                "Failed to convert verified value `{}` to signed hash",
-                self.metadata.full_name()
-            )
-        })?;
-        Ok(SignedHash {
+    pub fn to_signed_hash(&self) -> SignedHash<SP> {
+        let value_hash = hash_serialized_value::<SP::Digest>(&self.value);
+        SignedHash {
             signature: self.signature.clone(),
             source: self.source.clone(),
             metadata: self.metadata.clone(),
             hash: value_hash,
-        })
+        }
     }
 }
 
@@ -271,7 +276,7 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
 /// the returned error will contain the ID of the message the information came from.
 /// Then, the user can use whatever measures necessary towards the associated source.
 #[derive_where::derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct MessageId<SP: SessionParameters>(#[serde(with = "GenericArray014::<Hex>")] digest::Output<SP::Digest>);
+pub struct MessageId<SP: SessionParameters>(#[serde(with = "SliceLike::<Hex>")] digest::Output<SP::Digest>);
 
 impl<SP: SessionParameters> MessageId<SP> {
     /// Creates a random message ID.
@@ -282,13 +287,15 @@ impl<SP: SessionParameters> MessageId<SP> {
     }
 
     pub(crate) fn from_usize(id: usize) -> Self {
-        Self(SP::Digest::new().chain_update(id.to_be_bytes()).finalize())
+        let mut digest = SP::Digest::default();
+        digest.update(&id.to_be_bytes());
+        Self(digest.finalize_fixed())
     }
 }
 
 impl<SP: SessionParameters> Debug for MessageId<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "MessageId({})", hex::encode(self.0.as_ref()))
+        write!(f, "MessageId({})", hex::encode(&self.0))
     }
 }
 

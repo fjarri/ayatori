@@ -14,8 +14,8 @@ rust-version = "1.91"
 derive-where = { version = "1.5", default-features = false, features = ["serde"] }
 itertools = "0.14"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
-signature = { version = "2", default-features = false, features = ["digest", "rand_core"] }
-serde-encoded-bytes = { version = "0.2", default-features = false, features = ["hex", "generic-array-014"] }
+signature = { version = "3", default-features = false, features = ["alloc", "digest", "rand_core"] }
+serde-encoded-bytes = { version = "0.2", default-features = false, features = ["hex"] }
 displaydoc = { version = "0.2", default-features = false }
 hex = { version = "0.4", default-features = false }
 
@@ -23,10 +23,10 @@ postcard = { version = "1", default-features = false, features = ["alloc"], opti
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
 tokio = { version = "1", default-features = false, features = ["rt", "macros", "time"], optional = true }
 tokio-util = { version = "0.7", default-features = false, optional = true }
-rand = { version = "0.8", default-features = false, optional = true }
+rand = { version = "0.10", default-features = false, optional = true }
 
 [dev-dependencies]
-rand_chacha = { version = "0.3", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
 impls = "1"
 
 # These mirror the versions from the optional dependencies above.
@@ -34,7 +34,7 @@ postcard = { version = "1", default-features = false, features = ["alloc"] }
 
 [features]
 dev = ["postcard", "serde_json", "rand"]
-tokio = ["dep:tokio", "tokio-util"]
+tokio = ["dep:tokio", "tokio-util", "rand"]
 
 [package.metadata.docs.rs]
 all-features = true

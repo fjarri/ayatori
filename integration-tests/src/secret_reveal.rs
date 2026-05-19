@@ -1,6 +1,6 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 
-use ayatori::{protocol_author_api::*, signature::rand_core::RngCore};
+use ayatori::{protocol_author_api::*, signature::rand_core::TryRng};
 
 const MODULUS: u64 = 0x7fff_ffff;
 const GENERATOR: u64 = 7;
@@ -39,7 +39,7 @@ fn gen_secrets<SP: SessionParameters>(
     let all_parties = args.get::<PartyGroup<SP::Verifier>>("all_parties")?;
     let mut secrets = all_parties
         .ids()
-        .map(|id| (id.clone(), rng.next_u64() % MODULUS))
+        .map(|id| (id.clone(), rng.try_next_u64().unwrap() % MODULUS))
         .collect::<BTreeMap<_, _>>();
     let total = secrets.values().sum::<u64>() % MODULUS;
     let id = all_parties.ids().next().unwrap();
@@ -57,7 +57,7 @@ fn gen_dh_secret<SP: SessionParameters>(
     _id: &SP::Verifier,
     _args: &Args<SP>,
 ) -> Result<u64, UnattributableError> {
-    Ok(rng.next_u64() % MODULUS)
+    Ok(rng.try_next_u64().unwrap() % MODULUS)
 }
 
 fn gen_public<SP: SessionParameters>(_id: &SP::Verifier, args: &Args<SP>) -> Result<u64, UnattributableError> {
@@ -256,7 +256,7 @@ mod tests {
         let party_group = PartyGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()
@@ -280,7 +280,7 @@ mod tests {
         let party_group = PartyGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()
