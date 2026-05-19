@@ -29,7 +29,6 @@ dependencies = [
  "ayatori",
  "rand_chacha",
  "serde",
- "signature",
  "tokio",
  "tokio-util",
 ]
@@ -149,7 +148,6 @@ dependencies = [
  "ayatori",
  "rand_chacha",
  "serde",
- "signature",
  "tokio",
 ]
 

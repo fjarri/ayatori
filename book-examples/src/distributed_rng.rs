@@ -1,7 +1,5 @@
 use alloc::collections::BTreeSet;
-use ayatori::protocol_author_api::*;
-
-use signature::rand_core::RngCore;
+use ayatori::{protocol_author_api::*, signature::rand_core::RngCore};
 
 // ANCHOR: composable
 #[derive(Debug)]
@@ -174,7 +172,6 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
         dev::{
@@ -182,6 +179,7 @@ mod tests {
             run_sessions_sync,
         },
         protocol_user_api::*,
+        signature::{Keypair, rand_core::SeedableRng},
     };
 
     use super::DistributedRng;

@@ -1,8 +1,6 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 
-use signature::rand_core::RngCore;
-
-use ayatori::protocol_author_api::*;
+use ayatori::{protocol_author_api::*, signature::rand_core::RngCore};
 
 const MODULUS: u64 = 0x7fff_ffff;
 const GENERATOR: u64 = 7;
@@ -238,12 +236,12 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
         dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
         protocol_author_api::Args,
         protocol_user_api::*,
+        signature::{Keypair, rand_core::SeedableRng},
     };
 
     use super::{TestProtocol, modadd};

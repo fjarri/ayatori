@@ -271,7 +271,6 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
         dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
@@ -279,6 +278,7 @@ mod tests {
             Args, MaybeAttributableError, RuntimeError, SerializeArgs, SignedValue, ThirdPartyError,
         },
         protocol_user_api::*,
+        signature::{Keypair, rand_core::SeedableRng},
     };
 
     use super::{Message1, TestProtocol};

@@ -16,3 +16,5 @@ pub mod protocol_user_api;
 
 #[cfg(feature = "dev")]
 pub mod dev;
+
+pub use signature;

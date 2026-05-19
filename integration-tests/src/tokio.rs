@@ -8,9 +8,9 @@ mod tests {
             PartyGroup, Session, SessionId,
             tokio::{SessionRunner, par_run_session, run_session},
         },
+        signature::{Keypair, rand_core::SeedableRng},
     };
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use crate::distributed_rng::TestProtocol;
 

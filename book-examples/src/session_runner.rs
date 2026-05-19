@@ -96,9 +96,9 @@ mod tests {
             BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async,
         },
         protocol_user_api::{PartyGroup, Session, SessionId},
+        signature::{Keypair, rand_core::SeedableRng},
     };
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use super::run_session;
     use crate::distributed_rng::DistributedRng;

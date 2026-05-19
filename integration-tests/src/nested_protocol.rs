@@ -130,11 +130,11 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
         dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
         protocol_user_api::*,
+        signature::{Keypair, rand_core::SeedableRng},
     };
 
     use super::{Protocol1, Protocol1SharedData};
