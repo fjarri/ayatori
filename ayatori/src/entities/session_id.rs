@@ -3,7 +3,7 @@ use core::fmt::{self, Debug};
 use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::digest::{self, Digest};
 #[cfg(feature = "dev")]
-use signature::rand_core::CryptoRngCore;
+use signature::rand_core::RngCore;
 
 use crate::traits::SessionParameters;
 
@@ -23,7 +23,7 @@ impl<SP: SessionParameters> SessionId<SP> {
     /// usually defeats the purpose of having a distributed protocol.
     #[cfg(feature = "dev")]
     #[must_use]
-    pub fn random(rng: &mut impl CryptoRngCore) -> Self {
+    pub fn random(rng: &mut SP::Rng) -> Self {
         let mut buffer = digest::Output::<SP::Digest>::default();
         rng.fill_bytes(&mut buffer);
         Self(buffer)

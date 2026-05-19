@@ -19,7 +19,7 @@ mod tests {
 
     async fn async_run<F>(f: F)
     where
-        F: for<'a> SessionRunner<'a, SP, P, ChaCha8Rng>,
+        F: for<'a> SessionRunner<'a, SP, P>,
     {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
@@ -34,9 +34,7 @@ mod tests {
             .map(|signer| Session::<SP, P>::new(session_id.clone(), signer, &(), &shared_data).unwrap())
             .collect::<Vec<_>>();
 
-        let results = run_sessions_async::<SP, P, _, ChaCha8Rng>(&mut rng, sessions, f)
-            .await
-            .unwrap();
+        let results = run_sessions_async::<SP, P, _>(&mut rng, sessions, f).await.unwrap();
 
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);

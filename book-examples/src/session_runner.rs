@@ -133,13 +133,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let results = run_sessions_async::<SP, P, _, ChaCha8Rng>(
-            &mut rng,
-            sessions,
-            run_session::<SP, P>,
-        )
-        .await
-        .unwrap();
+        let results =
+            run_sessions_async::<SP, P, _>(&mut rng, sessions, run_session::<SP, P>)
+                .await
+                .unwrap();
 
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);

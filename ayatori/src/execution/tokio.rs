@@ -7,7 +7,7 @@ use alloc::{
 };
 
 use itertools::Itertools;
-use signature::rand_core::{CryptoRngCore, RngCore, SeedableRng};
+use signature::rand_core::{RngCore, SeedableRng};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -52,16 +52,14 @@ pub enum MessageOut<SP: SessionParameters> {
 }
 
 /// A trait defined for `async fn`s that execute a single session.
-pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>, R: CryptoRngCore>:
-    'static + Send + Sync
-{
+pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: 'static + Send + Sync {
     /// The returned future.
     type Fut: Future<Output = Result<SessionReport<SP, P>, RuntimeError>> + 'a + Send;
 
     /// Calls the function returning the future.
     fn call(
         &self,
-        rng: &'a mut R,
+        rng: &'a mut SP::Rng,
         tx: &'a mpsc::Sender<MessageOut<SP>>,
         rx: &'a mut mpsc::Receiver<MessageIn<SP>>,
         cancellation: CancellationToken,
@@ -223,8 +221,7 @@ where
                 }
                 Task::Randomized(task) => {
                     let mut seed = <SP::Rng as SeedableRng>::Seed::default();
-                    rng.try_fill_bytes(seed.as_mut())
-                        .map_err(|err| RuntimeError::new(format!("Failed to create a task RNG seed: {err}")))?;
+                    rng.fill_bytes(seed.as_mut());
                     let mut task_rng = SP::Rng::from_seed(seed);
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }

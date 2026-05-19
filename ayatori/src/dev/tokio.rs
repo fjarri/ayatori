@@ -3,7 +3,6 @@
 use alloc::{collections::BTreeMap, format, sync::Arc, vec::Vec};
 
 use rand::Rng;
-use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -18,15 +17,13 @@ use crate::{
 };
 
 async fn message_dispatcher<SP>(
-    rng: impl CryptoRngCore,
+    mut rng: SP::Rng,
     txs: BTreeMap<SP::Verifier, mpsc::Sender<MessageIn<SP>>>,
     rx: mpsc::Receiver<MessageOut<SP>>,
 ) -> Result<(), RuntimeError>
 where
     SP: SessionParameters,
 {
-    let mut rng = rng;
-
     let mut rx = rx;
     let mut messages = Vec::<Message<SP>>::new();
     loop {
@@ -81,16 +78,15 @@ where
     }
 }
 
-impl<'a, SP, P, F, Fut, R> SessionRunner<'a, SP, P, R> for F
+impl<'a, SP, P, F, Fut> SessionRunner<'a, SP, P> for F
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
-    R: CryptoRngCore + 'a,
     F: 'static
         + Send
         + Sync
         + Fn(
-            &'a mut R,
+            &'a mut SP::Rng,
             &'a mpsc::Sender<MessageOut<SP>>,
             &'a mut mpsc::Receiver<MessageIn<SP>>,
             CancellationToken,
@@ -101,7 +97,7 @@ where
     type Fut = Fut;
     fn call(
         &self,
-        rng: &'a mut R,
+        rng: &'a mut SP::Rng,
         tx: &'a mpsc::Sender<MessageOut<SP>>,
         rx: &'a mut mpsc::Receiver<MessageIn<SP>>,
         cancellation: CancellationToken,
@@ -112,17 +108,17 @@ where
 }
 
 /// Executes the given sessions concurrently within a `tokio` runtime.
-pub async fn run_sessions_async<SP, P, F, R>(
-    rng: &mut R,
+pub async fn run_sessions_async<SP, P, F>(
+    rng: &mut SP::Rng,
     sessions: Vec<Session<SP, P>>,
     session_runner: F,
 ) -> Result<ExecutionResult<SP, P>, RuntimeError>
 where
-    R: 'static + CryptoRngCore + Clone + Send,
     SP: SessionParameters,
     SP::Signer: Send + Sync,
+    SP::Rng: Clone + Send,
     P: ExecutableProtocol<SP>,
-    F: for<'a> SessionRunner<'a, SP, P, R>,
+    F: for<'a> SessionRunner<'a, SP, P>,
 {
     let num_parties = sessions.len();
 

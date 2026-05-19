@@ -5,7 +5,7 @@ use serde_encoded_bytes::{GenericArray014, Hex};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
     digest::{self, Digest},
-    rand_core::CryptoRngCore,
+    rand_core::RngCore,
 };
 
 use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
@@ -87,27 +87,6 @@ fn hash_value_and_metadata<SP: SessionParameters>(
     hash_value_hash_and_metadata::<SP>(&value_hash, metadata)
 }
 
-/// A wrapper to convert `dyn CryptoRngCore` to a sized `impl CryptoRngCore`,
-/// since some libraries don't accept a `?Sized` RNG.
-struct Rng<'a>(&'a mut dyn CryptoRngCore);
-
-impl signature::rand_core::RngCore for Rng<'_> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-    fn fill_bytes(&mut self, bytes: &mut [u8]) {
-        self.0.fill_bytes(bytes);
-    }
-    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), signature::rand_core::Error> {
-        self.0.try_fill_bytes(bytes)
-    }
-}
-
-impl signature::rand_core::CryptoRng for Rng<'_> {}
-
 /// A signed value with metadata.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedValue<SP: SessionParameters> {
@@ -134,9 +113,8 @@ impl<SP: SessionParameters> SignedValue<SP> {
         };
         let digest = hash_value_and_metadata::<SP>(&value, &metadata)
             .or_with_context(|| format!("Failed to create a signed value `{name}`"))?;
-        let mut typed_rng = Rng(rng);
         let signature = signer
-            .try_sign_digest_with_rng(&mut typed_rng, digest)
+            .try_sign_digest_with_rng(rng, digest)
             .map_err(|err| RuntimeError::new(format!("Signing failed: {err}")))?;
         Ok(Self {
             signature,
@@ -297,7 +275,7 @@ pub struct MessageId<SP: SessionParameters>(#[serde(with = "GenericArray014::<He
 
 impl<SP: SessionParameters> MessageId<SP> {
     /// Creates a random message ID.
-    pub fn random(rng: &mut impl CryptoRngCore) -> Self {
+    pub fn random(rng: &mut SP::Rng) -> Self {
         let mut buffer = digest::Output::<SP::Digest>::default();
         rng.fill_bytes(&mut buffer);
         Self(buffer)
