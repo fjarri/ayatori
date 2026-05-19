@@ -1,7 +1,5 @@
 use alloc::{format, string::String, sync::Arc, vec};
 
-use signature::rand_core::CryptoRngCore;
-
 use super::session::SessionData;
 use crate::{
     entities::{
@@ -364,7 +362,7 @@ impl<SP: SessionParameters> RngScalarUnattributableTask<SP> {
         }
     }
 
-    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
         let store_in = ScalarTag::Computed(self.store_in);
         match self.function.call(rng, &self.args) {
             Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
@@ -406,7 +404,7 @@ impl<SP: SessionParameters> RngElementUnattributableTask<SP> {
         }
     }
 
-    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
         let store_in = MappingTag::Computed(self.store_in);
         match self.function.call(rng, &self.index, &self.args) {
             Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
@@ -452,7 +450,7 @@ impl<SP: SessionParameters> SerializeAndSignElementTask<SP> {
         }
     }
 
-    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
         let store_in = MappingTag::LocalSigned(self.store_in);
         match self.function.call(rng, &self.index, &self.args) {
             Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
@@ -638,7 +636,7 @@ enum RandomizedTaskEnum<SP: SessionParameters> {
 pub struct RandomizedTask<SP: SessionParameters>(RandomizedTaskEnum<SP>);
 
 impl<SP: SessionParameters> RandomizedTask<SP> {
-    pub fn execute(self, rng: &mut impl CryptoRngCore) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
         match self.0 {
             RandomizedTaskEnum::ScalarUnattributable(task) => task.execute(rng),
             RandomizedTaskEnum::ElementUnattributable(task) => task.execute(rng),

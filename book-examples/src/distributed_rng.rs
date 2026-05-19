@@ -1,6 +1,8 @@
 use alloc::collections::BTreeSet;
 use ayatori::protocol_author_api::*;
 
+use signature::rand_core::RngCore;
+
 // ANCHOR: composable
 #[derive(Debug)]
 pub struct DistributedRng;
@@ -185,7 +187,7 @@ mod tests {
     use super::DistributedRng;
 
     // ANCHOR: happy_path
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type P = DistributedRng;
     type S = Session<SP, P>;
 

@@ -1,23 +1,17 @@
 use alloc::collections::BTreeSet;
 
-use signature::rand_core::CryptoRngCore;
+use signature::rand_core::RngCore;
 
 use ayatori::protocol_author_api::*;
 
 #[derive(Debug)]
 pub struct TestProtocol;
 
-fn sample_value<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
-    _args: &Args<SP>,
-) -> Result<u64, UnattributableError> {
+fn sample_value<SP: SessionParameters>(rng: &mut SP::Rng, _args: &Args<SP>) -> Result<u64, UnattributableError> {
     Ok(u64::from(rng.next_u32()))
 }
 
-fn sample_nonce<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
-    _args: &Args<SP>,
-) -> Result<u64, UnattributableError> {
+fn sample_nonce<SP: SessionParameters>(rng: &mut SP::Rng, _args: &Args<SP>) -> Result<u64, UnattributableError> {
     Ok(u64::from(rng.next_u32()))
 }
 
@@ -135,7 +129,7 @@ mod tests {
         let sessions = signers
             .into_iter()
             .map(|signer| {
-                Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(
+                Session::<TestSessionParams<BinaryFormat, ChaCha8Rng>, TestProtocol>::new(
                     session_id.clone(),
                     signer,
                     &(),

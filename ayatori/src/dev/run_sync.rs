@@ -1,7 +1,5 @@
 use alloc::{collections::BTreeMap, format, vec::Vec};
 
-use signature::rand_core::CryptoRngCore;
-
 use crate::{
     entities::{Message, MessageId, RuntimeError},
     execution::{Session, SessionReport, SessionState, Task},
@@ -11,7 +9,7 @@ use crate::{
 
 /// Executes the given sessions without offloading tasks to separate threads.
 pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
-    rng: &mut impl CryptoRngCore,
+    rng: &mut SP::Rng,
     sessions: Vec<Session<SP, P>>,
 ) -> Result<ExecutionResult<SP, P>, RuntimeError> {
     let mut sessions = sessions;

@@ -1,4 +1,3 @@
-use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -10,7 +9,7 @@ use ayatori::protocol_user_api::{
 
 // ANCHOR: signature
 pub async fn run_session<SP, P>(
-    rng: &mut impl CryptoRngCore,
+    rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
@@ -104,7 +103,7 @@ mod tests {
     use super::run_session;
     use crate::distributed_rng::DistributedRng;
 
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type P = DistributedRng;
 
     #[tokio::test]

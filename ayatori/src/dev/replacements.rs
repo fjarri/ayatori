@@ -1,8 +1,6 @@
 use alloc::{format, sync::Arc};
 use core::fmt::{self, Debug};
 
-use signature::rand_core::CryptoRngCore;
-
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingTag,
@@ -60,9 +58,7 @@ enum ReplacementEnum<SP: SessionParameters> {
     },
     Message {
         function: Arc<
-            dyn Fn(&mut dyn CryptoRngCore, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, RuntimeError>
-                + Send
-                + Sync,
+            dyn Fn(&mut SP::Rng, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, RuntimeError> + Send + Sync,
         >,
     },
 }
@@ -155,7 +151,7 @@ impl<SP: SessionParameters> Replacement<SP> {
             + Send
             + Sync
             + Fn(
-                &mut dyn CryptoRngCore,
+                &mut SP::Rng,
                 &SignedValue<SP>,
                 &SP::Verifier,
                 &SerializeArgs<SP>,

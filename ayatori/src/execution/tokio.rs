@@ -7,8 +7,7 @@ use alloc::{
 };
 
 use itertools::Itertools;
-use rand_chacha::ChaCha20Rng;
-use signature::rand_core::{CryptoRngCore, SeedableRng};
+use signature::rand_core::{CryptoRngCore, RngCore, SeedableRng};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -73,7 +72,7 @@ pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>, R:
 /// Executes the session waiting for the messages from the `rx` channel
 /// and pushing outgoing messages into the `tx` channel.
 pub async fn run_session<SP, P>(
-    rng: &mut (impl CryptoRngCore + Send),
+    rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
@@ -82,6 +81,7 @@ pub async fn run_session<SP, P>(
 where
     SP: SessionParameters,
     SP::Signer: Sync,
+    SP::Rng: Send,
     P: ExecutableProtocol<SP>,
 {
     loop {
@@ -203,7 +203,7 @@ impl<SP: SessionParameters> TaskScope<SP> {
 // we wrap all the logic here so that we could clean all the tasks in one place (in the caller).
 async fn par_run_session_inner<SP, P>(
     tasks: &mut TaskScope<SP>,
-    rng: &mut impl CryptoRngCore,
+    rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
@@ -212,6 +212,7 @@ async fn par_run_session_inner<SP, P>(
 where
     SP: SessionParameters,
     SP::Signer: Send + Sync,
+    SP::Rng: SeedableRng + Send,
     P: ExecutableProtocol<SP>,
 {
     loop {
@@ -221,8 +222,10 @@ where
                     tasks.spawn_blocking(move || Ok(task.execute()));
                 }
                 Task::Randomized(task) => {
-                    let mut task_rng = ChaCha20Rng::from_rng(&mut *rng)
-                        .map_err(|err| RuntimeError::new(format!("Failed to create an RNG: {err}")))?;
+                    let mut seed = <SP::Rng as SeedableRng>::Seed::default();
+                    rng.try_fill_bytes(seed.as_mut())
+                        .map_err(|err| RuntimeError::new(format!("Failed to create a task RNG seed: {err}")))?;
+                    let mut task_rng = SP::Rng::from_seed(seed);
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
                 Task::Send(task) => {
@@ -283,7 +286,7 @@ where
 /// to offset the parallelizing overhead.
 /// Use [`tokio::run_sessions_async`](`crate::dev::tokio::run_sessions_async`) to benchmark your specific protocol.
 pub async fn par_run_session<SP, P>(
-    rng: &mut impl CryptoRngCore,
+    rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
@@ -292,6 +295,7 @@ pub async fn par_run_session<SP, P>(
 where
     SP: SessionParameters,
     SP::Signer: Send + Sync,
+    SP::Rng: SeedableRng + Send,
     P: ExecutableProtocol<SP>,
 {
     let mut tasks = TaskScope::new();

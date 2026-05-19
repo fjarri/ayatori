@@ -1,6 +1,6 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 
-use signature::rand_core::CryptoRngCore;
+use signature::rand_core::RngCore;
 
 use ayatori::protocol_author_api::*;
 
@@ -35,7 +35,7 @@ fn modpow(x: u64, exp: u64) -> u64 {
 pub struct TestProtocol;
 
 fn gen_secrets<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
+    rng: &mut SP::Rng,
     args: &Args<SP>,
 ) -> Result<BTreeMap<SP::Verifier, u64>, UnattributableError> {
     let all_parties = args.get::<PartyGroup<SP::Verifier>>("all_parties")?;
@@ -55,7 +55,7 @@ fn splay_secrets<SP: SessionParameters>(id: &SP::Verifier, args: &Args<SP>) -> R
 }
 
 fn gen_dh_secret<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
+    rng: &mut SP::Rng,
     _id: &SP::Verifier,
     _args: &Args<SP>,
 ) -> Result<u64, UnattributableError> {
@@ -248,7 +248,7 @@ mod tests {
 
     use super::{TestProtocol, modadd};
 
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type S = Session<SP, TestProtocol>;
 
     #[test]

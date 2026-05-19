@@ -96,7 +96,7 @@ mod tests {
 
     use super::TestProtocol;
 
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type S = Session<SP, TestProtocol>;
 
     #[test]

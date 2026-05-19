@@ -14,7 +14,7 @@ mod tests {
 
     use crate::distributed_rng::TestProtocol;
 
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type P = TestProtocol;
 
     async fn async_run<F>(f: F)

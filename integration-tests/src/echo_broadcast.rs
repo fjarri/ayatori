@@ -271,10 +271,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{
-        Keypair,
-        rand_core::{CryptoRngCore, SeedableRng},
-    };
+    use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
         dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
@@ -286,7 +283,7 @@ mod tests {
 
     use super::{Message1, TestProtocol};
 
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type S = Session<SP, TestProtocol>;
 
     #[test]
@@ -306,7 +303,7 @@ mod tests {
     }
 
     fn serialize_replacement(
-        rng: &mut dyn CryptoRngCore,
+        rng: &mut <SP as SessionParameters>::Rng,
         orig_value: &SignedValue<SP>,
         destination: &<SP as SessionParameters>::Verifier,
         args: &SerializeArgs<SP>,

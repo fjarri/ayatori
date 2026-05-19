@@ -23,7 +23,6 @@ postcard = { version = "1", default-features = false, features = ["alloc"], opti
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
 tokio = { version = "1", default-features = false, features = ["rt", "macros", "time"], optional = true }
 tokio-util = { version = "0.7", default-features = false, optional = true }
-rand_chacha = { version = "0.3", default-features = false, optional = true }
 rand = { version = "0.8", default-features = false, optional = true }
 
 [dev-dependencies]
@@ -35,7 +34,7 @@ postcard = { version = "1", default-features = false, features = ["alloc"] }
 
 [features]
 dev = ["postcard", "serde_json", "rand"]
-tokio = ["dep:tokio", "tokio-util", "rand_chacha"]
+tokio = ["dep:tokio", "tokio-util"]
 
 [package.metadata.docs.rs]
 all-features = true

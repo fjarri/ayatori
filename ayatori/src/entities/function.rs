@@ -4,8 +4,6 @@ use alloc::{
 };
 use core::fmt::{self, Debug, Display};
 
-use signature::rand_core::CryptoRngCore;
-
 use super::{
     args::{Args, DeserializeArgs, SerializeArgs},
     errors::{
@@ -129,7 +127,7 @@ define_erased_function_type!(
 
 define_typed_function_type!(
     UnattributableScalarFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, args: &Args<SP>) -> UnattributableError
+    (rng: &mut SP::Rng, args: &Args<SP>) -> UnattributableError
 );
 
 define_typed_function_type!(
@@ -139,7 +137,7 @@ define_typed_function_type!(
 
 define_typed_function_type!(
     UnattributableMappingFunctionWithRng<SP>,
-    (rng: &mut dyn CryptoRngCore, id: &SP::Verifier, args: &Args<SP>) -> UnattributableError
+    (rng: &mut SP::Rng, id: &SP::Verifier, args: &Args<SP>) -> UnattributableError
 );
 
 define_typed_function_type!(
@@ -171,7 +169,7 @@ define_erased_function_type!(
 
 define_erased_function_type!(
     SerializeAndSignFunction<SP>,
-    (rng: &mut dyn CryptoRngCore, destination: &SP::Verifier, args: &SerializeArgs<SP>) -> Result<Value, RuntimeError>
+    (rng: &mut SP::Rng, destination: &SP::Verifier, args: &SerializeArgs<SP>) -> Result<Value, RuntimeError>
 );
 
 define_erased_function_type!(

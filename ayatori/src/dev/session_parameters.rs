@@ -118,13 +118,14 @@ impl digest::OutputSizeUser for TestHasher {
 
 /// An implementation of [`SessionParameters`] using the testing signer/verifier types.
 #[derive_where::derive_where(Debug, Clone, Copy)]
-pub struct TestSessionParams<F>(core::marker::PhantomData<fn() -> F>);
+pub struct TestSessionParams<F, R>(core::marker::PhantomData<fn() -> (F, R)>);
 
-impl<F: WireFormat> SessionParameters for TestSessionParams<F> {
+impl<F: WireFormat, R: CryptoRngCore + 'static> SessionParameters for TestSessionParams<F, R> {
     type Signer = TestSigner;
     type Verifier = TestVerifier;
     type Signature = TestSignature<Self::Digest>;
     type Digest = TestHasher;
+    type Rng = R;
     type WireFormat = F;
 }
 

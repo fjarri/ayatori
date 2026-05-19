@@ -120,7 +120,7 @@ pub struct SignedValue<SP: SessionParameters> {
 impl<SP: SessionParameters> SignedValue<SP> {
     /// Signs a new value.
     pub fn new(
-        rng: &mut dyn CryptoRngCore,
+        rng: &mut SP::Rng,
         signer: &SP::Signer,
         session_id: &SessionId<SP>,
         name: &FullName,
