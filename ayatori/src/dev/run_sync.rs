@@ -32,7 +32,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the map of message queues")))?
                 .drain(..)
             {
-                let message_id = MessageId::random(rng);
+                let message_id = MessageId::random(rng).or_with_context(|| "Failed to create a message ID".into())?;
                 session.add_message(&message_id, message);
             }
 

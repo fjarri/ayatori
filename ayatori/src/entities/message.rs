@@ -5,7 +5,7 @@ use serde_encoded_bytes::{Hex, SliceLike};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
     digest::{self, FixedOutput, Update},
-    rand_core::Rng,
+    rand_core::TryRng,
 };
 
 use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
@@ -280,10 +280,11 @@ pub struct MessageId<SP: SessionParameters>(#[serde(with = "SliceLike::<Hex>")] 
 
 impl<SP: SessionParameters> MessageId<SP> {
     /// Creates a random message ID.
-    pub fn random(rng: &mut SP::Rng) -> Self {
+    pub fn random(rng: &mut SP::Rng) -> Result<Self, RuntimeError> {
         let mut buffer = digest::Output::<SP::Digest>::default();
-        rng.fill_bytes(&mut buffer);
-        Self(buffer)
+        rng.try_fill_bytes(&mut buffer)
+            .map_err(|err| RuntimeError::new(format!("Failed to invoke the RNG: {err}")))?;
+        Ok(Self(buffer))
     }
 
     pub(crate) fn from_usize(id: usize) -> Self {

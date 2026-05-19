@@ -2,7 +2,7 @@ use alloc::{boxed::Box, collections::BTreeSet};
 use core::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
-use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::FixedOutput, rand_core::CryptoRng};
+use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::FixedOutput, rand_core::TryCryptoRng};
 
 use crate::{
     entities::{Erasable, RuntimeError},
@@ -65,7 +65,7 @@ pub trait SessionParameters: 'static {
     type Signature: Send + Sync + Debug + Clone + Serialize + for<'de> Deserialize<'de>;
 
     /// The RNG used by the session computations.
-    type Rng: CryptoRng;
+    type Rng: TryCryptoRng;
 
     /// The type used to (de)serialize messages.
     type WireFormat: WireFormat;

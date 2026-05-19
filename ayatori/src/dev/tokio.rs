@@ -3,6 +3,7 @@
 use alloc::{collections::BTreeMap, format, sync::Arc, vec::Vec};
 
 use rand::RngExt;
+use signature::rand_core::UnwrapErr;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -13,6 +14,7 @@ use crate::{
         Session, SessionReport,
         tokio::{MessageIn, MessageOut, SessionRunner},
     },
+    traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
 
@@ -26,6 +28,7 @@ where
 {
     let mut rx = rx;
     let mut messages = Vec::<Message<SP>>::new();
+
     loop {
         let mut messages_out = Vec::<MessageOut<SP>>::new();
 
@@ -52,7 +55,8 @@ where
         while !messages.is_empty() {
             // Pull a random message from the list,
             // to increase the chances that they are delivered out of order.
-            let message_idx = rng.random_range(0..messages.len());
+            let mut infallible_rng = UnwrapErr(&mut rng);
+            let message_idx = infallible_rng.random_range(0..messages.len());
             let outgoing = messages.swap_remove(message_idx);
 
             let tx = txs.get(outgoing.destination()).ok_or_else(|| {
@@ -62,7 +66,7 @@ where
                 ))
             })?;
 
-            let message_id = MessageId::random(&mut rng);
+            let message_id = MessageId::random(&mut rng).or_with_context(|| "Failed to create a message ID".into())?;
             let msg_in = MessageIn::Message {
                 message: outgoing,
                 id: message_id,
