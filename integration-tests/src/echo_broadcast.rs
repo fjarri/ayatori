@@ -12,8 +12,8 @@ fn prepare_echo_pack<SP: SessionParameters>(
         .iter()
         // Don't send out our own message the second time
         .filter(|(id, _value)| id != &&args.my_id())
-        .map(|(id, value)| value.to_signed_hash().map(|value| ((*id).clone(), value)))
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
+        .map(|(id, value)| ((*id).clone(), value.to_signed_hash()))
+        .collect::<BTreeMap<_, _>>();
     Ok(cloned)
 }
 
@@ -93,7 +93,7 @@ fn verify_echo_contents<SP: SessionParameters>(
             .get(from)
             .expect("we checked that the ID is present in the message map");
 
-        if !ethalon.payload_hash_matches(message)? {
+        if !ethalon.payload_hash_matches(message) {
             let associated_data = ((*ethalon).clone().unverify(), message.clone());
             return Err(ThirdPartyError::new("Mismatched value contents", from, associated_data)?.into());
         }
@@ -271,10 +271,6 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{
-        Keypair,
-        rand_core::{CryptoRngCore, SeedableRng},
-    };
 
     use ayatori::{
         dev::{BinaryFormat, Replacement, TestSessionParams, TestSigner, run_sessions_sync},
@@ -282,11 +278,12 @@ mod tests {
             Args, MaybeAttributableError, RuntimeError, SerializeArgs, SignedValue, ThirdPartyError,
         },
         protocol_user_api::*,
+        signature::{Keypair, rand_core::SeedableRng},
     };
 
     use super::{Message1, TestProtocol};
 
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type S = Session<SP, TestProtocol>;
 
     #[test]
@@ -296,7 +293,7 @@ mod tests {
         let party_group = PartyGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()
@@ -306,7 +303,7 @@ mod tests {
     }
 
     fn serialize_replacement(
-        rng: &mut dyn CryptoRngCore,
+        rng: &mut <SP as SessionParameters>::Rng,
         orig_value: &SignedValue<SP>,
         destination: &<SP as SessionParameters>::Verifier,
         args: &SerializeArgs<SP>,
@@ -341,7 +338,7 @@ mod tests {
         let party_group = PartyGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()

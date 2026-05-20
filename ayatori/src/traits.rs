@@ -2,7 +2,7 @@ use alloc::{boxed::Box, collections::BTreeSet};
 use core::fmt::Debug;
 
 use serde::{Deserialize, Serialize};
-use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::Digest};
+use signature::{DigestVerifier, Keypair, RandomizedDigestSigner, digest::FixedOutput, rand_core::TryCryptoRng};
 
 use crate::{
     entities::{Erasable, RuntimeError},
@@ -56,13 +56,16 @@ pub trait SessionParameters: 'static {
     type Signer: Debug + RandomizedDigestSigner<Self::Digest, Self::Signature> + Keypair<VerifyingKey = Self::Verifier>;
 
     /// The hash type that will be used to pre-hash message payloads before signing.
-    type Digest: Digest;
+    type Digest: FixedOutput + Default;
 
     /// The verifier type, which will also serve as a party identifier.
     type Verifier: PartyId + DigestVerifier<Self::Digest, Self::Signature> + Serialize + for<'de> Deserialize<'de>;
 
     /// The signature type corresponding to [`Signer`](`Self::Signer`) and [`Verifier`](`Self::Verifier`).
     type Signature: Send + Sync + Debug + Clone + Serialize + for<'de> Deserialize<'de>;
+
+    /// The RNG used by the session computations.
+    type Rng: TryCryptoRng;
 
     /// The type used to (de)serialize messages.
     type WireFormat: WireFormat;

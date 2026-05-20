@@ -7,7 +7,6 @@ use alloc::{
 use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
-use signature::rand_core::CryptoRngCore;
 
 use super::{
     any_node::AnyNode,
@@ -171,7 +170,7 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
 /// Same as [`compute_scalar`], but `function` may use an RNG.
 pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static + Send + Sync + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<Ret, UnattributableError>,
+    function: impl 'static + Send + Sync + Fn(&mut SP::Rng, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> Node<ComputeScalar<SP>> {
     let args: ComputeScalarArgs<SP> = args.into();
@@ -241,10 +240,7 @@ pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Cl
     fork_name: &str,
     lname: &str,
     rname: &str,
-    function: impl 'static
-    + Send
-    + Sync
-    + Fn(&mut dyn CryptoRngCore, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
+    function: impl 'static + Send + Sync + Fn(&mut SP::Rng, &Args<SP>) -> Result<OneOrBoth<LRet, RRet>, UnattributableError>,
     args: impl Into<ComputeScalarArgs<SP>>,
 ) -> (Node<ComputeScalar<SP>>, Node<ComputeScalar<SP>>) {
     let fork = compute_scalar_with_rng(fork_name, function, args);
@@ -295,10 +291,7 @@ pub fn compute_mapping_sender_fallible<SP: SessionParameters, Ret: Erasable>(
 /// Same as [`compute_mapping`], but `function` may use an RNG.
 pub fn compute_mapping_with_rng<SP: SessionParameters, Ret: Erasable>(
     name: &str,
-    function: impl 'static
-    + Send
-    + Sync
-    + Fn(&mut dyn CryptoRngCore, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
+    function: impl 'static + Send + Sync + Fn(&mut SP::Rng, &SP::Verifier, &Args<SP>) -> Result<Ret, UnattributableError>,
     args: impl Into<ComputeMappingArgs<SP>>,
 ) -> Node<ComputeMapping<SP>> {
     let args: ComputeMappingArgs<SP> = args.into();
@@ -370,7 +363,7 @@ pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: E
 }
 
 fn default_serialize_and_sign<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
+    rng: &mut SP::Rng,
     destination: &SP::Verifier,
     args: &SerializeArgs<SP>,
 ) -> Result<Value, RuntimeError> {

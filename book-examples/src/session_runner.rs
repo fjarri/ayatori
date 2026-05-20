@@ -1,4 +1,3 @@
-use signature::rand_core::CryptoRngCore;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -10,7 +9,7 @@ use ayatori::protocol_user_api::{
 
 // ANCHOR: signature
 pub async fn run_session<SP, P>(
-    rng: &mut impl CryptoRngCore,
+    rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
     rx: &mut mpsc::Receiver<MessageIn<SP>>,
     cancellation: CancellationToken,
@@ -97,14 +96,14 @@ mod tests {
             BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async,
         },
         protocol_user_api::{PartyGroup, Session, SessionId},
+        signature::{Keypair, rand_core::SeedableRng},
     };
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use super::run_session;
     use crate::distributed_rng::DistributedRng;
 
-    type SP = TestSessionParams<BinaryFormat>;
+    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
     type P = DistributedRng;
 
     #[tokio::test]
@@ -119,7 +118,7 @@ mod tests {
         let shared_data = (1001, PartyGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()
@@ -134,13 +133,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let results = run_sessions_async::<SP, P, _, ChaCha8Rng>(
-            &mut rng,
-            sessions,
-            run_session::<SP, P>,
-        )
-        .await
-        .unwrap();
+        let results =
+            run_sessions_async::<SP, P, _>(&mut rng, sessions, run_session::<SP, P>)
+                .await
+                .unwrap();
 
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);

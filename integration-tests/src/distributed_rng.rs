@@ -1,24 +1,16 @@
 use alloc::collections::BTreeSet;
 
-use signature::rand_core::CryptoRngCore;
-
-use ayatori::protocol_author_api::*;
+use ayatori::{protocol_author_api::*, signature::rand_core::TryRng};
 
 #[derive(Debug)]
 pub struct TestProtocol;
 
-fn sample_value<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
-    _args: &Args<SP>,
-) -> Result<u64, UnattributableError> {
-    Ok(u64::from(rng.next_u32()))
+fn sample_value<SP: SessionParameters>(rng: &mut SP::Rng, _args: &Args<SP>) -> Result<u64, UnattributableError> {
+    Ok(u64::from(rng.try_next_u32().unwrap()))
 }
 
-fn sample_nonce<SP: SessionParameters>(
-    rng: &mut dyn CryptoRngCore,
-    _args: &Args<SP>,
-) -> Result<u64, UnattributableError> {
-    Ok(u64::from(rng.next_u32()))
+fn sample_nonce<SP: SessionParameters>(rng: &mut SP::Rng, _args: &Args<SP>) -> Result<u64, UnattributableError> {
+    Ok(u64::from(rng.try_next_u32().unwrap()))
 }
 
 fn commit_to_value<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, UnattributableError> {
@@ -114,11 +106,11 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
         dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
         protocol_user_api::*,
+        signature::{Keypair, rand_core::SeedableRng},
     };
 
     use super::TestProtocol;
@@ -130,12 +122,12 @@ mod tests {
         let party_group = PartyGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()
             .map(|signer| {
-                Session::<TestSessionParams<BinaryFormat>, TestProtocol>::new(
+                Session::<TestSessionParams<BinaryFormat, ChaCha8Rng>, TestProtocol>::new(
                     session_id.clone(),
                     signer,
                     &(),

@@ -130,11 +130,11 @@ mod tests {
     use alloc::vec::Vec;
 
     use rand_chacha::ChaCha8Rng;
-    use signature::{Keypair, rand_core::SeedableRng};
 
     use ayatori::{
         dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
         protocol_user_api::*,
+        signature::{Keypair, rand_core::SeedableRng},
     };
 
     use super::{Protocol1, Protocol1SharedData};
@@ -149,12 +149,12 @@ mod tests {
         };
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng);
+        let session_id = SessionId::random(&mut rng).unwrap();
 
         let sessions = signers
             .into_iter()
             .map(|signer| {
-                Session::<TestSessionParams<BinaryFormat>, Protocol1>::new(
+                Session::<TestSessionParams<BinaryFormat, ChaCha8Rng>, Protocol1>::new(
                     session_id.clone(),
                     signer,
                     &(),
