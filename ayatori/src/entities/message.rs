@@ -179,7 +179,6 @@ pub struct SignedHash<SP: SessionParameters> {
     signature: SP::Signature,
     source: SP::Verifier,
     metadata: ValueMetadata<SP>,
-    // TODO: need an array support
     #[serde(with = "SliceLike::<Hex>")]
     hash: digest::Output<SP::Digest>,
 }
