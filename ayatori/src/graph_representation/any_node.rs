@@ -562,6 +562,7 @@ impl<SP: SessionParameters> From<Dependency<SP>> for AnyNode<SP> {
         match source {
             Dependency::ComputeScalar(node) => Self::ComputeScalar(node),
             Dependency::Collect(node) => Self::Collect(node),
+            Dependency::MergeScalars(node) => Self::MergeScalars(node),
         }
     }
 }
