@@ -144,6 +144,7 @@ name = "integration-tests"
 version = "0.0.0"
 dependencies = [
  "ayatori",
+ "derive-where",
  "rand_chacha",
  "serde",
  "tokio",

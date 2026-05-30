@@ -113,6 +113,11 @@ impl ScalarArgumentTag {
 pub(crate) struct CollectedTag(pub(crate) MappingTag);
 
 impl CollectedTag {
+    pub fn new(name: &str) -> Self {
+        // TODO: have a special variant for directly created CollectedTags?
+        Self(MappingTag::Computed(ComputedMappingTag::new(name)))
+    }
+
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self(self.0.with_added_prefix(prefix))
     }

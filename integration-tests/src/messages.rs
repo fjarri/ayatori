@@ -1,4 +1,4 @@
-use alloc::collections::BTreeSet;
+use alloc::{collections::BTreeSet, vec::Vec};
 
 use serde::{Deserialize, Serialize};
 
@@ -107,7 +107,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let y = receive(&message_y);
         let all_y = collect(&y, all_parties).with_dependency(&collect(&y_sent, all_parties));
 
-        let my_z_group = all_parties.except(party_build_data.id());
+        // TODO: expose the internal set of PartyGroup?
+        let mut ids = all_parties.ids().cloned().collect::<BTreeSet<_>>();
+        ids.remove(party_build_data.id());
+        let my_z_group = PartyGroup::new(&ids.into_iter().collect::<Vec<_>>());
         let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[]);
         let z_sent = direct_message(&message_z, &my_z);
         let z = receive(&message_z);

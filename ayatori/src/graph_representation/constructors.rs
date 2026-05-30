@@ -19,13 +19,14 @@ use super::{
 };
 use crate::{
     entities::{
-        Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError, MergedScalarTag, OneOrBoth, PartyGroup,
-        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction,
-        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SenderError,
-        SenderErrorWithReveal, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
-        SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
-        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        Args, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeArgs,
+        DeserializeFunction, Erasable, EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError,
+        MergedScalarTag, OneOrBoth, PartyGroup, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction,
+        SenderAttributableMappingFunction, SenderAttributableVerificationFunction,
+        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SerdeAdapter,
+        SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue, SimpleMappingFunction,
+        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction, ThirdPartyError,
+        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
     traced_error::TraceableResult,
@@ -497,6 +498,25 @@ pub fn collect<SP: SessionParameters>(
 ) -> Node<Collect<SP>> {
     let values = values.into();
     let store_in = values.store_in().to_collected();
+    Node::new(Collect {
+        store_in,
+        values,
+        group: group.clone(),
+        dependencies: Vec::new(),
+    })
+}
+
+/// Collects the elements of a mapping node into a scalar node with a given name.
+///
+/// Use instead of [`collect`] when you need to collect the same mapping into two different scalars
+/// (usng two different groups).
+pub fn collect_into<SP: SessionParameters>(
+    name: &str,
+    values: impl Into<CollectArg<SP>>,
+    group: &PartyGroup<SP::Verifier>,
+) -> Node<Collect<SP>> {
+    let values = values.into();
+    let store_in = CollectedTag::new(name);
     Node::new(Collect {
         store_in,
         values,

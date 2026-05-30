@@ -10,6 +10,7 @@ use crate::traits::PartyId;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartyGroup<Id: PartyId> {
     ids: BTreeSet<Id>,
+    threshold: usize,
 }
 
 impl<Id: PartyId> PartyGroup<Id> {
@@ -17,8 +18,18 @@ impl<Id: PartyId> PartyGroup<Id> {
     ///
     /// Repeating IDs are ignored.
     pub fn new(ids: &[Id]) -> Self {
+        let ids = ids.iter().cloned().collect::<BTreeSet<_>>();
+        let threshold = ids.len();
+        Self { ids, threshold }
+    }
+
+    /// Creates a new group from party IDs with a custom quorum threshold.
+    ///
+    /// Repeating IDs are ignored.
+    pub fn new_threshold(ids: &[Id], threshold: usize) -> Self {
         Self {
             ids: ids.iter().cloned().collect(),
+            threshold,
         }
     }
 
@@ -30,22 +41,20 @@ impl<Id: PartyId> PartyGroup<Id> {
     /// Returns `true` if the information from `ids` is enough to move on in the protocol.
     #[must_use]
     pub fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool {
-        &self.ids == ids
+        ids.intersection(&self.ids).count() >= self.threshold
     }
 
     /// Returns `true` if it is not possible for [`Self::has_quorum`] to return `true`
     /// if `banned_ids` are guaranteed not to be present in `ids`.
     #[must_use]
     pub fn is_quorum_possible(&self, banned_ids: &BTreeSet<Id>) -> bool {
-        self.has_quorum(&self.ids.difference(banned_ids).cloned().collect::<BTreeSet<_>>())
+        self.ids.difference(banned_ids).count() >= self.threshold
     }
 
-    /// Returns `self` with `id` excluded from the group.
+    /// Returns the quorum threshold.
     #[must_use]
-    pub fn except(&self, id: &Id) -> Self {
-        let mut ids = self.ids.clone();
-        ids.remove(id);
-        Self { ids }
+    pub fn threshold(&self) -> usize {
+        self.threshold
     }
 }
 
