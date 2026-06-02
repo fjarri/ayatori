@@ -95,12 +95,10 @@ where
                 }
                 Task::Send(task) => {
                     let (message, result) = task.execute();
-                    if let Some(message) = message {
-                        tx.send(MessageOut::Message(message)).await.map_err(|err| {
-                            RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                        })?;
-                    }
-                    session.add_result(result)
+                    tx.send(MessageOut::Message(message)).await.map_err(|err| {
+                        RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                    })?;
+                    session.add_result(result.success())
                 }
             };
 
@@ -230,12 +228,10 @@ where
                     let tx = tx.clone();
                     tasks.spawn(async move {
                         let (message, result) = task.execute();
-                        if let Some(message) = message {
-                            tx.send(MessageOut::Message(message)).await.map_err(|err| {
-                                RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
-                            })?;
-                        }
-                        Ok(result)
+                        tx.send(MessageOut::Message(message)).await.map_err(|err| {
+                            RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
+                        })?;
+                        Ok(result.success())
                     });
                 }
             }

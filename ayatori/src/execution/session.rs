@@ -32,7 +32,7 @@ use crate::{
     entities::{
         AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
         MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
+        SerializeArgs, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
@@ -246,6 +246,12 @@ where
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
     }
 
+    fn register_send_error(&mut self, guilty_party: SP::Verifier) {
+        self.ruleset.update_with_banned_party(&guilty_party);
+        self.attributable_errors
+            .insert(guilty_party, "Error when sending a message".into());
+    }
+
     fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
@@ -318,10 +324,13 @@ where
                     to_send,
                     destination,
                 } => {
-                    let signed_value = self
+                    let value = self
                         .storage
                         .get_elem(&MappingTag::LocalSigned(to_send), &destination)
                         .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+                    let signed_value = value
+                        .downcast::<SignedValue<SP>>()
+                        .or_with_context(|| "Failed to downcast the value to be sent".into())?;
                     return Ok(Some(SendTask::new(store_in, destination, signed_value).into()));
                 }
                 Action::ComputeScalar {
@@ -661,6 +670,10 @@ where
                     description,
                 });
                 Ok(AddTaskResult::MessageAttributableError(error))
+            }
+            TaskResultEnum::SendError { destination } => {
+                self.register_send_error(destination);
+                Ok(AddTaskResult::StateChanged)
             }
         }
     }

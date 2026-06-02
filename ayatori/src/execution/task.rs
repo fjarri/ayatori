@@ -469,15 +469,40 @@ impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
     }
 }
 
+/// An object used to report the result of attempting to send a message to a remote party.
+#[derive_where::derive_where(Debug)]
+pub struct SendTaskResult<SP: SessionParameters> {
+    store_in: MappingTag,
+    destination: SP::Verifier,
+}
+
+impl<SP: SessionParameters> SendTaskResult<SP> {
+    /// Returns a result indicating that the message was successfully sent.
+    pub fn success(self) -> TaskResult<SP> {
+        TaskResult(TaskResultEnum::Sent {
+            store_in: self.store_in,
+            destination: self.destination,
+        })
+    }
+
+    /// Returns a result indicating that there was an error delivering the message.
+    pub fn error(self) -> TaskResult<SP> {
+        TaskResult(TaskResultEnum::SendError {
+            destination: self.destination,
+        })
+    }
+}
+
+/// A task requiring the user to send a message to a remote party.
 #[derive_where::derive_where(Debug)]
 pub struct SendTask<SP: SessionParameters> {
     store_in: SentTag,
     destination: SP::Verifier,
-    signed_value: Value,
+    signed_value: SignedValue<SP>,
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
-    pub(crate) fn new(store_in: SentTag, destination: SP::Verifier, signed_value: Value) -> Self {
+    pub(crate) fn new(store_in: SentTag, destination: SP::Verifier, signed_value: SignedValue<SP>) -> Self {
         Self {
             store_in,
             destination,
@@ -485,18 +510,15 @@ impl<SP: SessionParameters> SendTask<SP> {
         }
     }
 
-    pub fn execute(self) -> (Option<Message<SP>>, TaskResult<SP>) {
-        let signed_value = match self.signed_value.downcast::<SignedValue<SP>>() {
-            Ok(value) => value,
-            Err(error) => return (None, TaskResult(TaskResultEnum::RuntimeError(error))),
-        };
-        let signed_values = vec![signed_value];
+    /// Returns the message to be sent and an object used to report the result of that.
+    pub fn execute(self) -> (Message<SP>, SendTaskResult<SP>) {
+        let signed_values = vec![self.signed_value];
         let message = Message::new(self.destination.clone(), signed_values);
-        let result = TaskResult(TaskResultEnum::Sent {
-            store_in: MappingTag::Sent(self.store_in.clone()),
+        let result = SendTaskResult {
+            store_in: MappingTag::Sent(self.store_in),
             destination: self.destination,
-        });
-        (Some(message), result)
+        };
+        (message, result)
     }
 }
 
@@ -607,10 +629,12 @@ enum DeterministicTaskEnum<SP: SessionParameters> {
     PreprocessMessage(PreprocessMessageTask<SP>),
 }
 
+/// An object encapsulating a deterministic task (one that does not require an RNG).
 #[derive_where::derive_where(Debug)]
 pub struct DeterministicTask<SP: SessionParameters>(DeterministicTaskEnum<SP>);
 
 impl<SP: SessionParameters> DeterministicTask<SP> {
+    /// Executes the task and returns a result to be passed back to the session.
     pub fn execute(self) -> TaskResult<SP> {
         match self.0 {
             DeterministicTaskEnum::ScalarUnattributable(task) => task.execute(),
@@ -632,10 +656,12 @@ enum RandomizedTaskEnum<SP: SessionParameters> {
     SerializeAndSignElement(SerializeAndSignElementTask<SP>),
 }
 
+/// An object encapsulating a randomized task (one that requires and RNG).
 #[derive_where::derive_where(Debug)]
 pub struct RandomizedTask<SP: SessionParameters>(RandomizedTaskEnum<SP>);
 
 impl<SP: SessionParameters> RandomizedTask<SP> {
+    /// Executes the task and returns a result to be passed back to the session.
     pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
         match self.0 {
             RandomizedTaskEnum::ScalarUnattributable(task) => task.execute(rng),
@@ -656,6 +682,7 @@ pub enum Task<SP: SessionParameters> {
     Randomized(RandomizedTask<SP>),
 }
 
+/// The result of executing a task, to be passed to [`Session::add_result`].
 #[derive_where::derive_where(Debug)]
 pub struct TaskResult<SP: SessionParameters>(TaskResultEnum<SP>);
 
@@ -710,5 +737,8 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
     MessageError {
         message_id: MessageId<SP>,
         description: String,
+    },
+    SendError {
+        destination: SP::Verifier,
     },
 }

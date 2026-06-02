@@ -49,16 +49,12 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                     Task::Randomized(task) => session.add_result(task.execute(rng)),
                     Task::Send(task) => {
                         let (message, result) = task.execute();
-                        if let Some(message) = message {
-                            let destination = message.destination().clone();
-                            messages
-                                .get_mut(&destination)
-                                .ok_or_else(|| {
-                                    RuntimeError::new(format!("{id:?} not found in the map of message queues"))
-                                })?
-                                .push(message);
-                        }
-                        session.add_result(result)
+                        let destination = message.destination().clone();
+                        messages
+                            .get_mut(&destination)
+                            .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the map of message queues")))?
+                            .push(message);
+                        session.add_result(result.success())
                     }
                 }?;
 

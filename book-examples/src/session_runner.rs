@@ -40,10 +40,8 @@ where
                 // ANCHOR: task_send
                 Task::Send(task) => {
                     let (message, result) = task.execute();
-                    if let Some(message) = message {
-                        tx.send(MessageOut::Message(message)).await.unwrap();
-                    }
-                    session.add_result(result)
+                    tx.send(MessageOut::Message(message)).await.unwrap();
+                    session.add_result(result.success())
                 } // ANCHOR_END: task_send
             };
 
