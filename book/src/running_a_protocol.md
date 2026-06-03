@@ -30,9 +30,11 @@ The whole body of the function is an event loop.
 ```
 In it, we will repeatedly perform the following actions:
 - Get a task from the session;
-- Execute the task;
-- Depending on the new session state finalize it or continue;
-- When there are no more tasks, get incoming messages from the channel and pass them to the session.
+- Execute the task, producing an update to the session state;
+- Apply the update, and depending on the new session state finalize it or continue;
+- When there are no more tasks, get an incoming message from the channel and pass it to the session, or store it in `cached_result` if it is an external update, to be applied at the start of the next iteration.
+
+The external updates may be a request to ban a party (for some user-specific reasons), or a result of attempting to send a message to a remote party (either a success or a failure).
 
 
 ### Processing tasks
@@ -46,8 +48,7 @@ Depending on the task, we need to perform certain actions.
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_deterministic}}
 ```
-A computation task: execute and give the result back to the session.
-This corresponds to a computation node in the protocol graph.
+A deterministic task is something that does not require passing on an RNG.
 Note that it can be offloaded to another `tokio` task, or a thread pool.
 
 ```rust,ignore
@@ -59,12 +60,16 @@ We extract these tasks to their own variant because offloading such tasks to ano
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_send}}
 ```
-This tasks requests that the user sends the message in the task.
-The destination can be obtained from [`Message::destination()`](protocol_user_api::Message::destination) method.
-`message` can be `None` if there has been some error serializing or signing a message; the error will be reported via `result` to be processed in the host thread.
+This tasks requests that the user sends the message contained in the task to a remote party.
+After the message is sent successfully, or failed to be sent (because the remote party is unavailable), the resulting update must be sent to the incoming channel as [`MessageIn::Result`](protocol_user_api::tokio::MessageIn::Result) variant.
 
-Note that the destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
-We are also pushing to the channel not a [`Message`](protocol_user_api::Message) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
+Note that the message destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
+We are also pushing to the channel not a [`SendTask`](protocol_user_api::SendTask) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
+
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:task_loop_end}}
+```
+If there were no tasks, and the cached task was empty, we break the loop and continue on to waiting for external messages.
 
 
 ### Processing the task result
@@ -115,3 +120,8 @@ If some error happens that cannot be attributed to a party, but can be attribute
 In other words, the error is escalated to the user, for them to deal with according to the context.
 If they maintain a mapping of transport addresses to party IDs, they can ban the offending party.
 If the transport layer has its own message authentication machinery, the fault may be provable.
+
+```rust,ignore
+{{#include ../../book-examples/src/session_runner.rs:process_message}}
+```
+The received message may be added to the session, or contain a result to be applied on the next iteration.

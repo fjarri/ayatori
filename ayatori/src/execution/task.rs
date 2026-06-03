@@ -690,6 +690,12 @@ impl<SP: SessionParameters> TaskResult<SP> {
     pub(crate) fn into_inner(self) -> TaskResultEnum<SP> {
         self.0
     }
+
+    /// Bans a party internally, resulting in all of its messages and values calculated from them being discarded,
+    /// and new messages ignored.
+    pub fn ban_party(party_id: SP::Verifier, reason: String) -> Self {
+        Self(TaskResultEnum::ExternalBan { party_id, reason })
+    }
 }
 
 #[derive_where::derive_where(Debug)]
@@ -740,5 +746,9 @@ pub(crate) enum TaskResultEnum<SP: SessionParameters> {
     },
     SendError {
         destination: SP::Verifier,
+    },
+    ExternalBan {
+        party_id: SP::Verifier,
+        reason: String,
     },
 }

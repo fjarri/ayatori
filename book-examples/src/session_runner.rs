@@ -3,7 +3,7 @@ use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
     ExecutableProtocol, RuntimeError, Session, SessionParameters, SessionReport,
-    SessionState, Task,
+    SessionState, Task, TaskResult,
     tokio::{MessageIn, MessageOut},
 };
 
@@ -22,31 +22,36 @@ where
     // ANCHOR_END: signature
 
     // ANCHOR: event_loop
+    let mut cached_result = None;
     loop {
         // ANCHOR_END: event_loop
-
         // ANCHOR: task_loop
-        while let Some(task) = session.make_task()? {
-            let new_state = match task {
-                // ANCHOR_END: task_loop
-                // ANCHOR: task_deterministic
-                Task::Deterministic(task) => session.add_result(task.execute()),
-                // ANCHOR_END: task_deterministic
-
-                // ANCHOR: task_randomized
-                Task::Randomized(task) => session.add_result(task.execute(rng)),
-                // ANCHOR_END: task_randomized
-
-                // ANCHOR: task_send
-                Task::Send(task) => {
-                    let (message, result) = task.execute();
-                    tx.send(MessageOut::Message(message)).await.unwrap();
-                    session.add_result(result.success())
-                } // ANCHOR_END: task_send
+        loop {
+            let result = if let Some(result) = cached_result.take() {
+                result
+            } else if let Some(task) = session.make_task().unwrap() {
+                match task {
+                    // ANCHOR_END: task_loop
+                    // ANCHOR: task_deterministic
+                    Task::Deterministic(task) => task.execute(),
+                    // ANCHOR_END: task_deterministic
+                    // ANCHOR: task_randomized
+                    Task::Randomized(task) => task.execute(rng),
+                    // ANCHOR_END: task_randomized
+                    // ANCHOR: task_send
+                    Task::Send(task) => {
+                        tx.send(MessageOut::Message(task)).await.unwrap();
+                        continue;
+                    } // ANCHOR_END: task_send
+                      // ANCHOR: task_loop_end
+                }
+            } else {
+                break;
             };
+            // ANCHOR_END: task_loop_end
 
             // ANCHOR: task_result
-            session = match new_state? {
+            session = match session.add_result(result)? {
                 // ANCHOR_END: task_result
                 // ANCHOR: task_result_in_progress
                 SessionState::InProgress(session) => session,
@@ -63,26 +68,30 @@ where
                 }
                 // ANCHOR_END: task_result_reached_output
                 // ANCHOR: task_result_unfinishable
-                SessionState::Unfinishable(report) => {
-                    return Ok(report);
-                } // ANCHOR_END: task_result_unfinishable
+                SessionState::Unfinishable(report) => return Ok(report),
             }
+            // ANCHOR_END: task_result_unfinishable
         }
 
         // ANCHOR: get_message
         let message_in = tokio::select! {
-            message_in = rx.recv() => message_in.unwrap(),
+            message_in = rx.recv() => message_in.ok_or_else(|| {
+                RuntimeError::new("Failed to pop a message from the input channel")
+            })?,
             () = cancellation.cancelled() => return Ok(session.terminate()),
         };
+        // ANCHOR_END: get_message
 
+        // ANCHOR: process_message
         match message_in {
+            MessageIn::Result(result) => cached_result = Some(result),
             MessageIn::Message { message, id } => session.add_message(&id, message),
             MessageIn::Ban { id, reason } => {
-                session.register_banned_party(id, reason)
+                cached_result = Some(TaskResult::ban_party(id, reason))
             }
         }
-        // ANCHOR_END: get_message
     }
+    // ANCHOR_END: process_message
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     session::{MessageAttributableError, Session, SessionReport, SessionState},
-    task::{Task, TaskResult},
+    task::{SendTask, Task, TaskResult},
 };
 use crate::{
     entities::{Message, MessageId, RuntimeError},
@@ -33,6 +33,8 @@ pub enum MessageIn<SP: SessionParameters> {
         /// Will be used to identify the message if there is a problem with it that cannot be attributed to a party ID.
         id: MessageId<SP>,
     },
+    /// A result of sending a message.
+    Result(TaskResult<SP>),
     /// A request to ban the specified party.
     Ban {
         /// The party id to ban.
@@ -46,7 +48,7 @@ pub enum MessageIn<SP: SessionParameters> {
 #[derive_where::derive_where(Debug)]
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.
-    Message(Message<SP>),
+    Message(SendTask<SP>),
     /// A non-fatal problem attributable to message(s) but not to a specific party.
     Error(MessageAttributableError<SP>),
 }
@@ -82,27 +84,27 @@ where
     SP::Rng: Send,
     P: ExecutableProtocol<SP>,
 {
+    let mut cached_result = None;
     loop {
-        while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
-            let new_state = match task {
-                Task::Deterministic(task) => {
-                    let result = task.execute();
-                    session.add_result(result)
+        loop {
+            let result = if let Some(result) = cached_result.take() {
+                result
+            } else if let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
+                match task {
+                    Task::Deterministic(task) => task.execute(),
+                    Task::Randomized(task) => task.execute(rng),
+                    Task::Send(task) => {
+                        tx.send(MessageOut::Message(task)).await.map_err(|err| {
+                            RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                        })?;
+                        continue;
+                    }
                 }
-                Task::Randomized(task) => {
-                    let result = task.execute(rng);
-                    session.add_result(result)
-                }
-                Task::Send(task) => {
-                    let (message, result) = task.execute();
-                    tx.send(MessageOut::Message(message)).await.map_err(|err| {
-                        RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                    })?;
-                    session.add_result(result.success())
-                }
+            } else {
+                break;
             };
 
-            session = match new_state? {
+            session = match session.add_result(result)? {
                 SessionState::InProgress(session) => session,
                 SessionState::InProgressWithMessageError { error, session } => {
                     tx.send(MessageOut::Error(error)).await.map_err(|err| {
@@ -113,9 +115,7 @@ where
                 SessionState::ReachedOutput(success) => {
                     return success.finalize();
                 }
-                SessionState::Unfinishable(report) => {
-                    return Ok(report);
-                }
+                SessionState::Unfinishable(report) => return Ok(report),
             }
         }
 
@@ -127,13 +127,14 @@ where
         };
 
         match message_in {
+            MessageIn::Result(result) => cached_result = Some(result),
             MessageIn::Message { message, id } => session.add_message(&id, message),
-            MessageIn::Ban { id, reason } => session.register_banned_party(id, reason),
+            MessageIn::Ban { id, reason } => cached_result = Some(TaskResult::ban_party(id, reason)),
         }
     }
 }
 
-struct TaskScope<SP: SessionParameters>(JoinSet<Result<TaskResult<SP>, RuntimeError>>);
+struct TaskScope<SP: SessionParameters>(JoinSet<Result<Option<TaskResult<SP>>, RuntimeError>>);
 
 impl<SP: SessionParameters> TaskScope<SP> {
     fn new() -> Self {
@@ -142,19 +143,19 @@ impl<SP: SessionParameters> TaskScope<SP> {
 
     fn spawn<F>(&mut self, task: F)
     where
-        F: Future<Output = Result<TaskResult<SP>, RuntimeError>> + Send + 'static,
+        F: Future<Output = Result<Option<TaskResult<SP>>, RuntimeError>> + Send + 'static,
     {
         self.0.spawn(task);
     }
 
     fn spawn_blocking<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Result<TaskResult<SP>, RuntimeError> + Send + 'static,
+        F: FnOnce() -> Result<Option<TaskResult<SP>>, RuntimeError> + Send + 'static,
     {
         self.0.spawn_blocking(f);
     }
 
-    async fn join_next(&mut self) -> Option<Result<TaskResult<SP>, RuntimeError>> {
+    async fn join_next(&mut self) -> Option<Result<Option<TaskResult<SP>>, RuntimeError>> {
         self.0.join_next().await.map(|join_result| match join_result {
             Ok(result) => result,
             Err(err) => Err(RuntimeError::new(format!("Failed to join the task: {err}"))),
@@ -215,60 +216,69 @@ where
         while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
             match task {
                 Task::Deterministic(task) => {
-                    tasks.spawn_blocking(move || Ok(task.execute()));
+                    tasks.spawn_blocking(move || Ok(Some(task.execute())));
                 }
                 Task::Randomized(task) => {
                     let mut seed = <SP::Rng as SeedableRng>::Seed::default();
                     rng.try_fill_bytes(seed.as_mut())
                         .map_err(|err| RuntimeError::new(format!("Failed to fill buffer with random data: {err}")))?;
                     let mut task_rng = SP::Rng::from_seed(seed);
-                    tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
+                    tasks.spawn_blocking(move || Ok(Some(task.execute(&mut task_rng))));
                 }
                 Task::Send(task) => {
                     let tx = tx.clone();
                     tasks.spawn(async move {
-                        let (message, result) = task.execute();
-                        tx.send(MessageOut::Message(message)).await.map_err(|err| {
+                        tx.send(MessageOut::Message(task)).await.map_err(|err| {
                             RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
                         })?;
-                        Ok(result.success())
+                        Ok(None)
                     });
                 }
             }
         }
 
-        tokio::select! {
+        let result = tokio::select! {
             message_in = rx.recv() => {
                 let message_in = message_in.ok_or_else(|| {
                     RuntimeError::new("Failed to pop an incoming message from the input channel")
                 })?;
                 match message_in {
-                    MessageIn::Message { message, id } => session.add_message(&id, message),
-                    MessageIn::Ban { id, reason } => session.register_banned_party(id, reason),
+                    MessageIn::Message { message, id } => {
+                        session.add_message(&id, message);
+                        None
+                    },
+                    MessageIn::Ban { id, reason } => Some(TaskResult::ban_party(id, reason)),
+                    MessageIn::Result(result) => Some(result)
                 }
             }
             task_result = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(task_result) = task_result {
-                    let task_result = task_result?;
-                    session = match session.add_result(task_result)? {
-                        SessionState::InProgress(session) => session,
-                        SessionState::InProgressWithMessageError { error, session } => {
-                            tx.send(MessageOut::Error(error)).await.map_err(|err| {
-                                RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                            })?;
-                            session
-                        },
-                        SessionState::ReachedOutput(success) => {
-                            return success.finalize();
-                        }
-                        SessionState::Unfinishable(report) => {
-                            return Ok(report);
-                        }
-                    }
+                    task_result?
+                }
+                else {
+                    None
                 }
             }
             () = cancellation.cancelled() => return Ok(session.terminate()),
         };
+
+        if let Some(task_result) = result {
+            session = match session.add_result(task_result)? {
+                SessionState::InProgress(session) => session,
+                SessionState::InProgressWithMessageError { error, session } => {
+                    tx.send(MessageOut::Error(error)).await.map_err(|err| {
+                        RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                    })?;
+                    session
+                }
+                SessionState::ReachedOutput(success) => {
+                    return success.finalize();
+                }
+                SessionState::Unfinishable(report) => {
+                    return Ok(report);
+                }
+            }
+        }
     }
 }
 

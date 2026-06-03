@@ -258,9 +258,7 @@ where
             .insert(guilty_party, format!("Error when calculating {tag}"));
     }
 
-    /// Bans a party internally, resulting in all of its messages and values calculated from them being discarded,
-    /// and new messages ignored.
-    pub fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
+    fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.external_bans.insert(guilty_party, reason);
     }
@@ -673,6 +671,10 @@ where
             }
             TaskResultEnum::SendError { destination } => {
                 self.register_send_error(destination);
+                Ok(AddTaskResult::StateChanged)
+            }
+            TaskResultEnum::ExternalBan { party_id, reason } => {
+                self.register_banned_party(party_id, reason);
                 Ok(AddTaskResult::StateChanged)
             }
         }
