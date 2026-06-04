@@ -86,9 +86,6 @@ where
         match message_in {
             MessageIn::Update(update) => cached_update = Some(update),
             MessageIn::Message { message, id } => session.add_message(&id, message),
-            MessageIn::Ban { id, reason } => {
-                cached_update = Some(SessionUpdate::ban_party(id, reason))
-            }
         }
     }
     // ANCHOR_END: process_message

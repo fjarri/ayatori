@@ -1,10 +1,6 @@
 //! `tokio`-specific tools for running sessions.
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{format, string::ToString, vec::Vec};
 
 use itertools::Itertools;
 use signature::rand_core::{SeedableRng, TryRng};
@@ -35,13 +31,6 @@ pub enum MessageIn<SP: SessionParameters> {
     },
     /// An extrenally produced update to a session.
     Update(SessionUpdate<SP>),
-    /// A request to ban the specified party.
-    Ban {
-        /// The party id to ban.
-        id: SP::Verifier,
-        /// The ban reason.
-        reason: String,
-    },
 }
 
 /// A container for outgoing information from a session runner.
@@ -129,7 +118,6 @@ where
         match message_in {
             MessageIn::Update(update) => cached_update = Some(update),
             MessageIn::Message { message, id } => session.add_message(&id, message),
-            MessageIn::Ban { id, reason } => cached_update = Some(SessionUpdate::ban_party(id, reason)),
         }
     }
 }
@@ -236,7 +224,6 @@ where
                         session.add_message(&id, message);
                         None
                     },
-                    MessageIn::Ban { id, reason } => Some(SessionUpdate::ban_party(id, reason)),
                     MessageIn::Update(update) => Some(update)
                 }
             }
