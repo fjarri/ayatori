@@ -34,12 +34,12 @@ impl<SP: SessionParameters> ScalarUnattributableTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         let store_in = ScalarTag::Computed(self.store_in);
         match self.function.call(&self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
-            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedScalar { store_in, result }),
+            Err(UnattributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => SessionUpdate(SessionUpdateEnum::SpuriousError {
                 store_in: AnyTag::Scalar(store_in),
                 error,
             }),
@@ -73,17 +73,17 @@ impl<SP: SessionParameters> ScalarUnattributableOptionalTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         let store_in = ScalarTag::Computed(self.store_in);
         match self.function.call(&self.args) {
-            Ok(result) => TaskResult(result.map_or_else(
-                || TaskResultEnum::NoActionNeeded,
-                |value| TaskResultEnum::ComputedScalar {
+            Ok(result) => SessionUpdate(result.map_or_else(
+                || SessionUpdateEnum::NoActionNeeded,
+                |value| SessionUpdateEnum::ComputedScalar {
                     store_in,
                     result: value,
                 },
             )),
-            Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(error) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
         }
     }
 }
@@ -119,16 +119,16 @@ impl<SP: SessionParameters> ElementUnattributableTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         let store_in = MappingTag::Computed(self.store_in);
         match self.function.call(&self.index, &self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index: self.index,
                 result,
             }),
-            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+            Err(UnattributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => SessionUpdate(SessionUpdateEnum::SpuriousError {
                 store_in: AnyTag::Mapping(store_in),
                 error,
             }),
@@ -168,16 +168,16 @@ impl<SP: SessionParameters> ElementSenderAttributableTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         let store_in = MappingTag::Computed(self.store_in);
         match self.function.call(&self.index, &self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index: self.index,
                 result,
             }),
-            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
+            Err(MaybeAttributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => SessionUpdate(SessionUpdateEnum::SenderError {
                 store_in,
                 guilty_party: self.index,
                 error,
@@ -221,21 +221,23 @@ impl<SP: SessionParameters> ElementSenderAttributableWithRevealTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         let store_in = MappingTag::Computed(self.store_in);
         match self.function.call(&self.index, &self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index: self.index,
                 result,
             }),
-            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderErrorWithReveal {
-                store_in,
-                guilty_party: self.index,
-                error,
-                on_error: self.on_error,
-            }),
+            Err(MaybeAttributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => {
+                SessionUpdate(SessionUpdateEnum::SenderErrorWithReveal {
+                    store_in,
+                    guilty_party: self.index,
+                    error,
+                    on_error: self.on_error,
+                })
+            }
         }
     }
 }
@@ -271,17 +273,17 @@ impl<SP: SessionParameters> ElementThirdPartyAttributableTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         let store_in = MappingTag::Computed(self.store_in);
         match self.function.call(&self.index, &self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index: self.index,
                 result,
             }),
-            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
             Err(MaybeAttributableError::Attributable(error)) => {
-                TaskResult(TaskResultEnum::ThirdPartyError { store_in, error })
+                SessionUpdate(SessionUpdateEnum::ThirdPartyError { store_in, error })
             }
         }
     }
@@ -321,16 +323,16 @@ impl<SP: SessionParameters> DeserializeElementTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         let store_in = MappingTag::Received(self.store_in);
         match self.function.call(&self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index: self.index,
                 result,
             }),
-            Err(MaybeAttributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Attributable(error)) => TaskResult(TaskResultEnum::SenderError {
+            Err(MaybeAttributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => SessionUpdate(SessionUpdateEnum::SenderError {
                 store_in,
                 guilty_party: self.index,
                 error,
@@ -362,12 +364,12 @@ impl<SP: SessionParameters> RngScalarUnattributableTask<SP> {
         }
     }
 
-    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> SessionUpdate<SP> {
         let store_in = ScalarTag::Computed(self.store_in);
         match self.function.call(rng, &self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedScalar { store_in, result }),
-            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedScalar { store_in, result }),
+            Err(UnattributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => SessionUpdate(SessionUpdateEnum::SpuriousError {
                 store_in: AnyTag::Scalar(store_in),
                 error,
             }),
@@ -404,16 +406,16 @@ impl<SP: SessionParameters> RngElementUnattributableTask<SP> {
         }
     }
 
-    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> SessionUpdate<SP> {
         let store_in = MappingTag::Computed(self.store_in);
         match self.function.call(rng, &self.index, &self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index: self.index,
                 result,
             }),
-            Err(UnattributableError::Runtime(error)) => TaskResult(TaskResultEnum::RuntimeError(error)),
-            Err(UnattributableError::Spurious(error)) => TaskResult(TaskResultEnum::SpuriousError {
+            Err(UnattributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(UnattributableError::Spurious(error)) => SessionUpdate(SessionUpdateEnum::SpuriousError {
                 store_in: AnyTag::Mapping(store_in),
                 error,
             }),
@@ -450,15 +452,15 @@ impl<SP: SessionParameters> SerializeAndSignElementTask<SP> {
         }
     }
 
-    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> SessionUpdate<SP> {
         let store_in = MappingTag::LocalSigned(self.store_in);
         match self.function.call(rng, &self.index, &self.args) {
-            Ok(result) => TaskResult(TaskResultEnum::ComputedMappingElement {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index: self.index,
                 result,
             }),
-            Err(error) => TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(error) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
         }
     }
 }
@@ -478,16 +480,16 @@ pub struct SendTaskResult<SP: SessionParameters> {
 
 impl<SP: SessionParameters> SendTaskResult<SP> {
     /// Returns a result indicating that the message was successfully sent.
-    pub fn success(self) -> TaskResult<SP> {
-        TaskResult(TaskResultEnum::Sent {
+    pub fn success(self) -> SessionUpdate<SP> {
+        SessionUpdate(SessionUpdateEnum::Sent {
             store_in: self.store_in,
             destination: self.destination,
         })
     }
 
     /// Returns a result indicating that there was an error delivering the message.
-    pub fn error(self) -> TaskResult<SP> {
-        TaskResult(TaskResultEnum::SendError {
+    pub fn error(self) -> SessionUpdate<SP> {
+        SessionUpdate(SessionUpdateEnum::SendError {
             destination: self.destination,
         })
     }
@@ -544,7 +546,7 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
         }
     }
 
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         // Before storing the value in the database, we check for the failures that are unattributable at this level.
         // In case of a failure all we can do is report the message ID and let the user deal with it
         // if their transport protocol allows it.
@@ -557,7 +559,7 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
         // If it is not, even if we detect something provably wrong with it,
         // the proof will be useless.
         if !self.session_data.participants.contains(self.signed_value.source()) {
-            return TaskResult(TaskResultEnum::MessageError {
+            return SessionUpdate(SessionUpdateEnum::MessageError {
                 message_id: self.message_id,
                 description: format!("A sender {source:?} is not one of the participants"),
             });
@@ -570,7 +572,7 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
             .local_participants
             .contains(self.signed_value.metadata().destination())
         {
-            return TaskResult(TaskResultEnum::MessageError {
+            return SessionUpdate(SessionUpdateEnum::MessageError {
                 message_id: self.message_id,
                 description: format!(
                     "A destination {:?} is not one of the local participants",
@@ -582,7 +584,7 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
         // Check that the value belongs to the this session.
         // If it does not, it may be a replay attack.
         if self.signed_value.metadata().session_id() != &self.session_data.id {
-            return TaskResult(TaskResultEnum::MessageError {
+            return SessionUpdate(SessionUpdateEnum::MessageError {
                 message_id: self.message_id,
                 description: "Invalid session ID".into(),
             });
@@ -591,9 +593,9 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
         // Verify the value signature.
         let verified_value = match self.signed_value.verify(&self.message_id) {
             Ok(value) => value,
-            Err(VerificationError::Runtime(error)) => return TaskResult(TaskResultEnum::RuntimeError(error)),
+            Err(VerificationError::Runtime(error)) => return SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
             Err(VerificationError::SignatureMismatch) => {
-                return TaskResult(TaskResultEnum::MessageError {
+                return SessionUpdate(SessionUpdateEnum::MessageError {
                     message_id: self.message_id.clone(),
                     description: format!("Verification error for a message from {source:?}"),
                 });
@@ -603,7 +605,7 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
         let store_in = RemoteSignedTag::new_with_full_name(verified_value.metadata().full_name());
         let value = Value::new(verified_value);
 
-        TaskResult(TaskResultEnum::Preprocessed {
+        SessionUpdate(SessionUpdateEnum::Preprocessed {
             store_in: MappingTag::RemoteSigned(store_in),
             source,
             value,
@@ -635,7 +637,7 @@ pub struct DeterministicTask<SP: SessionParameters>(DeterministicTaskEnum<SP>);
 
 impl<SP: SessionParameters> DeterministicTask<SP> {
     /// Executes the task and returns a result to be passed back to the session.
-    pub fn execute(self) -> TaskResult<SP> {
+    pub fn execute(self) -> SessionUpdate<SP> {
         match self.0 {
             DeterministicTaskEnum::ScalarUnattributable(task) => task.execute(),
             DeterministicTaskEnum::ScalarUnattributableOptional(task) => task.execute(),
@@ -662,7 +664,7 @@ pub struct RandomizedTask<SP: SessionParameters>(RandomizedTaskEnum<SP>);
 
 impl<SP: SessionParameters> RandomizedTask<SP> {
     /// Executes the task and returns a result to be passed back to the session.
-    pub fn execute(self, rng: &mut SP::Rng) -> TaskResult<SP> {
+    pub fn execute(self, rng: &mut SP::Rng) -> SessionUpdate<SP> {
         match self.0 {
             RandomizedTaskEnum::ScalarUnattributable(task) => task.execute(rng),
             RandomizedTaskEnum::ElementUnattributable(task) => task.execute(rng),
@@ -682,24 +684,24 @@ pub enum Task<SP: SessionParameters> {
     Randomized(RandomizedTask<SP>),
 }
 
-/// The result of executing a task, to be passed to [`Session::add_result`].
+/// The result of executing a task, to be passed to [`Session::with_update`].
 #[derive_where::derive_where(Debug)]
-pub struct TaskResult<SP: SessionParameters>(TaskResultEnum<SP>);
+pub struct SessionUpdate<SP: SessionParameters>(SessionUpdateEnum<SP>);
 
-impl<SP: SessionParameters> TaskResult<SP> {
-    pub(crate) fn into_inner(self) -> TaskResultEnum<SP> {
+impl<SP: SessionParameters> SessionUpdate<SP> {
+    pub(crate) fn into_inner(self) -> SessionUpdateEnum<SP> {
         self.0
     }
 
     /// Bans a party internally, resulting in all of its messages and values calculated from them being discarded,
     /// and new messages ignored.
     pub fn ban_party(party_id: SP::Verifier, reason: String) -> Self {
-        Self(TaskResultEnum::ExternalBan { party_id, reason })
+        Self(SessionUpdateEnum::ExternalBan { party_id, reason })
     }
 }
 
 #[derive_where::derive_where(Debug)]
-pub(crate) enum TaskResultEnum<SP: SessionParameters> {
+pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     NoActionNeeded,
     Sent {
         store_in: MappingTag,

@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     session::{MessageAttributableError, Session, SessionReport, SessionState},
-    task::{SendTask, Task, TaskResult},
+    task::{SendTask, SessionUpdate, Task},
 };
 use crate::{
     entities::{Message, MessageId, RuntimeError},
@@ -33,8 +33,8 @@ pub enum MessageIn<SP: SessionParameters> {
         /// Will be used to identify the message if there is a problem with it that cannot be attributed to a party ID.
         id: MessageId<SP>,
     },
-    /// A result of sending a message.
-    Result(TaskResult<SP>),
+    /// An extrenally produced update to a session.
+    Update(SessionUpdate<SP>),
     /// A request to ban the specified party.
     Ban {
         /// The party id to ban.
@@ -84,11 +84,11 @@ where
     SP::Rng: Send,
     P: ExecutableProtocol<SP>,
 {
-    let mut cached_result = None;
+    let mut cached_update = None;
     loop {
         loop {
-            let result = if let Some(result) = cached_result.take() {
-                result
+            let update = if let Some(update) = cached_update.take() {
+                update
             } else if let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
                 match task {
                     Task::Deterministic(task) => task.execute(),
@@ -104,7 +104,7 @@ where
                 break;
             };
 
-            session = match session.add_result(result)? {
+            session = match session.with_update(update)? {
                 SessionState::InProgress(session) => session,
                 SessionState::InProgressWithMessageError { error, session } => {
                     tx.send(MessageOut::Error(error)).await.map_err(|err| {
@@ -127,14 +127,14 @@ where
         };
 
         match message_in {
-            MessageIn::Result(result) => cached_result = Some(result),
+            MessageIn::Update(update) => cached_update = Some(update),
             MessageIn::Message { message, id } => session.add_message(&id, message),
-            MessageIn::Ban { id, reason } => cached_result = Some(TaskResult::ban_party(id, reason)),
+            MessageIn::Ban { id, reason } => cached_update = Some(SessionUpdate::ban_party(id, reason)),
         }
     }
 }
 
-struct TaskScope<SP: SessionParameters>(JoinSet<Result<Option<TaskResult<SP>>, RuntimeError>>);
+struct TaskScope<SP: SessionParameters>(JoinSet<Result<Option<SessionUpdate<SP>>, RuntimeError>>);
 
 impl<SP: SessionParameters> TaskScope<SP> {
     fn new() -> Self {
@@ -143,19 +143,19 @@ impl<SP: SessionParameters> TaskScope<SP> {
 
     fn spawn<F>(&mut self, task: F)
     where
-        F: Future<Output = Result<Option<TaskResult<SP>>, RuntimeError>> + Send + 'static,
+        F: Future<Output = Result<Option<SessionUpdate<SP>>, RuntimeError>> + Send + 'static,
     {
         self.0.spawn(task);
     }
 
     fn spawn_blocking<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Result<Option<TaskResult<SP>>, RuntimeError> + Send + 'static,
+        F: FnOnce() -> Result<Option<SessionUpdate<SP>>, RuntimeError> + Send + 'static,
     {
         self.0.spawn_blocking(f);
     }
 
-    async fn join_next(&mut self) -> Option<Result<Option<TaskResult<SP>>, RuntimeError>> {
+    async fn join_next(&mut self) -> Option<Result<Option<SessionUpdate<SP>>, RuntimeError>> {
         self.0.join_next().await.map(|join_result| match join_result {
             Ok(result) => result,
             Err(err) => Err(RuntimeError::new(format!("Failed to join the task: {err}"))),
@@ -237,7 +237,7 @@ where
             }
         }
 
-        let result = tokio::select! {
+        let maybe_update = tokio::select! {
             message_in = rx.recv() => {
                 let message_in = message_in.ok_or_else(|| {
                     RuntimeError::new("Failed to pop an incoming message from the input channel")
@@ -247,13 +247,13 @@ where
                         session.add_message(&id, message);
                         None
                     },
-                    MessageIn::Ban { id, reason } => Some(TaskResult::ban_party(id, reason)),
-                    MessageIn::Result(result) => Some(result)
+                    MessageIn::Ban { id, reason } => Some(SessionUpdate::ban_party(id, reason)),
+                    MessageIn::Update(update) => Some(update)
                 }
             }
-            task_result = tasks.join_next(), if !tasks.is_empty() => {
-                if let Some(task_result) = task_result {
-                    task_result?
+            update = tasks.join_next(), if !tasks.is_empty() => {
+                if let Some(update) = update {
+                    update?
                 }
                 else {
                     None
@@ -262,8 +262,8 @@ where
             () = cancellation.cancelled() => return Ok(session.terminate()),
         };
 
-        if let Some(task_result) = result {
-            session = match session.add_result(task_result)? {
+        if let Some(update) = maybe_update {
+            session = match session.with_update(update)? {
                 SessionState::InProgress(session) => session,
                 SessionState::InProgressWithMessageError { error, session } => {
                     tx.send(MessageOut::Error(error)).await.map_err(|err| {

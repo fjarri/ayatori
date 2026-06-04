@@ -45,8 +45,8 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                 task_processed = true;
 
                 let new_state = match task {
-                    Task::Deterministic(task) => session.add_result(task.execute()),
-                    Task::Randomized(task) => session.add_result(task.execute(rng)),
+                    Task::Deterministic(task) => session.with_update(task.execute()),
+                    Task::Randomized(task) => session.with_update(task.execute(rng)),
                     Task::Send(task) => {
                         let (message, result) = task.execute();
                         let destination = message.destination().clone();
@@ -54,7 +54,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                             .get_mut(&destination)
                             .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the map of message queues")))?
                             .push(message);
-                        session.add_result(result.success())
+                        session.with_update(result.success())
                     }
                 }?;
 

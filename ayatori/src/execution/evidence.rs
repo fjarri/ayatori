@@ -293,7 +293,7 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
     while let Some(task) = session.make_task()? {
         let new_state = match task {
             Task::Deterministic(task) => session
-                .add_result(task.execute())
+                .with_update(task.execute())
                 .or_with_context(|| "Failed to execute a task".into())?,
             Task::Randomized(_task) => {
                 return Ok(EvidenceVerdict::invalid(

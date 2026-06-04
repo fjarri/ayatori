@@ -88,7 +88,7 @@ where
                 .ok_or_else(|| RuntimeError::new(format!("Source ({source:?}) is missing in the map of channels")))?;
 
             source_tx
-                .send(MessageIn::Result(result.success()))
+                .send(MessageIn::Update(result.success()))
                 .await
                 .map_err(|err| RuntimeError::new(format!("Could not send back the result: {err}")))?;
 

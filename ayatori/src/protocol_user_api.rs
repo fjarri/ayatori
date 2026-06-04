@@ -5,7 +5,7 @@ pub use crate::{
     execution::{
         DeterministicTask, DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError,
         RandomizedTask, ReachedOutputSession, SendTask, SendTaskResult, Session, SessionOutcome, SessionReport,
-        SessionState, Task, TaskResult, UnfinishableOutcome,
+        SessionState, SessionUpdate, Task, UnfinishableOutcome,
     },
     traits::{ExecutableProtocol, SessionParameters},
 };

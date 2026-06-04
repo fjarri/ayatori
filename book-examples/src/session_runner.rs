@@ -3,7 +3,7 @@ use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
     ExecutableProtocol, RuntimeError, Session, SessionParameters, SessionReport,
-    SessionState, Task, TaskResult,
+    SessionState, SessionUpdate, Task,
     tokio::{MessageIn, MessageOut},
 };
 
@@ -22,13 +22,13 @@ where
     // ANCHOR_END: signature
 
     // ANCHOR: event_loop
-    let mut cached_result = None;
+    let mut cached_update = None;
     loop {
         // ANCHOR_END: event_loop
         // ANCHOR: task_loop
         loop {
-            let result = if let Some(result) = cached_result.take() {
-                result
+            let update = if let Some(update) = cached_update.take() {
+                update
             } else if let Some(task) = session.make_task().unwrap() {
                 match task {
                     // ANCHOR_END: task_loop
@@ -50,27 +50,27 @@ where
             };
             // ANCHOR_END: task_loop_end
 
-            // ANCHOR: task_result
-            session = match session.add_result(result)? {
-                // ANCHOR_END: task_result
-                // ANCHOR: task_result_in_progress
+            // ANCHOR: with_update
+            session = match session.with_update(update)? {
+                // ANCHOR_END: with_update
+                // ANCHOR: with_update_in_progress
                 SessionState::InProgress(session) => session,
-                // ANCHOR_END: task_result_in_progress
-                // ANCHOR: task_result_message_error
+                // ANCHOR_END: with_update_in_progress
+                // ANCHOR: with_update_message_error
                 SessionState::InProgressWithMessageError { error, session } => {
                     tx.send(MessageOut::Error(error)).await.unwrap();
                     session
                 }
-                // ANCHOR_END: task_result_message_error
-                // ANCHOR: task_result_reached_output
+                // ANCHOR_END: with_update_message_error
+                // ANCHOR: with_update_reached_output
                 SessionState::ReachedOutput(success) => {
                     return success.finalize();
                 }
-                // ANCHOR_END: task_result_reached_output
-                // ANCHOR: task_result_unfinishable
+                // ANCHOR_END: with_update_reached_output
+                // ANCHOR: with_update_unfinishable
                 SessionState::Unfinishable(report) => return Ok(report),
             }
-            // ANCHOR_END: task_result_unfinishable
+            // ANCHOR_END: with_update_unfinishable
         }
 
         // ANCHOR: get_message
@@ -84,10 +84,10 @@ where
 
         // ANCHOR: process_message
         match message_in {
-            MessageIn::Result(result) => cached_result = Some(result),
+            MessageIn::Update(update) => cached_update = Some(update),
             MessageIn::Message { message, id } => session.add_message(&id, message),
             MessageIn::Ban { id, reason } => {
-                cached_result = Some(TaskResult::ban_party(id, reason))
+                cached_update = Some(SessionUpdate::ban_party(id, reason))
             }
         }
     }
