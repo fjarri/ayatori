@@ -134,28 +134,21 @@ where
     }
 }
 
-struct TaskScope<SP: SessionParameters>(JoinSet<Result<Option<SessionUpdate<SP>>, RuntimeError>>);
+struct TaskScope<SP: SessionParameters>(JoinSet<Result<SessionUpdate<SP>, RuntimeError>>);
 
 impl<SP: SessionParameters> TaskScope<SP> {
     fn new() -> Self {
         Self(JoinSet::new())
     }
 
-    fn spawn<F>(&mut self, task: F)
-    where
-        F: Future<Output = Result<Option<SessionUpdate<SP>>, RuntimeError>> + Send + 'static,
-    {
-        self.0.spawn(task);
-    }
-
     fn spawn_blocking<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Result<Option<SessionUpdate<SP>>, RuntimeError> + Send + 'static,
+        F: FnOnce() -> Result<SessionUpdate<SP>, RuntimeError> + Send + 'static,
     {
         self.0.spawn_blocking(f);
     }
 
-    async fn join_next(&mut self) -> Option<Result<Option<SessionUpdate<SP>>, RuntimeError>> {
+    async fn join_next(&mut self) -> Option<Result<SessionUpdate<SP>, RuntimeError>> {
         self.0.join_next().await.map(|join_result| match join_result {
             Ok(result) => result,
             Err(err) => Err(RuntimeError::new(format!("Failed to join the task: {err}"))),
@@ -216,23 +209,19 @@ where
         while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
             match task {
                 Task::Deterministic(task) => {
-                    tasks.spawn_blocking(move || Ok(Some(task.execute())));
+                    tasks.spawn_blocking(move || Ok(task.execute()));
                 }
                 Task::Randomized(task) => {
                     let mut seed = <SP::Rng as SeedableRng>::Seed::default();
                     rng.try_fill_bytes(seed.as_mut())
                         .map_err(|err| RuntimeError::new(format!("Failed to fill buffer with random data: {err}")))?;
                     let mut task_rng = SP::Rng::from_seed(seed);
-                    tasks.spawn_blocking(move || Ok(Some(task.execute(&mut task_rng))));
+                    tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
                 Task::Send(task) => {
-                    let tx = tx.clone();
-                    tasks.spawn(async move {
-                        tx.send(MessageOut::Message(task)).await.map_err(|err| {
-                            RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
-                        })?;
-                        Ok(None)
-                    });
+                    tx.send(MessageOut::Message(task)).await.map_err(|err| {
+                        RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
+                    })?;
                 }
             }
         }
@@ -252,12 +241,10 @@ where
                 }
             }
             update = tasks.join_next(), if !tasks.is_empty() => {
-                if let Some(update) = update {
-                    update?
-                }
-                else {
-                    None
-                }
+                let update = update.ok_or_else(|| {
+                    RuntimeError::new("Expected an update to be `Some` since we checked that the task set is not empty")
+                })?;
+                Some(update?)
             }
             () = cancellation.cancelled() => return Ok(session.terminate()),
         };
