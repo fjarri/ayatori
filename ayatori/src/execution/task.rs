@@ -693,16 +693,29 @@ impl<SP: SessionParameters> SessionUpdate<SP> {
         self.0
     }
 
-    /// Bans a party internally, resulting in all of its messages and values calculated from them being discarded,
+    /// Creates an update that, when applied, bans a party internally,
+    /// resulting in all of its messages and values calculated from them being discarded,
     /// and new messages ignored.
     pub fn ban_party(party_id: SP::Verifier, reason: String) -> Self {
         Self(SessionUpdateEnum::ExternalBan { party_id, reason })
+    }
+
+    /// Creates an update that adds a newly received message to the session.
+    ///
+    /// The user is expected to remember the passed `id` and associate it with the external sender,
+    /// so that measure can be taken in case the message turns out to be malformed.
+    pub fn add_message(id: MessageId<SP>, message: Message<SP>) -> Self {
+        Self(SessionUpdateEnum::Received { id, message })
     }
 }
 
 #[derive_where::derive_where(Debug)]
 pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     NoActionNeeded,
+    Received {
+        id: MessageId<SP>,
+        message: Message<SP>,
+    },
     Sent {
         store_in: MappingTag,
         destination: SP::Verifier,

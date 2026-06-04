@@ -299,7 +299,7 @@ where
     }
 
     /// Registers a received message.
-    pub fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
+    fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
         let tasks = message
             .into_values()
             .map(|signed_value| PreprocessMessageTask::new(&self.data, message_id.clone(), signed_value))
@@ -485,6 +485,10 @@ where
     fn with_update_inner(&mut self, result: SessionUpdate<SP>) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         match result.into_inner() {
             SessionUpdateEnum::NoActionNeeded => Ok(AddSessionUpdate::StateDidNotChange),
+            SessionUpdateEnum::Received { id, message } => {
+                self.add_message(&id, message);
+                Ok(AddSessionUpdate::StateDidNotChange)
+            }
             SessionUpdateEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
             SessionUpdateEnum::SpuriousError { store_in, error } => {
                 Ok(AddSessionUpdate::SpuriousError { store_in, error })

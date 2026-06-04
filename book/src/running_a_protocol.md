@@ -61,7 +61,7 @@ We extract these tasks to their own variant because offloading such tasks to ano
 {{#include ../../book-examples/src/session_runner.rs:task_send}}
 ```
 This tasks requests that the user sends the message contained in the task to a remote party.
-After the message is sent successfully, or failed to be sent (because the remote party is unavailable), the resulting update must be sent to the incoming channel as [`MessageIn::Update`](protocol_user_api::tokio::MessageIn::Update) variant.
+After the message is sent successfully, or failed to be sent (because the remote party is unavailable), the resulting update must be sent to the incoming channel as [`SessionUpdate`](protocol_user_api::SessionUpdate) variant.
 
 Note that the message destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
 We are also pushing to the channel not a [`SendTask`](protocol_user_api::SendTask) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
@@ -111,7 +111,7 @@ When all the available tasks are popped, we stand by waiting for messages (or an
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:get_message}}
 ```
-Again, we are receiving not a [`Message`](protocol_user_api::Message) itself, but a [`MessageIn`](protocol_user_api::tokio::MessageIn) wrapper, which may contain other external commands besides actual messages.
+Again, we are receiving not a [`Message`](protocol_user_api::Message) itself, but a [`SessionUpdate`](protocol_user_api::SessionUpdate) object, which may contain other external commands besides actual messages.
 
 The intended process with message IDs is the following.
 When receiving a [`Message`](protocol_user_api::Message), the user generates a random [`MessageId`](protocol_user_api::MessageId) and associates it with the transport address of the sender.
@@ -120,8 +120,3 @@ If some error happens that cannot be attributed to a party, but can be attribute
 In other words, the error is escalated to the user, for them to deal with according to the context.
 If they maintain a mapping of transport addresses to party IDs, they can ban the offending party.
 If the transport layer has its own message authentication machinery, the fault may be provable.
-
-```rust,ignore
-{{#include ../../book-examples/src/session_runner.rs:process_message}}
-```
-The received message may be added to the session, or contain an update to be applied on the next iteration.

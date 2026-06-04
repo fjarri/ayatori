@@ -12,26 +12,10 @@ use super::{
     task::{SendTask, SessionUpdate, Task},
 };
 use crate::{
-    entities::{Message, MessageId, RuntimeError},
+    entities::RuntimeError,
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
-
-/// A container for incoming commands to a session runner.
-#[derive_where::derive_where(Debug)]
-pub enum MessageIn<SP: SessionParameters> {
-    /// An incoming message.
-    Message {
-        /// The message itself.
-        message: Message<SP>,
-        /// The ID associated with the message.
-        ///
-        /// Will be used to identify the message if there is a problem with it that cannot be attributed to a party ID.
-        id: MessageId<SP>,
-    },
-    /// An extrenally produced update to a session.
-    Update(SessionUpdate<SP>),
-}
 
 /// A container for outgoing information from a session runner.
 #[derive_where::derive_where(Debug)]
@@ -52,7 +36,7 @@ pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: '
         &self,
         rng: &'a mut SP::Rng,
         tx: &'a mpsc::Sender<MessageOut<SP>>,
-        rx: &'a mut mpsc::Receiver<MessageIn<SP>>,
+        rx: &'a mut mpsc::Receiver<SessionUpdate<SP>>,
         cancellation: CancellationToken,
         session: Session<SP, P>,
     ) -> Self::Fut;
@@ -63,7 +47,7 @@ pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: '
 pub async fn run_session<SP, P>(
     rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
-    rx: &mut mpsc::Receiver<MessageIn<SP>>,
+    rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
 ) -> Result<SessionReport<SP, P>, RuntimeError>
@@ -108,17 +92,12 @@ where
             }
         }
 
-        let message_in = tokio::select! {
-            message_in = rx.recv() => message_in.ok_or_else(|| {
+        cached_update = Some(tokio::select! {
+            update = rx.recv() => update.ok_or_else(|| {
                 RuntimeError::new("Failed to pop a message from the input channel")
             })?,
             () = cancellation.cancelled() => return Ok(session.terminate()),
-        };
-
-        match message_in {
-            MessageIn::Update(update) => cached_update = Some(update),
-            MessageIn::Message { message, id } => session.add_message(&id, message),
-        }
+        });
     }
 }
 
@@ -183,7 +162,7 @@ async fn par_run_session_inner<SP, P>(
     tasks: &mut TaskScope<SP>,
     rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
-    rx: &mut mpsc::Receiver<MessageIn<SP>>,
+    rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
 ) -> Result<SessionReport<SP, P>, RuntimeError>
@@ -215,17 +194,11 @@ where
         }
 
         let maybe_update = tokio::select! {
-            message_in = rx.recv() => {
-                let message_in = message_in.ok_or_else(|| {
+            update = rx.recv() => {
+                let update = update.ok_or_else(|| {
                     RuntimeError::new("Failed to pop an incoming message from the input channel")
                 })?;
-                match message_in {
-                    MessageIn::Message { message, id } => {
-                        session.add_message(&id, message);
-                        None
-                    },
-                    MessageIn::Update(update) => Some(update)
-                }
+                Some(update)
             }
             update = tasks.join_next(), if !tasks.is_empty() => {
                 let update = update.ok_or_else(|| {
@@ -266,7 +239,7 @@ where
 pub async fn par_run_session<SP, P>(
     rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
-    rx: &mut mpsc::Receiver<MessageIn<SP>>,
+    rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     session: Session<SP, P>,
 ) -> Result<SessionReport<SP, P>, RuntimeError>

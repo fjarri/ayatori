@@ -3,15 +3,14 @@ use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
     ExecutableProtocol, RuntimeError, Session, SessionParameters, SessionReport,
-    SessionState, SessionUpdate, Task,
-    tokio::{MessageIn, MessageOut},
+    SessionState, SessionUpdate, Task, tokio::MessageOut,
 };
 
 // ANCHOR: signature
 pub async fn run_session<SP, P>(
     rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
-    rx: &mut mpsc::Receiver<MessageIn<SP>>,
+    rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
 ) -> Result<SessionReport<SP, P>, RuntimeError>
@@ -74,21 +73,14 @@ where
         }
 
         // ANCHOR: get_message
-        let message_in = tokio::select! {
+        cached_update = Some(tokio::select! {
             message_in = rx.recv() => message_in.ok_or_else(|| {
                 RuntimeError::new("Failed to pop a message from the input channel")
             })?,
             () = cancellation.cancelled() => return Ok(session.terminate()),
-        };
+        });
         // ANCHOR_END: get_message
-
-        // ANCHOR: process_message
-        match message_in {
-            MessageIn::Update(update) => cached_update = Some(update),
-            MessageIn::Message { message, id } => session.add_message(&id, message),
-        }
     }
-    // ANCHOR_END: process_message
 }
 
 #[cfg(test)]

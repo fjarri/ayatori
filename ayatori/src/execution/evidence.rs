@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 
 use super::{
     session::{Session, SessionState},
-    task::Task,
+    task::{SessionUpdate, Task},
 };
 use crate::{
     entities::{
@@ -285,10 +285,18 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
     }
 
     let message_id = MessageId::from_usize(0);
-    session.add_message(
-        &message_id,
+    let update = SessionUpdate::add_message(
+        message_id,
         Message::new(session_verifier.clone(), signed_values.to_vec()),
     );
+    session = match session.with_update(update)? {
+        SessionState::InProgress(session) => session,
+        _ => {
+            return Err(RuntimeError::new(
+                "Session unexpectedly changed state after adding incoming messages",
+            ));
+        }
+    };
 
     while let Some(task) = session.make_task()? {
         let new_state = match task {

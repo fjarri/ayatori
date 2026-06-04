@@ -11,8 +11,8 @@ use super::run_sync::ExecutionResult;
 use crate::{
     entities::{MessageId, RuntimeError},
     execution::{
-        SendTask, Session, SessionReport,
-        tokio::{MessageIn, MessageOut, SessionRunner},
+        SendTask, Session, SessionReport, SessionUpdate,
+        tokio::{MessageOut, SessionRunner},
     },
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
@@ -25,7 +25,7 @@ struct WrappedMessageOut<SP: SessionParameters> {
 
 async fn message_dispatcher<SP>(
     mut rng: SP::Rng,
-    txs: BTreeMap<SP::Verifier, mpsc::Sender<MessageIn<SP>>>,
+    txs: BTreeMap<SP::Verifier, mpsc::Sender<SessionUpdate<SP>>>,
     rx: mpsc::Receiver<WrappedMessageOut<SP>>,
 ) -> Result<(), RuntimeError>
 where
@@ -74,12 +74,9 @@ where
             })?;
 
             let message_id = MessageId::random(&mut rng).or_with_context(|| "Failed to create a message ID".into())?;
-            let msg_in = MessageIn::Message {
-                message,
-                id: message_id,
-            };
+            let update = SessionUpdate::add_message(message_id, message);
 
-            tx.send(msg_in)
+            tx.send(update)
                 .await
                 .map_err(|err| RuntimeError::new(format!("Could not send an outgoing message: {err}")))?;
 
@@ -88,7 +85,7 @@ where
                 .ok_or_else(|| RuntimeError::new(format!("Source ({source:?}) is missing in the map of channels")))?;
 
             source_tx
-                .send(MessageIn::Update(result.success()))
+                .send(result.success())
                 .await
                 .map_err(|err| RuntimeError::new(format!("Could not send back the result: {err}")))?;
 
@@ -108,7 +105,7 @@ where
         + Fn(
             &'a mut SP::Rng,
             &'a mpsc::Sender<MessageOut<SP>>,
-            &'a mut mpsc::Receiver<MessageIn<SP>>,
+            &'a mut mpsc::Receiver<SessionUpdate<SP>>,
             CancellationToken,
             Session<SP, P>,
         ) -> Fut,
@@ -119,7 +116,7 @@ where
         &self,
         rng: &'a mut SP::Rng,
         tx: &'a mpsc::Sender<MessageOut<SP>>,
-        rx: &'a mut mpsc::Receiver<MessageIn<SP>>,
+        rx: &'a mut mpsc::Receiver<SessionUpdate<SP>>,
         cancellation: CancellationToken,
         session: Session<SP, P>,
     ) -> Self::Fut {
@@ -154,7 +151,7 @@ where
         let cancellation = cancellation.clone();
         let session_runner = session_runner.clone();
 
-        let (in_tx, mut in_rx) = mpsc::channel::<MessageIn<SP>>(100);
+        let (in_tx, mut in_rx) = mpsc::channel::<SessionUpdate<SP>>(100);
         tx_map.insert(id.clone(), in_tx);
 
         let (out_tx, mut out_rx) = mpsc::channel::<MessageOut<SP>>(100);
