@@ -48,7 +48,7 @@ pub fn run_sessions_sync<SP: SessionParameters, P: ExecutableProtocol<SP>>(
                     Task::Deterministic(task) => session.with_update(task.execute()),
                     Task::Randomized(task) => session.with_update(task.execute(rng)),
                     Task::Send(task) => {
-                        let (message, result) = task.execute();
+                        let (message, result) = task.unpack();
                         let destination = message.destination().clone();
                         messages
                             .get_mut(&destination)

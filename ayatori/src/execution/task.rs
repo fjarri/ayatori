@@ -513,7 +513,7 @@ impl<SP: SessionParameters> SendTask<SP> {
     }
 
     /// Returns the message to be sent and an object used to report the result of that.
-    pub fn execute(self) -> (Message<SP>, SendTaskResult<SP>) {
+    pub fn unpack(self) -> (Message<SP>, SendTaskResult<SP>) {
         let signed_values = vec![self.signed_value];
         let message = Message::new(self.destination.clone(), signed_values);
         let result = SendTaskResult {

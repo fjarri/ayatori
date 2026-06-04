@@ -64,7 +64,7 @@ where
             let message_idx = infallible_rng.random_range(0..messages.len());
             let (source, outgoing) = messages.swap_remove(message_idx);
 
-            let (message, result) = outgoing.execute();
+            let (message, result) = outgoing.unpack();
 
             let tx = txs.get(message.destination()).ok_or_else(|| {
                 RuntimeError::new(format!(
