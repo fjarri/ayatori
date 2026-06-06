@@ -308,6 +308,7 @@ pub struct Message<SP: SessionParameters> {
 
 impl<SP: SessionParameters> Message<SP> {
     pub(crate) fn new(destination: SP::Verifier, values: Vec<SignedValue<SP>>) -> Self {
+        // TODO: check that all the values have the same destination?
         Self { destination, values }
     }
 
@@ -316,7 +317,7 @@ impl<SP: SessionParameters> Message<SP> {
         &self.destination
     }
 
-    pub(crate) fn into_values(self) -> impl Iterator<Item = SignedValue<SP>> {
-        self.values.into_iter()
+    pub(crate) fn into_values(self) -> Vec<SignedValue<SP>> {
+        self.values
     }
 }

@@ -300,8 +300,10 @@ where
 
     /// Registers a received message.
     fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
+        // TODO: report message ID if message contains 0 values?
         let tasks = message
             .into_values()
+            .into_iter()
             .map(|signed_value| PreprocessMessageTask::new(&self.data, message_id.clone(), signed_value))
             .collect::<Vec<_>>();
         self.preprocessing_tasks.extend(tasks);

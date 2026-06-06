@@ -188,7 +188,8 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
 
     use ayatori::{
-        dev::{BinaryFormat, TestSessionParams, TestSigner, run_sessions_sync},
+        dev::{BinaryFormat, BlockMessagesRule, RunSyncConfig, TestSessionParams, TestSigner, run_sessions_sync},
+        protocol_author_api::FullName,
         protocol_user_api::*,
         signature::{Keypair, rand_core::SeedableRng},
     };
@@ -196,6 +197,7 @@ mod tests {
     use super::{BuildData, PrivateData, TestProtocol};
 
     type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
+    type S = Session<SP, TestProtocol>;
 
     #[test]
     fn happy_path() {
@@ -219,7 +221,7 @@ mod tests {
                 } else {
                     PrivateData::Receiver
                 };
-                Session::<SP, TestProtocol>::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
+                S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
             })
             .collect::<Vec<_>>();
         let results = run_sessions_sync(&mut rng, sessions).unwrap();
@@ -227,5 +229,47 @@ mod tests {
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
         assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
+    }
+
+    #[test]
+    fn unresponsive_party() {
+        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+
+        let build_data = BuildData {
+            all_parties: ids.iter().cloned().collect(),
+            sender: ids[0],
+            max_faulty_parties: 1,
+        };
+
+        let mut rng = ChaCha8Rng::seed_from_u64(123);
+        let session_id = SessionId::random(&mut rng).unwrap();
+
+        let sessions = signers
+            .into_iter()
+            .map(|signer| {
+                let private_data = if signer.verifying_key() == ids[0] {
+                    PrivateData::Sender { value: 111 }
+                } else {
+                    PrivateData::Receiver
+                };
+                S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let runner = RunSyncConfig::default().block_messages(BlockMessagesRule {
+            source: Some(ids[2]),
+            name: Some(FullName::new_with_prefix(&["echo"]).unwrap()),
+            destination: None,
+        });
+
+        let results = runner.run_sessions(&mut rng, sessions).unwrap();
+
+        let value = results.reports[&ids[0]].success_ref().unwrap();
+        assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+        assert!(matches!(
+            results.reports[&ids[2]].outcome,
+            SessionOutcome::Unfinishable(_)
+        ));
     }
 }

@@ -28,8 +28,12 @@ impl FullName {
         }
     }
 
+    /// Creates a new name with optional prefixes (to recreate the names generated for nested protocols).
+    ///
+    /// The name of the tag is the last element of `prefix_and_name`,
+    /// so it must be non-empty.
     #[cfg(feature = "dev")]
-    pub(crate) fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, RuntimeError> {
+    pub fn new_with_prefix(prefix_and_name: &[&str]) -> Result<Self, RuntimeError> {
         let mut names = prefix_and_name.iter().map(ToString::to_string).collect::<Vec<String>>();
         let name = names
             .pop()
