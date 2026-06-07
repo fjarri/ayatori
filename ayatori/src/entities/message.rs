@@ -1,6 +1,7 @@
 use alloc::{boxed::Box, format, vec::Vec};
 use core::fmt::{self, Debug};
 
+use itertools::Itertools;
 use serde_encoded_bytes::{Hex, SliceLike};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
@@ -301,15 +302,21 @@ impl<SP: SessionParameters> Debug for MessageId<SP> {
 
 /// A message to be sent to another party, containing multiple signed values.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+#[serde(into = "WireMessage<SP>")]
+#[serde(try_from = "WireMessage<SP>")]
 pub struct Message<SP: SessionParameters> {
     destination: SP::Verifier,
     values: Vec<SignedValue<SP>>,
 }
 
 impl<SP: SessionParameters> Message<SP> {
-    pub(crate) fn new(destination: SP::Verifier, values: Vec<SignedValue<SP>>) -> Self {
-        // TODO: check that all the values have the same destination?
-        Self { destination, values }
+    pub(crate) fn new(values: Vec<SignedValue<SP>>) -> Result<Self, RuntimeError> {
+        let first = values.first().ok_or_else(|| RuntimeError::new(""))?;
+        if !values.iter().map(|value| value.metadata().destination()).all_equal() {
+            return Err(RuntimeError::new(""));
+        }
+        let destination = first.metadata().destination().clone();
+        Ok(Self { destination, values })
     }
 
     /// The party for which the message is intended.
@@ -319,5 +326,23 @@ impl<SP: SessionParameters> Message<SP> {
 
     pub(crate) fn into_values(self) -> Vec<SignedValue<SP>> {
         self.values
+    }
+}
+
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+struct WireMessage<SP: SessionParameters> {
+    values: Vec<SignedValue<SP>>,
+}
+
+impl<SP: SessionParameters> From<Message<SP>> for WireMessage<SP> {
+    fn from(source: Message<SP>) -> Self {
+        Self { values: source.values }
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<WireMessage<SP>> for Message<SP> {
+    type Error = RuntimeError;
+    fn try_from(source: WireMessage<SP>) -> Result<Self, Self::Error> {
+        Self::new(source.values)
     }
 }

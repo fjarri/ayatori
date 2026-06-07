@@ -45,7 +45,6 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
             return Some(message);
         }
 
-        let destination = message.destination().clone();
         let mut filtered_values = message.into_values();
         for rule in &self.block_messages {
             filtered_values.retain(|value| {
@@ -64,7 +63,10 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
         if filtered_values.is_empty() {
             None
         } else {
-            Some(Message::new(destination, filtered_values))
+            Some(
+                Message::new(filtered_values)
+                    .expect("the values vec is non-empty and they all still have the same destination"),
+            )
         }
     }
 

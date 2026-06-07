@@ -3,6 +3,7 @@ use alloc::{
     format,
     string::String,
     sync::Arc,
+    vec,
     vec::Vec,
 };
 use core::{
@@ -300,7 +301,6 @@ where
 
     /// Registers a received message.
     fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
-        // TODO: report message ID if message contains 0 values?
         let tasks = message
             .into_values()
             .into_iter()
@@ -331,7 +331,8 @@ where
                     let signed_value = value
                         .downcast::<SignedValue<SP>>()
                         .or_with_context(|| "Failed to downcast the value to be sent".into())?;
-                    return Ok(Some(SendTask::new(store_in, destination, signed_value).into()));
+                    let message = Message::new(vec![signed_value])?;
+                    return Ok(Some(SendTask::new(store_in, destination, message).into()));
                 }
                 Action::ComputeScalar {
                     store_in,

@@ -284,19 +284,30 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
         }
     }
 
-    let message_id = MessageId::from_usize(0);
-    let update = SessionUpdate::add_message(
-        message_id,
-        Message::new(session_verifier.clone(), signed_values.to_vec()),
-    );
-    session = match session.with_update(update)? {
-        SessionState::InProgress(session) => session,
-        _ => {
-            return Err(RuntimeError::new(
-                "Session unexpectedly changed state after adding incoming messages",
+    if !signed_values.is_empty() {
+        let message_id = MessageId::from_usize(0);
+        let Ok(message) = Message::new(signed_values.to_vec()) else {
+            return Ok(EvidenceVerdict::invalid(
+                "The stored messages have differing destinations",
+            ));
+        };
+
+        if message.destination() != session_verifier {
+            return Ok(EvidenceVerdict::invalid(
+                "The destination of stored messages differs from the ID of the party that reported the failure",
             ));
         }
-    };
+
+        let update = SessionUpdate::add_message(message_id, message);
+        session = match session.with_update(update)? {
+            SessionState::InProgress(session) => session,
+            _ => {
+                return Err(RuntimeError::new(
+                    "Session unexpectedly changed state after adding incoming messages",
+                ));
+            }
+        };
+    }
 
     while let Some(task) = session.make_task()? {
         let new_state = match task {

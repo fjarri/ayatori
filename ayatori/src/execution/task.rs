@@ -1,4 +1,4 @@
-use alloc::{format, string::String, sync::Arc, vec};
+use alloc::{format, string::String, sync::Arc};
 
 use super::session::SessionData;
 use crate::{
@@ -500,27 +500,25 @@ impl<SP: SessionParameters> SendTaskResult<SP> {
 pub struct SendTask<SP: SessionParameters> {
     store_in: SentTag,
     destination: SP::Verifier,
-    signed_value: SignedValue<SP>,
+    message: Message<SP>,
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
-    pub(crate) fn new(store_in: SentTag, destination: SP::Verifier, signed_value: SignedValue<SP>) -> Self {
+    pub(crate) fn new(store_in: SentTag, destination: SP::Verifier, message: Message<SP>) -> Self {
         Self {
             store_in,
             destination,
-            signed_value,
+            message,
         }
     }
 
     /// Returns the message to be sent and an object used to report the result of that.
     pub fn unpack(self) -> (Message<SP>, SendTaskResult<SP>) {
-        let signed_values = vec![self.signed_value];
-        let message = Message::new(self.destination.clone(), signed_values);
         let result = SendTaskResult {
             store_in: MappingTag::Sent(self.store_in),
             destination: self.destination,
         };
-        (message, result)
+        (self.message, result)
     }
 }
 
