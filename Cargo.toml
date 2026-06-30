@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["ayatori", "book-examples", "integration-tests"]
+members = ["ayatori", "ayatori-rbc", "book-examples", "integration-tests"]
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

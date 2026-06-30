@@ -19,7 +19,7 @@ impl WireFormat for BinaryFormat {
 
     fn deserialize<'de, T: Deserialize<'de>>(bytes: &'de [u8]) -> Result<T, Self::DeError> {
         let (result, unused_bytes) = postcard::take_from_bytes(bytes)?;
-        if unused_bytes.len() > 0 {
+        if !unused_bytes.is_empty() {
             return Err(postcard::Error::custom("Unused data left after deserialization"));
         }
         Ok(result)

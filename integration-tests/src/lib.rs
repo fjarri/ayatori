@@ -7,7 +7,6 @@
 
 extern crate alloc;
 
-pub mod bracha;
 pub mod distributed_rng;
 pub mod echo_broadcast;
 pub mod evidence_generation;

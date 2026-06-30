@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     entities::{
-        AnyTagRef, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
+        AnyTag, EvidenceVerdict, MappingTag, Message, MessageId, RuntimeError, SenderError, SenderErrorWithReveal,
         SessionId, SignedValue, StoredThirdPartyError, VerificationError, VerifiedValue,
     },
     graph_representation::{AnyNode, ArgNodes, ComputeMappingKind, PartyBuildData},
@@ -356,13 +356,13 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ThirdPartyErrorEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
-    failed_at: MappingTag,
+    failed_at: AnyTag,
     error: StoredThirdPartyError<SP>,
     phantom: PhantomData<fn() -> (SP, P)>,
 }
 
 impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<SP, P> {
-    pub fn new(reported_by: &SP::Verifier, failed_at: &MappingTag, error: StoredThirdPartyError<SP>) -> Self {
+    pub fn new(reported_by: &SP::Verifier, failed_at: &AnyTag, error: StoredThirdPartyError<SP>) -> Self {
         Self {
             reported_by: reported_by.clone(),
             failed_at: failed_at.clone(),
@@ -388,7 +388,7 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         let output = P::build(&party_build_data, &build_data, arg_nodes)
             .or_with_context(|| "Failed to build the protocol graph".into())?;
         let any_node = Into::<AnyNode<SP>>::into(output);
-        let Some(node) = any_node.find_subnode(AnyTagRef::Mapping(self.failed_at.as_ref())) else {
+        let Some(node) = any_node.find_subnode(self.failed_at.as_ref()) else {
             return Ok(EvidenceVerdict::invalid(format!(
                 "Could not find subnode {}",
                 self.failed_at

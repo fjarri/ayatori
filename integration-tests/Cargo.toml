@@ -12,3 +12,4 @@ rand_chacha = { version = "0.10", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 tokio = { version = "1", default-features = false }
 derive-where = { version = "1.5", default-features = false, features = ["serde"] }
+itertools = "0.14"

@@ -4,11 +4,11 @@ use core::fmt::{self, Debug};
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingTag,
-        MaybeAttributableError, RuntimeError, ScalarFunction, ScalarTag, SerializeAndSignFunction, SerializeArgs,
-        SignedValue, SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyError,
+        MaybeAttributableError, RuntimeError, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
+        SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction, ThirdPartyError,
         UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
-    graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, ShallowClone},
+    graph_representation::{AnyNode, ComputeMappingKind, ComputeScalarKind, GeneralizedNode, OutputNode, ShallowClone},
     traced_error::TraceableResult,
     traits::SessionParameters,
 };
@@ -186,16 +186,20 @@ impl<SP: SessionParameters> Replacement<SP> {
                     function: replacement_function,
                 },
             ) => {
-                let new_function = if let ScalarFunction::Unattributable(orig_function) = &node.as_ref().function {
+                let new_kind = if let ComputeScalarKind::Simple { function } = &node.as_ref().kind
+                    && let SimpleScalarFunction::Unattributable(orig_function) = function
+                {
                     let orig_function = orig_function.clone();
                     let replacement_function = replacement_function.clone();
-                    ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
-                        format!("[modified] {orig_function}"),
-                        move |args| {
-                            let orig_value = orig_function.call(args)?;
-                            replacement_function(orig_value, args)
-                        },
-                    ))
+                    let new_function =
+                        SimpleScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
+                            format!("[modified] {orig_function}"),
+                            move |args| {
+                                let orig_value = orig_function.call(args)?;
+                                replacement_function(orig_value, args)
+                            },
+                        ));
+                    ComputeScalarKind::Simple { function: new_function }
                 } else {
                     return Err(RuntimeError::new(format!(
                         "Invalid function type in the subnode `{}` - expected unattributable scalar function",
@@ -205,7 +209,7 @@ impl<SP: SessionParameters> Replacement<SP> {
 
                 AnyNode::from(node.get_strong_ref().mutated(|inner| {
                     let mut inner = inner.shallow_clone();
-                    inner.function = new_function;
+                    inner.kind = new_kind;
                     inner
                 }))
             }

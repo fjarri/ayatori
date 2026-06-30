@@ -7,9 +7,10 @@ use crate::{
         MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag,
         SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SenderError,
         SenderErrorWithReveal, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError,
-        ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError, UnattributableMappingFunction,
-        UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
-        UnattributableScalarFunctionWithRng, Value, VerificationError,
+        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction, ThirdPartyError,
+        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
+        VerificationError,
     },
     flat_representation::OnError,
     traits::SessionParameters,
@@ -91,6 +92,47 @@ impl<SP: SessionParameters> ScalarUnattributableOptionalTask<SP> {
 impl<SP: SessionParameters> From<ScalarUnattributableOptionalTask<SP>> for Task<SP> {
     fn from(source: ScalarUnattributableOptionalTask<SP>) -> Self {
         Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarUnattributableOptional(
+            source,
+        )))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
+pub(crate) struct ScalarThirdPartyAttributableTask<SP: SessionParameters> {
+    store_in: ComputedScalarTag,
+    function: ThirdPartyAttributableScalarFunction<SP>,
+    args: Args<SP>,
+}
+
+impl<SP: SessionParameters> ScalarThirdPartyAttributableTask<SP> {
+    pub fn new(
+        store_in: ComputedScalarTag,
+        function: ThirdPartyAttributableScalarFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        Self {
+            store_in,
+            function,
+            args,
+        }
+    }
+
+    pub fn execute(self) -> SessionUpdate<SP> {
+        let store_in = ScalarTag::Computed(self.store_in);
+        match self.function.call(&self.args) {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedScalar { store_in, result }),
+            Err(MaybeAttributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+            Err(MaybeAttributableError::Attributable(error)) => SessionUpdate(SessionUpdateEnum::ThirdPartyError {
+                store_in: AnyTag::Scalar(store_in),
+                error,
+            }),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<ScalarThirdPartyAttributableTask<SP>> for Task<SP> {
+    fn from(source: ScalarThirdPartyAttributableTask<SP>) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::ScalarThirdPartyAttributable(
             source,
         )))
     }
@@ -282,9 +324,10 @@ impl<SP: SessionParameters> ElementThirdPartyAttributableTask<SP> {
                 result,
             }),
             Err(MaybeAttributableError::Runtime(error)) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
-            Err(MaybeAttributableError::Attributable(error)) => {
-                SessionUpdate(SessionUpdateEnum::ThirdPartyError { store_in, error })
-            }
+            Err(MaybeAttributableError::Attributable(error)) => SessionUpdate(SessionUpdateEnum::ThirdPartyError {
+                store_in: AnyTag::Mapping(store_in),
+                error,
+            }),
         }
     }
 }
@@ -621,6 +664,7 @@ impl<SP: SessionParameters> From<PreprocessMessageTask<SP>> for Task<SP> {
 enum DeterministicTaskEnum<SP: SessionParameters> {
     ScalarUnattributable(ScalarUnattributableTask<SP>),
     ScalarUnattributableOptional(ScalarUnattributableOptionalTask<SP>),
+    ScalarThirdPartyAttributable(ScalarThirdPartyAttributableTask<SP>),
     ElementUnattributable(ElementUnattributableTask<SP>),
     ElementSenderAttributable(ElementSenderAttributableTask<SP>),
     ElementSenderAttributableWithReveal(ElementSenderAttributableWithRevealTask<SP>),
@@ -639,6 +683,7 @@ impl<SP: SessionParameters> DeterministicTask<SP> {
         match self.0 {
             DeterministicTaskEnum::ScalarUnattributable(task) => task.execute(),
             DeterministicTaskEnum::ScalarUnattributableOptional(task) => task.execute(),
+            DeterministicTaskEnum::ScalarThirdPartyAttributable(task) => task.execute(),
             DeterministicTaskEnum::ElementUnattributable(task) => task.execute(),
             DeterministicTaskEnum::ElementSenderAttributable(task) => task.execute(),
             DeterministicTaskEnum::ElementSenderAttributableWithReveal(task) => task.execute(),
@@ -750,7 +795,7 @@ pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
         on_error: OnError,
     },
     ThirdPartyError {
-        store_in: MappingTag,
+        store_in: AnyTag,
         error: ThirdPartyError<SP>,
     },
     MessageError {

@@ -23,8 +23,9 @@ use super::{
     task::{
         DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
         ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
-        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarUnattributableOptionalTask,
-        ScalarUnattributableTask, SendTask, SerializeAndSignElementTask, SessionUpdate, SessionUpdateEnum, Task,
+        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarThirdPartyAttributableTask,
+        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SendTask, SerializeAndSignElementTask,
+        SessionUpdate, SessionUpdateEnum, Task,
     },
 };
 #[cfg(feature = "dev")]
@@ -353,6 +354,9 @@ where
                         }
                         ScalarFunction::UnattributableWithRng(function) => {
                             RngScalarUnattributableTask::new(store_in, function, args).into()
+                        }
+                        ScalarFunction::ThirdPartyAttributable(function) => {
+                            ScalarThirdPartyAttributableTask::new(store_in, function, args).into()
                         }
                     }));
                 }

@@ -12,15 +12,16 @@ use super::{
     args::BoundProtocolArgs,
     constructors::collect,
     typed_nodes::{
-        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
-        GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SerializeAndSign, args_to_owned,
+        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
+        DirectMessage, GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SerializeAndSign,
+        args_to_owned,
     },
     unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
 use crate::{
     entities::{
         AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, MaybeAttributableError,
-        PartyGroup, RuntimeError, ScalarFunction, ScalarTagRef, SimpleMappingFunction, UnattributableError,
+        PartyGroup, RuntimeError, ScalarTagRef, SimpleMappingFunction, SimpleScalarFunction, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     traced_error::TraceableResult,
@@ -201,8 +202,17 @@ impl<SP: SessionParameters> AnyNode<SP> {
         for node in subnodes {
             match node {
                 Self::ComputeScalar(node) => {
-                    if !node.as_ref().function.is_reproducible() {
-                        return Reproducibility::NotAvailable;
+                    match &node.as_ref().kind {
+                        ComputeScalarKind::Simple { function } => {
+                            if !function.is_reproducible() {
+                                return Reproducibility::NotAvailable;
+                            }
+                        }
+                        ComputeScalarKind::ThirdPartyAttributable { .. } => {
+                            // TODO: should we have `kind.is_reproducible()`? Or defer to `function` here too
+                            // instead of assuming that it will never depend on RNG?
+                            // `function` here does not depend on RNG, so is always reproducible.
+                        }
                     }
                 }
                 Self::ComputeMapping(node) => {
@@ -358,16 +368,18 @@ impl<SP: SessionParameters> AnyNode<SP> {
         let guilty_party = guilty_party.clone();
         let wrapped = OutputNode::ComputeScalar(Node::new(ComputeScalar {
             store_in: original_output_tag.clone(),
-            function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
-                "<evidence_verification_output>",
-                move |args| {
-                    let map = args.get_map::<EvidenceVerdict>(arg_name)?;
-                    let verdict: &EvidenceVerdict = map
-                        .get(&guilty_party)
-                        .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))?;
-                    Ok(Value::new(verdict.clone()))
-                },
-            )),
+            kind: ComputeScalarKind::Simple {
+                function: SimpleScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
+                    "<evidence_verification_output>",
+                    move |args| {
+                        let map = args.get_map::<EvidenceVerdict>(arg_name)?;
+                        let verdict: &EvidenceVerdict = map
+                            .get(&guilty_party)
+                            .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))?;
+                        Ok(Value::new(verdict.clone()))
+                    },
+                )),
+            },
             args: [(arg_name.into(), ComputeScalarArg::Collect(collected.get_strong_ref()))].into(),
             dependencies: Vec::new(),
         }));

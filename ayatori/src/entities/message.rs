@@ -60,11 +60,11 @@ impl From<RuntimeError> for VerificationError {
 impl core::error::Error for VerificationError {}
 
 fn hash_serialized_value<D: Update + FixedOutput + Default>(value: &SerializedValue) -> digest::Output<D> {
-    let value_len = u128::try_from(value.as_ref().len()).expect("Serialized value length is less than 2^128 bytes");
+    let value_len = u128::try_from(value.data().len()).expect("Serialized value length is less than 2^128 bytes");
     let mut digest = D::default();
     digest.update(b"SerializedValueDigest");
     digest.update(&value_len.to_be_bytes());
-    digest.update(value.as_ref());
+    digest.update(value.data());
     digest.finalize_fixed()
 }
 
@@ -151,7 +151,9 @@ impl<SP: SessionParameters> SignedValue<SP> {
             .map_err(|_err| VerificationError::SignatureMismatch)
     }
 
-    pub(crate) fn verify_and_unpack(self) -> Result<SerializedValue, VerificationError> {
+    // TODO (#93): this can be made `pub(crate)` after the issue is closed.
+    /// Verifies the value and returns the encapsulated serialized value.
+    pub fn verify_and_unpack(self) -> Result<SerializedValue, VerificationError> {
         self.verify_inner()?;
         Ok(self.value)
     }
@@ -235,7 +237,9 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         &self.message_id
     }
 
-    pub(crate) fn serialized_value(&self) -> &SerializedValue {
+    // TODO (#93): this can be made `pub(crate)` after the issue is closed.
+    /// Returns the encapsulated serialized value.
+    pub fn serialized_value(&self) -> &SerializedValue {
         &self.value
     }
 

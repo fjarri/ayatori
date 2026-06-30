@@ -131,6 +131,11 @@ define_typed_function_type!(
 );
 
 define_typed_function_type!(
+    ThirdPartyAttributableScalarFunction<SP>,
+    (args: &Args<SP>) -> MaybeAttributableError<ThirdPartyError<SP>>
+);
+
+define_typed_function_type!(
     UnattributableMappingFunction<SP>,
     (id: &SP::Verifier, args: &Args<SP>) -> UnattributableError
 );
@@ -177,19 +182,39 @@ define_erased_function_type!(
     (args: &DeserializeArgs<SP>) -> Result<Value, MaybeAttributableError<SenderError>>
 );
 
+// The subset of scalar functions that do not need additional associated information besides the arguments.
 #[derive_where::derive_where(Debug, Clone)]
-pub(crate) enum ScalarFunction<SP: SessionParameters> {
+pub(crate) enum SimpleScalarFunction<SP: SessionParameters> {
     Unattributable(UnattributableScalarFunction<SP>),
     UnattributableOptional(UnattributableOptionalScalarFunction<SP>),
     UnattributableWithRng(UnattributableScalarFunctionWithRng<SP>),
 }
 
-impl<SP: SessionParameters> ScalarFunction<SP> {
+impl<SP: SessionParameters> SimpleScalarFunction<SP> {
     pub fn is_reproducible(&self) -> bool {
         !matches!(self, Self::UnattributableWithRng(_))
     }
 }
 
+#[derive_where::derive_where(Debug, Clone)]
+pub(crate) enum ScalarFunction<SP: SessionParameters> {
+    Unattributable(UnattributableScalarFunction<SP>),
+    UnattributableOptional(UnattributableOptionalScalarFunction<SP>),
+    UnattributableWithRng(UnattributableScalarFunctionWithRng<SP>),
+    ThirdPartyAttributable(ThirdPartyAttributableScalarFunction<SP>),
+}
+
+impl<SP: SessionParameters> From<SimpleScalarFunction<SP>> for ScalarFunction<SP> {
+    fn from(source: SimpleScalarFunction<SP>) -> Self {
+        match source {
+            SimpleScalarFunction::Unattributable(function) => Self::Unattributable(function),
+            SimpleScalarFunction::UnattributableOptional(function) => Self::UnattributableOptional(function),
+            SimpleScalarFunction::UnattributableWithRng(function) => Self::UnattributableWithRng(function),
+        }
+    }
+}
+
+// The subset of mapping functions that do not need additional associated information besides the arguments.
 #[derive_where::derive_where(Debug, Clone)]
 pub(crate) enum SimpleMappingFunction<SP: SessionParameters> {
     Unattributable(UnattributableMappingFunction<SP>),
@@ -222,12 +247,23 @@ impl<SP: SessionParameters> From<SimpleMappingFunction<SP>> for MappingFunction<
     }
 }
 
+impl<SP: SessionParameters> Display for SimpleScalarFunction<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::UnattributableWithRng(function) => write!(f, "{function}[RNG]"),
+            Self::Unattributable(function) => write!(f, "{function}"),
+            Self::UnattributableOptional(function) => write!(f, "{function}"),
+        }
+    }
+}
+
 impl<SP: SessionParameters> Display for ScalarFunction<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             Self::UnattributableWithRng(function) => write!(f, "{function}[RNG]"),
             Self::Unattributable(function) => write!(f, "{function}"),
             Self::UnattributableOptional(function) => write!(f, "{function}"),
+            Self::ThirdPartyAttributable(function) => write!(f, "{function}"),
         }
     }
 }

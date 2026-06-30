@@ -240,7 +240,6 @@ pub(crate) enum ScalarTag {
 }
 
 impl ScalarTag {
-    #[cfg(feature = "dev")]
     pub fn as_ref(&self) -> ScalarTagRef<'_> {
         match self {
             Self::Computed(tag) => ScalarTagRef::Computed(tag),
@@ -359,7 +358,7 @@ impl AnyTagRef<'_> {
     }
 }
 
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq)]
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum AnyTag {
     #[displaydoc("{0}")]
     Scalar(ScalarTag),
@@ -368,7 +367,6 @@ pub(crate) enum AnyTag {
 }
 
 impl AnyTag {
-    #[cfg(feature = "dev")]
     pub fn as_ref(&self) -> AnyTagRef<'_> {
         match self {
             Self::Scalar(tag) => AnyTagRef::Scalar(tag.as_ref()),

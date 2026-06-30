@@ -11,9 +11,10 @@ pub(crate) use errors::StoredThirdPartyError;
 pub(crate) use function::{
     DeserializeFunction, MappingFunction, ScalarFunction, SenderAttributableMappingFunction,
     SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
-    SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
-    UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
-    UnattributableScalarFunction, UnattributableScalarFunctionWithRng,
+    SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+    ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction, UnattributableMappingFunction,
+    UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
+    UnattributableScalarFunctionWithRng,
 };
 pub(crate) use tag::{
     AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedTag, MappingTag, MappingTagRef,
