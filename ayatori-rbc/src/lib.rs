@@ -18,4 +18,7 @@ mod merkle_tree;
 mod protocol;
 mod sharding;
 
-pub use protocol::ReliableBroadcast;
+#[cfg(test)]
+mod tests;
+
+pub use protocol::{BuildData, ReliableBroadcast};

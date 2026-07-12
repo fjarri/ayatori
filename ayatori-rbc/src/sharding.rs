@@ -141,7 +141,7 @@ impl Scheme {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-enum ShardKind {
+pub(crate) enum ShardKind {
     Original,
     Recovery,
 }
@@ -213,6 +213,16 @@ impl Shard {
             kind: self.kind,
             data: &self.data,
         }
+    }
+
+    #[cfg(test)]
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
+    #[cfg(test)]
+    pub fn kind(&self) -> ShardKind {
+        self.kind
     }
 }
 

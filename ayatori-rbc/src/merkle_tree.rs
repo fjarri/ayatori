@@ -139,9 +139,9 @@ impl<D: FixedOutput + Default> MerkleBranch<D> {
         for (level, node) in self.nodes.iter().enumerate() {
             let node_idx = idx >> level;
             if node_idx & 1 == 0 {
-                current_node = MerkleNode::from_nodes(node, &current_node);
-            } else {
                 current_node = MerkleNode::from_nodes(&current_node, node);
+            } else {
+                current_node = MerkleNode::from_nodes(node, &current_node);
             }
         }
         MerkleRoot(current_node.0) == self.root

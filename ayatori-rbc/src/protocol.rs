@@ -3,8 +3,10 @@ use alloc::{
     format,
     vec::Vec,
 };
+use core::marker::PhantomData;
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 use ayatori::{
     protocol_author_api::*,
@@ -15,8 +17,6 @@ use super::{
     merkle_tree::{Hashable, MerkleBranch, MerkleTree},
     sharding::{self, Scheme, Shard},
 };
-
-type Value = u64;
 
 impl<D: FixedOutput + Default> Hashable<D> for Shard {
     fn hash(&self) -> digest::Output<D> {
@@ -29,12 +29,12 @@ impl<D: FixedOutput + Default> Hashable<D> for Shard {
 
 /// Reliable threshold broadcast protocol.
 #[derive(Debug, Clone, Copy)]
-pub struct ReliableBroadcast;
+pub struct ReliableBroadcast<T>(PhantomData<fn() -> T>);
 
-fn make_shards<SP: SessionParameters>(
+fn make_shards<SP: SessionParameters, T: Erasable + Serialize>(
     args: &Args<SP>,
 ) -> Result<(Scheme, BTreeMap<SP::Verifier, Shard>), UnattributableError> {
-    let value = args.get::<Value>("value")?;
+    let value = args.get::<T>("value")?;
     let threshold = args.get::<usize>("threshold")?;
     let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
     let (scheme, shards) = sharding::new_set::<SP, _>(value, *threshold, ids)?;
@@ -114,7 +114,9 @@ fn check_echo<SP: SessionParameters>(
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 struct AssemblyError<SP: SessionParameters>(Vec<SignedValue<SP>>);
 
-fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<Value, MaybeAttributableError<ThirdPartyError<SP>>> {
+fn gen_output<SP: SessionParameters, T: Erasable + for<'de> Deserialize<'de>>(
+    args: &Args<SP>,
+) -> Result<T, MaybeAttributableError<ThirdPartyError<SP>>> {
     let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
     let sender = args.get::<SP::Verifier>("sender")?;
     let echoed_messages = args.get_map::<EchoMessage<SP>>("echo_messages")?;
@@ -133,7 +135,7 @@ fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<Value, MaybeAttr
         let Ok(value_message) = SP::WireFormat::deserialize::<ValueMessage<SP>>(serialized_value.data()) else {
             return Err(ThirdPartyError::new("Failed to deserialize", sender, error_package)?.into());
         };
-        messages.insert(echo_message.0.source().clone(), value_message);
+        messages.insert(echo_message.0.metadata().destination().clone(), value_message);
     }
 
     let Ok(scheme) = messages.values().map(|message| message.scheme).all_equal_value() else {
@@ -165,7 +167,7 @@ fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<Value, MaybeAttr
         return Err(ThirdPartyError::new("Merkle root mismatch", sender, error_package)?.into());
     }
 
-    let value = sharding::assemble::<SP, Value>(scheme, messages.values().map(|message| &message.shard))?;
+    let value = sharding::assemble::<SP, T>(scheme, messages.values().map(|message| &message.shard))?;
 
     Ok(value)
 }
@@ -178,38 +180,7 @@ fn verify_gen_output_error<SP: SessionParameters>(
     todo!()
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum PrivateData {
-    Sender { value: Value },
-    Receiver,
-}
-
-// TODO: this implementation is only needed for tests
-impl<SP: SessionParameters> ExecutableProtocol<SP> for ReliableBroadcast {
-    type PrivateData = PrivateData;
-    type SharedData = BuildData<SP>;
-    type Output = Value;
-
-    fn make_private_inputs(private_data: &Self::PrivateData) -> PrivateInputs {
-        match private_data {
-            PrivateData::Receiver => PrivateInputs::new(),
-            PrivateData::Sender { value } => PrivateInputs::new().input("to_broadcast", *value),
-        }
-    }
-
-    fn make_public_inputs(_shared_data: &Self::SharedData) -> PublicInputs {
-        PublicInputs::new()
-    }
-
-    fn make_build_data(shared_data: &Self::SharedData) -> Self::BuildData {
-        shared_data.clone()
-    }
-
-    fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.all_parties.clone()
-    }
-}
-
+/// Build data for the RBC protocol
 #[derive_where::derive_where(Debug, Clone)]
 pub struct BuildData<SP: SessionParameters> {
     sender: SP::Verifier,
@@ -218,6 +189,11 @@ pub struct BuildData<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> BuildData<SP> {
+    // TODO: can we allow `sender` to be separate from `all_parties`?
+    /// Creates the new build data.
+    ///
+    /// `sender` must be a member of `all_parties`.
+    /// `max_faulty_parties` should be such that `max_faulty_parties * 2 + 1 <= len(all_parties)`
     pub fn new(
         all_parties: &BTreeSet<SP::Verifier>,
         sender: &SP::Verifier,
@@ -243,6 +219,11 @@ impl<SP: SessionParameters> BuildData<SP> {
             max_faulty_parties,
         })
     }
+
+    #[cfg(test)]
+    pub(crate) fn all_parties(&self) -> &BTreeSet<SP::Verifier> {
+        &self.all_parties
+    }
 }
 
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
@@ -255,7 +236,11 @@ struct ValueMessage<SP: SessionParameters> {
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 struct EchoMessage<SP: SessionParameters>(SignedValue<SP>);
 
-impl<SP: SessionParameters> ComposableProtocol<SP> for ReliableBroadcast {
+impl<SP, T> ComposableProtocol<SP> for ReliableBroadcast<T>
+where
+    SP: SessionParameters,
+    T: Erasable + Serialize + for<'de> Deserialize<'de>,
+{
     type BuildData = BuildData<SP>;
     type OutputNode = Node<ComputeScalar<SP>>;
 
@@ -290,7 +275,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for ReliableBroadcast {
             let threshold = constant("threshold", recovery_threshold);
             let scheme_and_shards = compute_scalar(
                 "scheme_and_shards",
-                make_shards,
+                make_shards::<SP, T>,
                 &[
                     ("value", (to_broadcast).into()),
                     ("threshold", (&threshold).into()),
@@ -377,7 +362,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for ReliableBroadcast {
         // TODO: same as above, collect(ready_sent) can have a 0 threshold.
         let output = compute_scalar_third_party_attributable(
             "output",
-            gen_output,
+            gen_output::<SP, T>,
             &[
                 ("echo_messages", (&enough_echos_received).into()),
                 ("sender", (&sender).into()),
@@ -389,99 +374,5 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for ReliableBroadcast {
         .with_dependency(&collect(&ready_sent, &PartyGroup::new(&ids)));
 
         Ok(output)
-    }
-}
-
-#[cfg(test)]
-#[expect(clippy::indexing_slicing)]
-mod tests {
-    use alloc::vec::Vec;
-
-    use rand_chacha::ChaCha8Rng;
-
-    use ayatori::{
-        dev::{BinaryFormat, BlockMessagesRule, RunSyncConfig, TestSessionParams, TestSigner, run_sessions_sync},
-        protocol_author_api::FullName,
-        protocol_user_api::*,
-        signature::{Keypair, rand_core::SeedableRng},
-    };
-
-    use super::{BuildData, PrivateData, ReliableBroadcast};
-
-    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
-    type S = Session<SP, ReliableBroadcast>;
-
-    #[test]
-    fn happy_path() {
-        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-
-        let build_data = BuildData {
-            all_parties: ids.iter().copied().collect(),
-            sender: ids[0],
-            max_faulty_parties: 1,
-        };
-
-        let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng).unwrap();
-
-        let sessions = signers
-            .into_iter()
-            .map(|signer| {
-                let private_data = if signer.verifying_key() == ids[0] {
-                    PrivateData::Sender { value: 111 }
-                } else {
-                    PrivateData::Receiver
-                };
-                S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
-            })
-            .collect::<Vec<_>>();
-        let results = run_sessions_sync(&mut rng, sessions).unwrap();
-
-        let value = results.reports[&ids[0]].success_ref().unwrap();
-        assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
-        assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
-    }
-
-    #[test]
-    fn unresponsive_party() {
-        let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
-        let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-
-        let build_data = BuildData {
-            all_parties: ids.iter().copied().collect(),
-            sender: ids[0],
-            max_faulty_parties: 1,
-        };
-
-        let mut rng = ChaCha8Rng::seed_from_u64(123);
-        let session_id = SessionId::random(&mut rng).unwrap();
-
-        let sessions = signers
-            .into_iter()
-            .map(|signer| {
-                let private_data = if signer.verifying_key() == ids[0] {
-                    PrivateData::Sender { value: 111 }
-                } else {
-                    PrivateData::Receiver
-                };
-                S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        let runner = RunSyncConfig::default().block_messages(BlockMessagesRule {
-            source: Some(ids[2]),
-            name: Some(FullName::new_with_prefix(&["echo"]).unwrap()),
-            destination: None,
-        });
-
-        let results = runner.run_sessions(&mut rng, sessions).unwrap();
-
-        let value = results.reports[&ids[0]].success_ref().unwrap();
-        assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
-        assert!(matches!(
-            results.reports[&ids[2]].outcome,
-            SessionOutcome::Unfinishable(_)
-        ));
     }
 }
