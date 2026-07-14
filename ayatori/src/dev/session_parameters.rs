@@ -1,5 +1,6 @@
-use core::num::NonZeroUsize;
+use core::hash::{BuildHasher, Hasher};
 
+use ahash::{AHasher, RandomState};
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{Hex, SliceLike};
 use signature::{
@@ -98,36 +99,34 @@ where
 
 /// A very simple hasher for testing purposes.
 /// Not in any way secure.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TestHasher {
-    cursor: usize,
-    buffer: digest::Output<Self>,
+#[derive(Debug, Clone)]
+pub struct TestHasher(AHasher);
+
+impl Default for TestHasher {
+    fn default() -> Self {
+        // `AHasher::default()` uses compile-time random numbers,
+        // we want consistent defaults.
+        Self(RandomState::with_seeds(1, 2, 3, 4).build_hasher())
+    }
 }
 
 impl digest::HashMarker for TestHasher {}
 
 impl digest::Update for TestHasher {
     fn update(&mut self, data: &[u8]) {
-        // A very simple algorithm for testing, just xor the data in buffer-sized chunks.
-        for byte in data {
-            *self.buffer.get_mut(self.cursor).expect("index within bounds") ^= byte;
-
-            let buffer_len = NonZeroUsize::new(self.buffer.len()).expect("buffer length is non-zero");
-
-            // `cursor` is maintained `< buffer.len()`, so the addition will not overflow.
-            self.cursor = (self.cursor.wrapping_add(1)) % buffer_len;
-        }
+        self.0.write(data);
     }
 }
 
 impl digest::FixedOutput for TestHasher {
     fn finalize_into(self, out: &mut digest::Output<Self>) {
-        AsMut::<[u8]>::as_mut(out).copy_from_slice(&self.buffer);
+        let result = Hasher::finish(&self.0).to_be_bytes();
+        out.copy_from_slice(&result);
     }
 }
 
 impl digest::OutputSizeUser for TestHasher {
-    type OutputSize = typenum::U32;
+    type OutputSize = typenum::U8;
 }
 
 /// An implementation of [`SessionParameters`] using the testing signer/verifier types.
