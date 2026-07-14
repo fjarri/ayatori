@@ -230,38 +230,58 @@ struct Decoded(Vec<OriginalShard>);
 
 impl Decoded {
     fn new<'a>(scheme: Scheme, shards: impl Iterator<Item = ShardRef<'a>>) -> Result<Self, RuntimeError> {
-        let mut decoder = ReedSolomonDecoder::new(scheme.original_shards, scheme.recovery_shards, scheme.shard_size)
-            .map_err(|err| RuntimeError::new(format!("Failed to create a R-S decoded: {err}")))?;
         let mut originals = BTreeMap::new();
 
-        for shard in shards {
-            match shard.kind {
-                ShardKind::Original => {
-                    decoder
-                        .add_original_shard(shard.idx, shard.data)
-                        .map_err(|err| RuntimeError::new(format!("Failed to add an original shard: {err}")))?;
-                    originals.insert(
-                        shard.idx,
-                        OriginalShard {
-                            idx: shard.idx,
-                            data: shard.data.into(),
-                        },
-                    );
+        if scheme.recovery_shards == 0 {
+            // `reed_solomon` does not support the corner case of recovery_shards == 0
+            for shard in shards {
+                if shard.kind != ShardKind::Original {
+                    return Err(RuntimeError::new(
+                        "A recovery shard used with a scheme with recovery_shards=0",
+                    ));
                 }
-                ShardKind::Recovery => {
-                    decoder
-                        .add_recovery_shard(shard.idx, shard.data)
-                        .map_err(|err| RuntimeError::new(format!("Failed to add a recovery shard: {err}")))?;
+                originals.insert(
+                    shard.idx,
+                    OriginalShard {
+                        idx: shard.idx,
+                        data: shard.data.into(),
+                    },
+                );
+            }
+        } else {
+            let mut decoder =
+                ReedSolomonDecoder::new(scheme.original_shards, scheme.recovery_shards, scheme.shard_size)
+                    .map_err(|err| RuntimeError::new(format!("Failed to create a R-S decoded: {err}")))?;
+
+            for shard in shards {
+                match shard.kind {
+                    ShardKind::Original => {
+                        decoder
+                            .add_original_shard(shard.idx, shard.data)
+                            .map_err(|err| RuntimeError::new(format!("Failed to add an original shard: {err}")))?;
+                        originals.insert(
+                            shard.idx,
+                            OriginalShard {
+                                idx: shard.idx,
+                                data: shard.data.into(),
+                            },
+                        );
+                    }
+                    ShardKind::Recovery => {
+                        decoder
+                            .add_recovery_shard(shard.idx, shard.data)
+                            .map_err(|err| RuntimeError::new(format!("Failed to add a recovery shard: {err}")))?;
+                    }
                 }
             }
-        }
 
-        let result = decoder
-            .decode()
-            .map_err(|err| RuntimeError::new(format!("Failed to decode: {err}")))?;
+            let result = decoder
+                .decode()
+                .map_err(|err| RuntimeError::new(format!("Failed to decode: {err}")))?;
 
-        for (idx, data) in result.restored_original_iter() {
-            originals.insert(idx, OriginalShard { idx, data: data.into() });
+            for (idx, data) in result.restored_original_iter() {
+                originals.insert(idx, OriginalShard { idx, data: data.into() });
+            }
         }
 
         // At this point all the originals are accounted for, so we can dispense with the map.
@@ -287,23 +307,32 @@ struct Encoded(Vec<Shard>);
 
 impl Encoded {
     fn new_inner<'a>(scheme: Scheme, originals: impl Iterator<Item = (usize, &'a [u8])>) -> Result<Self, RuntimeError> {
-        let mut encoder = ReedSolomonEncoder::new(scheme.original_shards, scheme.recovery_shards, scheme.shard_size)
-            .map_err(|err| RuntimeError::new(format!("Failed to create a R-S encoder: {err}")))?;
         let mut shards = Vec::new();
 
-        for (idx, data) in originals {
-            encoder
-                .add_original_shard(data)
-                .map_err(|err| RuntimeError::new(format!("Failed to add an original shard: {err}")))?;
-            shards.push(Shard::new(idx, ShardKind::Original, data.into())?);
-        }
+        if scheme.recovery_shards == 0 {
+            // `reed_solomon` does not support the corner case of recovery_shards == 0
+            for (idx, data) in originals {
+                shards.push(Shard::new(idx, ShardKind::Original, data.into())?);
+            }
+        } else {
+            let mut encoder =
+                ReedSolomonEncoder::new(scheme.original_shards, scheme.recovery_shards, scheme.shard_size)
+                    .map_err(|err| RuntimeError::new(format!("Failed to create a R-S encoder: {err}")))?;
 
-        let result = encoder
-            .encode()
-            .map_err(|err| RuntimeError::new(format!("Failed to encode: {err}")))?;
+            for (idx, data) in originals {
+                encoder
+                    .add_original_shard(data)
+                    .map_err(|err| RuntimeError::new(format!("Failed to add an original shard: {err}")))?;
+                shards.push(Shard::new(idx, ShardKind::Original, data.into())?);
+            }
 
-        for (idx, data) in result.recovery_iter().enumerate() {
-            shards.push(Shard::new(idx, ShardKind::Recovery, data.into())?);
+            let result = encoder
+                .encode()
+                .map_err(|err| RuntimeError::new(format!("Failed to encode: {err}")))?;
+
+            for (idx, data) in result.recovery_iter().enumerate() {
+                shards.push(Shard::new(idx, ShardKind::Recovery, data.into())?);
+            }
         }
 
         Ok(Self(shards))
@@ -424,6 +453,26 @@ mod tests {
             shards[&ids[4]].clone(),
         ];
         let value_back = assemble::<SP, Value>(scheme, some_shards.iter()).unwrap();
+
+        assert_eq!(value, value_back);
+    }
+
+    #[test]
+    fn create_shards_n_of_n() {
+        let value = Value {
+            x: 123,
+            y: b"just a test string nothing special".to_vec().into_boxed_slice(),
+            z: 456,
+        };
+
+        let threshold = 5;
+        let shards_num = 5;
+
+        let ids = (0..shards_num).map(TestVerifier::new).collect::<Vec<_>>();
+        let ids_set = ids.iter().copied().collect::<BTreeSet<_>>();
+        let (scheme, shards) = new_set::<SP, _>(&value, threshold, &ids_set).unwrap();
+
+        let value_back = assemble::<SP, Value>(scheme, shards.values()).unwrap();
 
         assert_eq!(value, value_back);
     }

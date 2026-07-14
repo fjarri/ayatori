@@ -346,13 +346,21 @@ where
         .with_dependency(&all_echos_sent);
 
         let ready_received = receive(&message_ready);
-        let some_ready_received = collect(&ready_received, &PartyGroup::new_threshold(&ids, send_ready_threshold));
+        let some_ready_received = collect_into(
+            "some_ready_received",
+            &ready_received,
+            &PartyGroup::new_threshold(&ids, send_ready_threshold),
+        );
 
         let ready_trigger = merge_scalars(&all_echos_received, &some_ready_received);
         let ready = constant("ready", ());
         let ready_sent = broadcast(&message_ready, &ready).with_dependency(&ready_trigger);
 
-        let all_ready_received = collect(&ready_received, &PartyGroup::new_threshold(&ids, finalize_threshold));
+        let all_ready_received = collect_into(
+            "all_ready_received",
+            &ready_received,
+            &PartyGroup::new_threshold(&ids, finalize_threshold),
+        );
         let enough_echos_received = collect_into(
             "enough_echos_for_decode",
             &echo_checked,

@@ -87,6 +87,34 @@ fn happy_path() {
 }
 
 #[test]
+fn happy_path_n_of_n() {
+    let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
+    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+
+    let build_data = BuildData::new(&ids.iter().copied().collect(), &ids[0], 0).unwrap();
+
+    let mut rng = ChaCha8Rng::seed_from_u64(123);
+    let session_id = SessionId::random(&mut rng).unwrap();
+
+    let sessions = signers
+        .into_iter()
+        .map(|signer| {
+            let private_data = if signer.verifying_key() == ids[0] {
+                PrivateData::Sender { value: 111 }
+            } else {
+                PrivateData::Receiver
+            };
+            S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
+        })
+        .collect::<Vec<_>>();
+    let results = run_sessions_sync(&mut rng, sessions).unwrap();
+
+    let value = results.reports[&ids[0]].success_ref().unwrap();
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
+}
+
+#[test]
 fn unresponsive_party() {
     let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
     let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
