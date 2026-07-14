@@ -41,7 +41,6 @@ pub(crate) struct MerkleTree<D: FixedOutput> {
     // then 2^(L-1) nodes produced by hashing leaves,
     // and so on, the root node being the last.
     nodes: Vec<MerkleNode<D>>,
-    levels: usize,
 }
 
 pub(crate) trait Hashable<D: FixedOutput> {
@@ -90,15 +89,15 @@ impl<D: FixedOutput + Default> MerkleTree<D> {
             }
         }
 
-        Ok(Self { nodes, levels })
+        Ok(Self { nodes })
     }
 
-    #[expect(clippy::arithmetic_side_effects, clippy::indexing_slicing)]
+    #[expect(clippy::arithmetic_side_effects, clippy::indexing_slicing, clippy::as_conversions)]
     pub fn branch(&self, idx: usize) -> MerkleBranch<D> {
         let mut nodes = Vec::new();
-
-        for level in 0..(self.levels - 1) {
-            let level_offset = (1 << (self.levels - level)) * ((1 << level) - 1);
+        let levels = (self.nodes.len() + 1).ilog2() as usize;
+        for level in 0..(levels - 1) {
+            let level_offset = (1 << (levels - level)) * ((1 << level) - 1);
             let idx_in_level = (idx >> level) ^ 1;
             nodes.push(self.nodes[level_offset + idx_in_level].clone());
         }
