@@ -7,24 +7,12 @@ use core::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use ayatori::{
-    protocol_author_api::*,
-    signature::digest::{self, FixedOutput},
-};
+use ayatori::protocol_author_api::*;
 
 use super::{
-    merkle_tree::{Hashable, MerkleBranch, MerkleTree},
+    merkle_tree::{MerkleBranch, MerkleTree},
     sharding::{self, Scheme, Shard},
 };
-
-impl<D: FixedOutput + Default> Hashable<D> for Shard {
-    fn hash(&self) -> digest::Output<D> {
-        let mut digest = D::default();
-        // TODO: add DST and hash metadata as well
-        digest.update(self.data());
-        digest.finalize_fixed()
-    }
-}
 
 /// Reliable threshold broadcast protocol.
 #[derive(Debug, Clone, Copy)]

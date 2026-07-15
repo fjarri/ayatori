@@ -7,10 +7,15 @@ use alloc::{
     vec::Vec,
 };
 
-use ayatori::protocol_author_api::{RuntimeError, SessionParameters, WireFormat};
+use ayatori::{
+    protocol_author_api::{RuntimeError, SessionParameters, WireFormat},
+    signature::digest::{self, FixedOutput},
+};
 use reed_solomon_simd::{ReedSolomonDecoder, ReedSolomonEncoder};
 use serde::{Deserialize, Serialize};
 use serde_encoded_bytes::{Hex, SliceLike};
+
+use super::merkle_tree::Hashable;
 
 fn usize_from_u32(x: u32) -> usize {
     usize::try_from(x).expect("`usize` is at least 4 bytes as ensured by a crate-wide assertion")
@@ -165,9 +170,10 @@ struct WireShard {
     idx: u32,
 }
 
-impl From<WireShard> for Shard {
-    fn from(source: WireShard) -> Self {
-        Self::new_inner(usize_from_u32(source.idx), source.kind, source.data)
+impl TryFrom<WireShard> for Shard {
+    type Error = RuntimeError;
+    fn try_from(source: WireShard) -> Result<Self, RuntimeError> {
+        Self::new(usize_from_u32(source.idx), source.kind, source.data)
     }
 }
 
@@ -183,7 +189,7 @@ impl From<Shard> for WireShard {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(from = "WireShard")]
+#[serde(try_from = "WireShard")]
 #[serde(into = "WireShard")]
 pub(crate) struct Shard {
     data: Box<[u8]>,
@@ -192,15 +198,14 @@ pub(crate) struct Shard {
 }
 
 impl Shard {
-    fn new_inner(idx: usize, kind: ShardKind, data: Box<[u8]>) -> Self {
-        Self { data, kind, idx }
-    }
-
     fn new(idx: usize, kind: ShardKind, data: Box<[u8]>) -> Result<Self, RuntimeError> {
+        if data.len() > usize_from_u32(u32::MAX) {
+            return Err(RuntimeError::new("`data` must be smaller than 2^32 bytes"));
+        }
         if u32::try_from(idx).is_err() {
             return Err(RuntimeError::new("`idx` must be within `usize` bounds"));
         }
-        Ok(Self::new_inner(idx, kind, data))
+        Ok(Self { data, kind, idx })
     }
 
     pub fn data(&self) -> &[u8] {
@@ -223,6 +228,29 @@ impl Shard {
     #[cfg(test)]
     pub fn kind(&self) -> ShardKind {
         self.kind
+    }
+}
+
+impl<D: FixedOutput + Default> Hashable<D> for Shard {
+    fn hash(&self) -> digest::Output<D> {
+        let mut digest = D::default();
+        digest.update(b"Shard");
+        digest.update(
+            &u32::try_from(self.data().len())
+                .expect("within range as checked in the constructor")
+                .to_be_bytes(),
+        );
+        digest.update(self.data());
+        digest.update(match self.kind {
+            ShardKind::Original => &[0],
+            ShardKind::Recovery => &[1],
+        });
+        digest.update(
+            &u32::try_from(self.idx)
+                .expect("within range as checked in the constructor")
+                .to_be_bytes(),
+        );
+        digest.finalize_fixed()
     }
 }
 

@@ -27,7 +27,6 @@ impl<D: FixedOutput + Default> MerkleNode<D> {
 
     fn from_nodes(left: &Self, right: &Self) -> Self {
         let mut digest = D::default();
-        // TODO: add length to the tag
         digest.update(b"MerkleTree");
         digest.update(&left.0);
         digest.update(&right.0);
