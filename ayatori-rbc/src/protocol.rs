@@ -5,7 +5,6 @@ use alloc::{
 };
 use core::marker::PhantomData;
 
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use ayatori::{
@@ -89,10 +88,56 @@ fn make_echo<SP: SessionParameters>(args: &Args<SP>) -> Result<EchoMessage<SP>, 
     Ok(echo)
 }
 
+fn make_ids_to_indices<SP: SessionParameters>(
+    args: &Args<SP>,
+) -> Result<BTreeMap<SP::Verifier, usize>, UnattributableError> {
+    let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
+    let ids_to_indices = ids
+        .iter()
+        .enumerate()
+        .map(|(idx, id)| (id.clone(), idx))
+        .collect::<BTreeMap<_, _>>();
+    Ok(ids_to_indices)
+}
+
+#[derive_where::derive_where(Debug)]
+struct OriginalMessage<SP: SessionParameters> {
+    signed_value: SignedValue<SP>,
+    value_message: ValueMessage<SP>,
+}
+
+fn make_original_message<SP: SessionParameters>(args: &Args<SP>) -> Result<OriginalMessage<SP>, UnattributableError> {
+    let signed_value_map = args.get_map::<VerifiedValue<SP>>("value_signed")?;
+    let message_map = args.get_map::<ValueMessage<SP>>("value")?;
+    let sender = args.get::<SP::Verifier>("sender")?;
+
+    let signed_value = signed_value_map.get(sender).ok_or_else(|| {
+        RuntimeError::new(format!(
+            "Sender {sender:?} is expected to be present in signed messages map"
+        ))
+    })?;
+
+    let message = message_map.get(sender).ok_or_else(|| {
+        RuntimeError::new(format!(
+            "Sender {sender:?} is expected to be present in received messages map"
+        ))
+    })?;
+    Ok(OriginalMessage {
+        signed_value: (*signed_value).clone().unverify(),
+        value_message: (*message).clone(),
+    })
+}
+
+#[derive_where::derive_where(Debug)]
+struct CheckedEchoMessage<SP: SessionParameters> {
+    signed_value: SignedValue<SP>,
+    serialized_value: SerializedValue,
+}
+
 fn check_echo<SP: SessionParameters>(
     _id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<EchoMessage<SP>, MaybeAttributableError<SenderError>> {
+) -> Result<CheckedEchoMessage<SP>, MaybeAttributableError<SenderError>> {
     let sender = args.get::<SP::Verifier>("sender")?;
     let echo = args.get::<EchoMessage<SP>>("echo")?;
 
@@ -104,80 +149,133 @@ fn check_echo<SP: SessionParameters>(
         return Err(SenderError::new("echo source is incorrect").into());
     }
 
-    // TODO: check the signature correctness
-
     // TODO: check the message name. Note that it may be prefixed.
 
-    Ok(echo.clone())
+    let Ok(serialized_value) = echo.0.clone().verify_and_unpack() else {
+        return Err(SenderError::new("echo contains a message with an invalid signature").into());
+    };
+
+    Ok(CheckedEchoMessage {
+        signed_value: echo.0.clone(),
+        serialized_value,
+    })
 }
 
-#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
-struct AssemblyError<SP: SessionParameters>(Vec<SignedValue<SP>>);
+#[derive_where::derive_where(Debug, Clone)]
+struct ProcessedEchoMessage<SP: SessionParameters> {
+    signed_value: SignedValue<SP>,
+    value_message: ValueMessage<SP>,
+}
 
-fn gen_output<SP: SessionParameters, T: Erasable + for<'de> Deserialize<'de>>(
+fn process_echo<SP: SessionParameters>(
+    _id: &SP::Verifier,
     args: &Args<SP>,
-) -> Result<T, MaybeAttributableError<ThirdPartyError<SP>>> {
-    let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
+) -> Result<ProcessedEchoMessage<SP>, MaybeAttributableError<ThirdPartyError<SP>>> {
     let sender = args.get::<SP::Verifier>("sender")?;
-    let echoed_messages = args.get_map::<EchoMessage<SP>>("echo_messages")?;
+    let original_message = args.get::<OriginalMessage<SP>>("original_message")?;
+    let echo = args.get::<CheckedEchoMessage<SP>>("echo")?;
+    let ids_to_indices = args.get::<BTreeMap<SP::Verifier, usize>>("ids_to_indices")?;
 
-    let error_package = AssemblyError(echoed_messages.values().map(|echo| echo.0.clone()).collect::<Vec<_>>());
+    let error_package = (original_message.signed_value.clone(), echo.signed_value.clone());
 
-    // TODO (#93): re-attribution will happen here.
-
-    let mut messages = BTreeMap::new();
-    for echo_message in echoed_messages.values() {
-        let serialized_value = echo_message
-            .0
-            .clone()
-            .verify_and_unpack()
-            .expect("Signature checked in `check_echo()`");
-        let Ok(value_message) = SP::WireFormat::deserialize::<ValueMessage<SP>>(serialized_value.data()) else {
-            return Err(ThirdPartyError::new("Failed to deserialize", sender, error_package)?.into());
-        };
-        messages.insert(echo_message.0.metadata().destination().clone(), value_message);
-    }
-
-    let Ok(scheme) = messages.values().map(|message| message.scheme).all_equal_value() else {
-        return Err(ThirdPartyError::new("Not all schemes are equal", sender, error_package)?.into());
-    };
-    let Ok(root) = messages.values().map(|message| message.branch.root()).all_equal_value() else {
-        return Err(ThirdPartyError::new("Not all roots are equal", sender, error_package)?.into());
+    let Ok(value_message) = SP::WireFormat::deserialize::<ValueMessage<SP>>(echo.serialized_value.data()) else {
+        return Err(ThirdPartyError::new("Failed to deserialize", sender, error_package)?.into());
     };
 
-    let ids_to_indices = ids
-        .iter()
-        .enumerate()
-        .map(|(idx, id)| (id, idx))
-        .collect::<BTreeMap<_, _>>();
-
-    for (id, message) in &messages {
-        let idx = ids_to_indices
-            .get(id)
-            .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the list of all party IDs")))?;
-        if !message.branch.verify(*idx, &message.shard) {
-            return Err(ThirdPartyError::new("Branch verification failed", sender, error_package)?.into());
-        }
+    if value_message.branch.root() != original_message.value_message.branch.root() {
+        return Err(ThirdPartyError::new("Root mismatch", sender, error_package)?.into());
     }
 
-    let all_shards = sharding::interpolate::<SP>(scheme, messages.values().map(|message| &message.shard), ids)?;
-    let tree = MerkleTree::new(all_shards.values().enumerate())?;
-
-    if &tree.root() != root {
-        return Err(ThirdPartyError::new("Merkle root mismatch", sender, error_package)?.into());
+    if value_message.scheme != original_message.value_message.scheme {
+        return Err(ThirdPartyError::new("Scheme mismatch", sender, error_package)?.into());
     }
 
-    let value = sharding::assemble::<SP, T>(scheme, messages.values().map(|message| &message.shard))?;
+    let id = echo.signed_value.metadata().destination();
+    let idx = ids_to_indices
+        .get(id)
+        .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the list of all party IDs")))?;
+    if !value_message.branch.verify(*idx, &value_message.shard) {
+        return Err(ThirdPartyError::new("Branch verification failed", sender, error_package)?.into());
+    }
 
-    Ok(value)
+    Ok(ProcessedEchoMessage {
+        signed_value: echo.signed_value.clone(),
+        value_message,
+    })
 }
 
-fn verify_gen_output_error<SP: SessionParameters>(
+fn verify_process_echo<SP: SessionParameters>(
     _guilty_party: &SP::Verifier,
     _session_id: &SessionId<SP>,
     _associated_data: &AssociatedData<SP>,
 ) -> Result<EvidenceVerdict, RuntimeError> {
     todo!()
+}
+
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+struct AssemblyError<SP: SessionParameters> {
+    original_message: SignedValue<SP>,
+    echoed_messages: Vec<SignedValue<SP>>,
+}
+
+fn interpolate_and_check_root<SP: SessionParameters>(
+    args: &Args<SP>,
+) -> Result<(), MaybeAttributableError<ThirdPartyError<SP>>> {
+    let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
+    let sender = args.get::<SP::Verifier>("sender")?;
+    let original_message = args.get::<OriginalMessage<SP>>("original_message")?;
+    let echoed_messages = args.get_map::<ProcessedEchoMessage<SP>>("processed_echos")?;
+
+    let error_package = AssemblyError {
+        original_message: original_message.signed_value.clone(),
+        echoed_messages: echoed_messages
+            .values()
+            .map(|echo| echo.signed_value.clone())
+            .collect::<Vec<_>>(),
+    };
+
+    // TODO (#93): re-attribution will happen here.
+
+    let mut messages = BTreeMap::new();
+    for echo_message in echoed_messages.values() {
+        messages.insert(
+            echo_message.signed_value.metadata().destination().clone(),
+            echo_message.value_message.clone(),
+        );
+    }
+
+    let all_shards = sharding::interpolate::<SP>(
+        original_message.value_message.scheme,
+        messages.values().map(|message| &message.shard),
+        ids,
+    )?;
+    let tree = MerkleTree::new(all_shards.values().enumerate())?;
+
+    if &tree.root() != original_message.value_message.branch.root() {
+        return Err(ThirdPartyError::new("Merkle root mismatch", sender, error_package)?.into());
+    }
+
+    Ok(())
+}
+
+fn verify_interpolate_and_check_root_error<SP: SessionParameters>(
+    _guilty_party: &SP::Verifier,
+    _session_id: &SessionId<SP>,
+    _associated_data: &AssociatedData<SP>,
+) -> Result<EvidenceVerdict, RuntimeError> {
+    todo!()
+}
+
+fn finalize<SP: SessionParameters, T: Erasable + for<'de> Deserialize<'de>>(
+    args: &Args<SP>,
+) -> Result<T, UnattributableError> {
+    let original_message = args.get::<OriginalMessage<SP>>("original_message")?;
+    let processed_echos = args.get_map::<ProcessedEchoMessage<SP>>("processed_echos")?;
+    let value = sharding::assemble::<SP, T>(
+        original_message.value_message.scheme,
+        processed_echos.values().map(|echo| &echo.value_message.shard),
+    )?;
+    Ok(value)
 }
 
 /// Build data for the RBC protocol
@@ -263,16 +361,16 @@ where
         let f = build_data.max_faulty_parties;
 
         let no_overflow = "no overflow as enforced by BuildData::new()";
-        let recovery_threshold = n.checked_sub(f.checked_mul(2).expect(no_overflow)).expect(no_overflow);
-        let echo_threshold = n.checked_sub(f).expect(no_overflow);
-        let send_ready_threshold = f.checked_add(1).expect(no_overflow);
-        let finalize_threshold = f.checked_mul(2).expect(no_overflow).checked_add(1).expect(no_overflow);
+        let echos_to_finalize = n.checked_sub(f.checked_mul(2).expect(no_overflow)).expect(no_overflow);
+        let echos_to_check_root = n.checked_sub(f).expect(no_overflow);
+        let readies_to_send_ready = f.checked_add(1).expect(no_overflow);
+        let readies_to_finalize = f.checked_mul(2).expect(no_overflow).checked_add(1).expect(no_overflow);
 
         let ids = build_data.all_parties.iter().cloned().collect::<Vec<_>>();
         let ids_set = constant("ids", ids.iter().cloned().collect::<BTreeSet<SP::Verifier>>());
 
         let all_shards_sent = if &build_data.sender == party_build_data.id() {
-            let threshold = constant("threshold", recovery_threshold);
+            let threshold = constant("threshold", echos_to_finalize);
             let scheme_and_shards = compute_scalar(
                 "scheme_and_shards",
                 make_shards::<SP, T>,
@@ -306,12 +404,26 @@ where
             Dependency::from(&constant("empty_dependency", ()))
         };
 
-        let (value_signed, _value_raw) = receive_split(&message_value);
+        let (value_signed, value_deserialized) = receive_split(&message_value);
+
+        let sender = constant("sender", build_data.sender.clone());
+        let ids_to_indices = compute_scalar("ids_to_indices", make_ids_to_indices, &[("ids", (&ids_set).into())]);
 
         let sender_party = PartyGroup::new(core::slice::from_ref(&build_data.sender));
         let value_signed_scalar = collect(&value_signed, &sender_party).with_dependency(all_shards_sent);
+        let value_deserialized_scalar = collect(&value_deserialized, &sender_party);
 
-        let sender = constant("sender", build_data.sender.clone());
+        // TODO: conversion of 1-element collection map to a scalar seems like a common operation
+        let original_message = compute_scalar(
+            "scheme",
+            make_original_message,
+            &[
+                ("sender", (&sender).into()),
+                ("value_signed", (&value_signed_scalar).into()),
+                ("value", (&value_deserialized_scalar).into()),
+            ],
+        );
+
         let echo = compute_scalar(
             "echo",
             make_echo,
@@ -320,7 +432,8 @@ where
                 ("value_signed", (&value_signed_scalar).into()),
                 ("ids", (&ids_set).into()),
             ],
-        );
+        )
+        .with_dependency(&value_deserialized_scalar);
 
         let echo_sent = broadcast(&message_echo, &echo);
         let echo_received = receive(&message_echo);
@@ -331,6 +444,18 @@ where
             &[("sender", (&sender).into()), ("echo", (&echo_received).into())],
         );
 
+        let echo_processed = compute_mapping_third_party_fallible(
+            "echo_processed",
+            process_echo,
+            &[
+                ("sender", (&sender).into()),
+                ("original_message", (&original_message).into()),
+                ("echo", (&echo_checked).into()),
+                ("ids_to_indices", (&ids_to_indices).into()),
+            ],
+            verify_process_echo,
+        );
+
         // TODO: can this be relaxed? The algorithm in the paper only asks to send and echo when we received a share.
         // Can we proceed if only a few echos were sent?
         // Seems like the "0" threshold would be applicable here, but it creates problems
@@ -338,47 +463,62 @@ where
         // The "0" threshold basically means "we don't care if these were sent or not, just add the node to the tree"
         let all_echos_sent = collect(&echo_sent, &PartyGroup::new(&ids));
 
-        let all_echos_received = collect_into(
-            "enough_echos_for_ready",
-            &echo_checked,
-            &PartyGroup::new_threshold(&ids, echo_threshold),
+        let all_echos_to_check_root = collect_into(
+            "echos_to_check_root",
+            &echo_processed,
+            &PartyGroup::new_threshold(&ids, echos_to_check_root),
         )
         .with_dependency(&all_echos_sent);
 
-        let ready_received = receive(&message_ready);
-        let some_ready_received = collect_into(
-            "some_ready_received",
-            &ready_received,
-            &PartyGroup::new_threshold(&ids, send_ready_threshold),
-        );
-
-        let ready_trigger = merge_scalars(&all_echos_received, &some_ready_received);
-        let ready = constant("ready", ());
-        let ready_sent = broadcast(&message_ready, &ready).with_dependency(&ready_trigger);
-
-        let all_ready_received = collect_into(
-            "all_ready_received",
-            &ready_received,
-            &PartyGroup::new_threshold(&ids, finalize_threshold),
-        );
-        let enough_echos_received = collect_into(
-            "enough_echos_for_decode",
-            &echo_checked,
-            &PartyGroup::new_threshold(&ids, recovery_threshold),
-        );
-
-        // TODO: same as above, collect(ready_sent) can have a 0 threshold.
-        let output = compute_scalar_third_party_attributable(
-            "output",
-            gen_output::<SP, T>,
+        let root_checked = compute_scalar_third_party_attributable(
+            "root_checked",
+            interpolate_and_check_root,
             &[
-                ("echo_messages", (&enough_echos_received).into()),
+                ("processed_echos", (&all_echos_to_check_root).into()),
                 ("sender", (&sender).into()),
                 ("ids", (&ids_set).into()),
+                ("original_message", (&original_message).into()),
             ],
-            verify_gen_output_error,
+            verify_interpolate_and_check_root_error,
+        );
+
+        let ready_received = receive(&message_ready);
+
+        let all_readies_to_send_ready = collect_into(
+            "readies_to_send_ready",
+            &ready_received,
+            &PartyGroup::new_threshold(&ids, readies_to_send_ready),
+        );
+
+        let send_ready_trigger = merge_scalars(&root_checked, &all_readies_to_send_ready);
+        let ready = constant("ready", ());
+        let ready_sent = broadcast(&message_ready, &ready).with_dependency(&send_ready_trigger);
+
+        let all_echos_to_finalize = collect_into(
+            "echos_to_finalize",
+            &echo_processed,
+            &PartyGroup::new_threshold(&ids, echos_to_finalize),
         )
-        .with_dependency(&all_ready_received)
+        .with_dependency(&all_echos_sent);
+
+        let all_readies_to_finalize = collect_into(
+            "readies_to_finalize",
+            &ready_received,
+            &PartyGroup::new_threshold(&ids, readies_to_finalize),
+        );
+
+        let finalize_trigger = merge_scalars(&all_echos_to_finalize, &all_readies_to_finalize);
+
+        let output = compute_scalar(
+            "output",
+            finalize::<SP, T>,
+            &[
+                ("processed_echos", (&all_echos_to_finalize).into()),
+                ("original_message", (&original_message).into()),
+            ],
+        )
+        .with_dependency(&finalize_trigger)
+        // TODO: see above about the 0 threshold, this would be applicable here too.
         .with_dependency(&collect(&ready_sent, &PartyGroup::new(&ids)));
 
         Ok(output)
