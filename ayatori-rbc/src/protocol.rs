@@ -14,9 +14,15 @@ use super::{
     sharding::{self, Scheme, Shard},
 };
 
-/// Reliable threshold broadcast protocol.
-#[derive(Debug, Clone, Copy)]
-pub struct ReliableBroadcast<T>(PhantomData<fn() -> T>);
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+struct ValueMessage<SP: SessionParameters> {
+    scheme: Scheme,
+    shard: Shard,
+    branch: MerkleBranch<SP::Digest>,
+}
+
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+struct EchoMessage<SP: SessionParameters>(SignedValue<SP>);
 
 fn make_shards<SP: SessionParameters, T: Erasable + Serialize>(
     args: &Args<SP>,
@@ -250,21 +256,21 @@ fn verify_interpolate_and_check_root_error<SP: SessionParameters>(
 
 fn finalize<SP: SessionParameters, T: Erasable + for<'de> Deserialize<'de>>(
     args: &Args<SP>,
-) -> Result<T, UnattributableError> {
+) -> Result<Option<T>, UnattributableError> {
     let original_message = args.get::<OriginalMessage<SP>>("original_message")?;
     let processed_echos = args.get_map::<ProcessedEchoMessage<SP>>("processed_echos")?;
     let value = sharding::assemble::<SP, T>(
         original_message.value_message.scheme,
         processed_echos.values().map(|echo| &echo.value_message.shard),
     )?;
-    Ok(value)
+    Ok(Some(value))
 }
 
 /// Build data for the RBC protocol
 #[derive_where::derive_where(Debug, Clone)]
 pub struct BuildData<SP: SessionParameters> {
     sender: SP::Verifier,
-    all_parties: BTreeSet<SP::Verifier>,
+    receivers: BTreeSet<SP::Verifier>,
     max_faulty_parties: usize,
 }
 
@@ -275,15 +281,11 @@ impl<SP: SessionParameters> BuildData<SP> {
     /// `sender` must be a member of `all_parties`.
     /// `max_faulty_parties` should be such that `max_faulty_parties * 2 + 1 <= len(all_parties)`
     pub fn new(
-        all_parties: &BTreeSet<SP::Verifier>,
+        receivers: &BTreeSet<SP::Verifier>,
         sender: &SP::Verifier,
         max_faulty_parties: usize,
     ) -> Result<Self, RuntimeError> {
-        if !all_parties.contains(sender) {
-            return Err(RuntimeError::new("All parties must contain the sender"));
-        }
-
-        if all_parties.len()
+        if receivers.len()
             < max_faulty_parties
                 .checked_mul(2)
                 .expect("no overflow")
@@ -295,26 +297,22 @@ impl<SP: SessionParameters> BuildData<SP> {
 
         Ok(Self {
             sender: sender.clone(),
-            all_parties: all_parties.clone(),
+            receivers: receivers.clone(),
             max_faulty_parties,
         })
     }
 
     #[cfg(test)]
-    pub(crate) fn all_parties(&self) -> &BTreeSet<SP::Verifier> {
-        &self.all_parties
+    pub(crate) fn all_parties(&self) -> BTreeSet<SP::Verifier> {
+        let mut result = self.receivers.clone();
+        result.insert(self.sender.clone());
+        result
     }
 }
 
-#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
-struct ValueMessage<SP: SessionParameters> {
-    scheme: Scheme,
-    shard: Shard,
-    branch: MerkleBranch<SP::Digest>,
-}
-
-#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
-struct EchoMessage<SP: SessionParameters>(SignedValue<SP>);
+/// Reliable threshold broadcast protocol.
+#[derive(Debug, Clone, Copy)]
+pub struct ReliableBroadcast<T>(PhantomData<fn() -> T>);
 
 impl<SP, T> ComposableProtocol<SP> for ReliableBroadcast<T>
 where
@@ -333,13 +331,16 @@ where
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
+        let is_sender = &build_data.sender == party_build_data.id();
+        let is_receiver = build_data.receivers.contains(party_build_data.id());
+
         let message_value = ProtocolMessage::new::<ValueMessage<SP>>("value");
         let message_echo = ProtocolMessage::new::<EchoMessage<SP>>("echo");
         let message_ready = ProtocolMessage::new::<()>("ready");
 
         let to_broadcast = inputs.get("to_broadcast")?;
 
-        let n = build_data.all_parties.len();
+        let n = build_data.receivers.len();
         let f = build_data.max_faulty_parties;
 
         let no_overflow = "no overflow as enforced by BuildData::new()";
@@ -348,12 +349,12 @@ where
         let readies_to_send_ready = f.checked_add(1).expect(no_overflow);
         let readies_to_finalize = f.checked_mul(2).expect(no_overflow).checked_add(1).expect(no_overflow);
 
-        let ids = build_data.all_parties.iter().cloned().collect::<Vec<_>>();
+        let ids = build_data.receivers.iter().cloned().collect::<Vec<_>>();
         let ids_set = constant("ids", ids.iter().cloned().collect::<BTreeSet<SP::Verifier>>());
 
         let ids_to_indices = compute_scalar("ids_to_indices", make_ids_to_indices, &[("ids", (&ids_set).into())]);
 
-        let all_shards_sent = if &build_data.sender == party_build_data.id() {
+        let all_shards_sent = if is_sender {
             let threshold = constant("threshold", echos_to_finalize);
             let scheme_and_shards = compute_scalar(
                 "scheme_and_shards",
@@ -388,122 +389,126 @@ where
             Dependency::from(&constant("empty_dependency", ()))
         };
 
-        let (value_signed, value_deserialized) = receive_split(&message_value);
+        if is_receiver {
+            let (value_signed, value_deserialized) = receive_split(&message_value);
 
-        let sender = constant("sender", build_data.sender.clone());
+            let sender = constant("sender", build_data.sender.clone());
 
-        let sender_party = PartyGroup::new(core::slice::from_ref(&build_data.sender));
-        let value_signed_scalar = collect(&value_signed, &sender_party).with_dependency(all_shards_sent);
-        let value_deserialized_scalar = collect(&value_deserialized, &sender_party);
+            let sender_party = PartyGroup::new(core::slice::from_ref(&build_data.sender));
+            let value_signed_scalar = collect(&value_signed, &sender_party).with_dependency(all_shards_sent);
+            let value_deserialized_scalar = collect(&value_deserialized, &sender_party);
 
-        // TODO: conversion of 1-element collection map to a scalar seems like a common operation
-        let original_message = compute_scalar(
-            "scheme",
-            make_original_message,
-            &[
-                ("sender", (&sender).into()),
-                ("value_signed", (&value_signed_scalar).into()),
-                ("value", (&value_deserialized_scalar).into()),
-            ],
-        );
+            // TODO: conversion of 1-element collection map to a scalar seems like a common operation
+            let original_message = compute_scalar(
+                "scheme",
+                make_original_message,
+                &[
+                    ("sender", (&sender).into()),
+                    ("value_signed", (&value_signed_scalar).into()),
+                    ("value", (&value_deserialized_scalar).into()),
+                ],
+            );
 
-        let echo = compute_scalar(
-            "echo",
-            make_echo,
-            &[
-                ("sender", (&sender).into()),
-                ("value_signed", (&value_signed_scalar).into()),
-                ("ids", (&ids_set).into()),
-            ],
-        )
-        .with_dependency(&value_deserialized_scalar);
+            let echo = compute_scalar(
+                "echo",
+                make_echo,
+                &[
+                    ("sender", (&sender).into()),
+                    ("value_signed", (&value_signed_scalar).into()),
+                    ("ids", (&ids_set).into()),
+                ],
+            )
+            .with_dependency(&value_deserialized_scalar);
 
-        let echo_sent = broadcast(&message_echo, &echo);
-        let echo_received = receive(&message_echo);
+            let echo_sent = broadcast(&message_echo, &echo);
+            let echo_received = receive(&message_echo);
 
-        let echo_checked = compute_mapping_sender_fallible(
-            "echo_checked",
-            check_echo,
-            &[("sender", (&sender).into()), ("echo", (&echo_received).into())],
-        );
+            let echo_checked = compute_mapping_sender_fallible(
+                "echo_checked",
+                check_echo,
+                &[("sender", (&sender).into()), ("echo", (&echo_received).into())],
+            );
 
-        let echo_processed = compute_mapping_third_party_fallible(
-            "echo_processed",
-            process_echo,
-            &[
-                ("sender", (&sender).into()),
-                ("original_message", (&original_message).into()),
-                ("echo", (&echo_checked).into()),
-                ("ids_to_indices", (&ids_to_indices).into()),
-            ],
-            verify_process_echo,
-        );
+            let echo_processed = compute_mapping_third_party_fallible(
+                "echo_processed",
+                process_echo,
+                &[
+                    ("sender", (&sender).into()),
+                    ("original_message", (&original_message).into()),
+                    ("echo", (&echo_checked).into()),
+                    ("ids_to_indices", (&ids_to_indices).into()),
+                ],
+                verify_process_echo,
+            );
 
-        // TODO: can this be relaxed? The algorithm in the paper only asks to send and echo when we received a share.
-        // Can we proceed if only a few echos were sent?
-        // Seems like the "0" threshold would be applicable here, but it creates problems
-        // since the action of collecting does not find any values in the storage.
-        // The "0" threshold basically means "we don't care if these were sent or not, just add the node to the tree"
-        let all_echos_sent = collect(&echo_sent, &PartyGroup::new(&ids));
+            // TODO: can this be relaxed? The algorithm in the paper only asks to send and echo when we received a share.
+            // Can we proceed if only a few echos were sent?
+            // Seems like the "0" threshold would be applicable here, but it creates problems
+            // since the action of collecting does not find any values in the storage.
+            // The "0" threshold basically means "we don't care if these were sent or not, just add the node to the tree"
+            let all_echos_sent = collect(&echo_sent, &PartyGroup::new(&ids));
 
-        let all_echos_to_check_root = collect_into(
-            "echos_to_check_root",
-            &echo_processed,
-            &PartyGroup::new_threshold(&ids, echos_to_check_root),
-        )
-        .with_dependency(&all_echos_sent);
+            let all_echos_to_check_root = collect_into(
+                "echos_to_check_root",
+                &echo_processed,
+                &PartyGroup::new_threshold(&ids, echos_to_check_root),
+            )
+            .with_dependency(&all_echos_sent);
 
-        let root_checked = compute_scalar_third_party_attributable(
-            "root_checked",
-            interpolate_and_check_root,
-            &[
-                ("processed_echos", (&all_echos_to_check_root).into()),
-                ("sender", (&sender).into()),
-                ("ids", (&ids_set).into()),
-                ("original_message", (&original_message).into()),
-            ],
-            verify_interpolate_and_check_root_error,
-        );
+            let root_checked = compute_scalar_third_party_attributable(
+                "root_checked",
+                interpolate_and_check_root,
+                &[
+                    ("processed_echos", (&all_echos_to_check_root).into()),
+                    ("sender", (&sender).into()),
+                    ("ids", (&ids_set).into()),
+                    ("original_message", (&original_message).into()),
+                ],
+                verify_interpolate_and_check_root_error,
+            );
 
-        let ready_received = receive(&message_ready);
+            let ready_received = receive(&message_ready);
 
-        let all_readies_to_send_ready = collect_into(
-            "readies_to_send_ready",
-            &ready_received,
-            &PartyGroup::new_threshold(&ids, readies_to_send_ready),
-        );
+            let all_readies_to_send_ready = collect_into(
+                "readies_to_send_ready",
+                &ready_received,
+                &PartyGroup::new_threshold(&ids, readies_to_send_ready),
+            );
 
-        let send_ready_trigger = merge_scalars(&root_checked, &all_readies_to_send_ready);
-        let ready = constant("ready", ());
-        let ready_sent = broadcast(&message_ready, &ready).with_dependency(&send_ready_trigger);
+            let send_ready_trigger = merge_scalars(&root_checked, &all_readies_to_send_ready);
+            let ready = constant("ready", ());
+            let ready_sent = broadcast(&message_ready, &ready).with_dependency(&send_ready_trigger);
 
-        let all_echos_to_finalize = collect_into(
-            "echos_to_finalize",
-            &echo_processed,
-            &PartyGroup::new_threshold(&ids, echos_to_finalize),
-        )
-        .with_dependency(&all_echos_sent);
+            let all_echos_to_finalize = collect_into(
+                "echos_to_finalize",
+                &echo_processed,
+                &PartyGroup::new_threshold(&ids, echos_to_finalize),
+            )
+            .with_dependency(&all_echos_sent);
 
-        let all_readies_to_finalize = collect_into(
-            "readies_to_finalize",
-            &ready_received,
-            &PartyGroup::new_threshold(&ids, readies_to_finalize),
-        );
+            let all_readies_to_finalize = collect_into(
+                "readies_to_finalize",
+                &ready_received,
+                &PartyGroup::new_threshold(&ids, readies_to_finalize),
+            );
 
-        let finalize_trigger = merge_scalars(&all_echos_to_finalize, &all_readies_to_finalize);
+            let finalize_trigger = merge_scalars(&all_echos_to_finalize, &all_readies_to_finalize);
 
-        let output = compute_scalar(
-            "output",
-            finalize::<SP, T>,
-            &[
-                ("processed_echos", (&all_echos_to_finalize).into()),
-                ("original_message", (&original_message).into()),
-            ],
-        )
-        .with_dependency(&finalize_trigger)
-        // TODO: see above about the 0 threshold, this would be applicable here too.
-        .with_dependency(&collect(&ready_sent, &PartyGroup::new(&ids)));
+            let output = compute_scalar(
+                "output",
+                finalize::<SP, T>,
+                &[
+                    ("processed_echos", (&all_echos_to_finalize).into()),
+                    ("original_message", (&original_message).into()),
+                ],
+            )
+            .with_dependency(&finalize_trigger)
+            // TODO: see above about the 0 threshold, this would be applicable here too.
+            .with_dependency(&collect(&ready_sent, &PartyGroup::new(&ids)));
 
-        Ok(output)
+            Ok(output)
+        } else {
+            Ok(constant::<_, Option<T>>("output", None).with_dependency(all_shards_sent))
+        }
     }
 }

@@ -25,20 +25,20 @@ type Value = u64;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PrivateData {
-    Sender { value: Value },
-    Receiver,
+    Sender(Value),
+    NotSender,
 }
 
 // TODO: this implementation is only needed for tests
 impl<SP: SessionParameters> ExecutableProtocol<SP> for ReliableBroadcast<Value> {
     type PrivateData = PrivateData;
     type SharedData = BuildData<SP>;
-    type Output = Value;
+    type Output = Option<Value>;
 
     fn make_private_inputs(private_data: &Self::PrivateData) -> PrivateInputs {
         match private_data {
-            PrivateData::Receiver => PrivateInputs::new(),
-            PrivateData::Sender { value } => PrivateInputs::new().input("to_broadcast", *value),
+            PrivateData::NotSender => PrivateInputs::new(),
+            PrivateData::Sender(value) => PrivateInputs::new().input("to_broadcast", *value),
         }
     }
 
@@ -51,7 +51,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for ReliableBroadcast<Value> 
     }
 
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.all_parties().clone()
+        shared_data.all_parties()
     }
 }
 
@@ -72,18 +72,49 @@ fn happy_path() {
         .into_iter()
         .map(|signer| {
             let private_data = if signer.verifying_key() == ids[0] {
-                PrivateData::Sender { value: 111 }
+                PrivateData::Sender(111)
             } else {
-                PrivateData::Receiver
+                PrivateData::NotSender
             };
             S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
         })
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    let value = results.reports[&ids[0]].success_ref().unwrap();
-    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
-    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
+    assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &Some(111));
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), &Some(111));
+    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), &Some(111));
+}
+
+#[test]
+fn happy_path_distinct_sender() {
+    let signers = (1..5).map(TestSigner::new).collect::<Vec<_>>();
+    let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
+
+    let mut receivers = ids.iter().copied().collect::<BTreeSet<_>>();
+    receivers.remove(&ids[0]);
+    let build_data = BuildData::new(&receivers, &ids[0], 1).unwrap();
+
+    let mut rng = ChaCha8Rng::seed_from_u64(123);
+    let session_id = SessionId::random(&mut rng).unwrap();
+
+    let sessions = signers
+        .into_iter()
+        .map(|signer| {
+            let private_data = if signer.verifying_key() == ids[0] {
+                PrivateData::Sender(111)
+            } else {
+                PrivateData::NotSender
+            };
+            S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
+        })
+        .collect::<Vec<_>>();
+    let results = run_sessions_sync(&mut rng, sessions).unwrap();
+
+    assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &None);
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), &Some(111));
+    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), &Some(111));
+    assert_eq!(results.reports[&ids[3]].success_ref().unwrap(), &Some(111));
 }
 
 #[test]
@@ -100,18 +131,18 @@ fn happy_path_n_of_n() {
         .into_iter()
         .map(|signer| {
             let private_data = if signer.verifying_key() == ids[0] {
-                PrivateData::Sender { value: 111 }
+                PrivateData::Sender(111)
             } else {
-                PrivateData::Receiver
+                PrivateData::NotSender
             };
             S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
         })
         .collect::<Vec<_>>();
     let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
-    let value = results.reports[&ids[0]].success_ref().unwrap();
-    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
-    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), value);
+    assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &Some(111));
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), &Some(111));
+    assert_eq!(results.reports[&ids[2]].success_ref().unwrap(), &Some(111));
 }
 
 #[test]
@@ -128,9 +159,9 @@ fn unresponsive_party() {
         .into_iter()
         .map(|signer| {
             let private_data = if signer.verifying_key() == ids[0] {
-                PrivateData::Sender { value: 111 }
+                PrivateData::Sender(111)
             } else {
-                PrivateData::Receiver
+                PrivateData::NotSender
             };
             S::new(session_id.clone(), signer, &private_data, &build_data).unwrap()
         })
@@ -144,8 +175,8 @@ fn unresponsive_party() {
 
     let results = runner.run_sessions(&mut rng, sessions).unwrap();
 
-    let value = results.reports[&ids[0]].success_ref().unwrap();
-    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);
+    assert_eq!(results.reports[&ids[0]].success_ref().unwrap(), &Some(111));
+    assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), &Some(111));
     assert!(matches!(
         results.reports[&ids[2]].outcome,
         SessionOutcome::Unfinishable(_)
@@ -181,13 +212,13 @@ fn sender_fault() {
         .into_iter()
         .map(|signer| {
             if signer.verifying_key() == ids[0] {
-                let private_data = PrivateData::Sender { value: 111 };
+                let private_data = PrivateData::Sender(111);
                 let replacement =
                     Replacement::<SP>::compute_scalar(&["scheme_and_shards"], malicious_make_shards).unwrap();
                 S::new_with_replacements(session_id.clone(), signer, &private_data, &build_data, &[&replacement])
                     .unwrap()
             } else {
-                S::new(session_id.clone(), signer, &PrivateData::Receiver, &build_data).unwrap()
+                S::new(session_id.clone(), signer, &PrivateData::NotSender, &build_data).unwrap()
             }
         })
         .collect::<Vec<_>>();
