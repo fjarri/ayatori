@@ -232,10 +232,7 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                     result.insert(MappingTagRef::LocalSigned(&node.as_ref().data.as_ref().store_in), ids);
                 }
                 AnyNode::Collect(node) => {
-                    result.insert(
-                        node.as_ref().values.store_in(),
-                        node.as_ref().group.ids().cloned().collect(),
-                    );
+                    result.insert(node.as_ref().values.store_in(), node.as_ref().group.ids().clone());
                 }
             }
         }

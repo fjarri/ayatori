@@ -91,7 +91,7 @@ mod tests {
         dev::{
             BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async,
         },
-        protocol_user_api::{PartyGroup, Session, SessionId},
+        protocol_user_api::{Session, SessionId, ThresholdGroup},
         signature::{Keypair, rand_core::SeedableRng},
     };
     use rand_chacha::ChaCha8Rng;
@@ -111,7 +111,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let private_data = 999;
-        let shared_data = (1001, PartyGroup::new(&ids));
+        let shared_data = (1001, ThresholdGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

@@ -36,13 +36,14 @@ fn gen_secrets<SP: SessionParameters>(
     rng: &mut SP::Rng,
     args: &Args<SP>,
 ) -> Result<BTreeMap<SP::Verifier, u64>, UnattributableError> {
-    let all_parties = args.get::<PartyGroup<SP::Verifier>>("all_parties")?;
+    let all_parties = args.get::<ThresholdGroup<SP::Verifier>>("all_parties")?;
     let mut secrets = all_parties
         .ids()
+        .iter()
         .map(|id| (id.clone(), rng.try_next_u64().unwrap() % MODULUS))
         .collect::<BTreeMap<_, _>>();
     let total = secrets.values().sum::<u64>() % MODULUS;
-    let id = all_parties.ids().next().unwrap();
+    let id = all_parties.ids().iter().next().unwrap();
     *secrets.get_mut(id).unwrap() = modsub(secrets[id], total);
     Ok(secrets)
 }
@@ -127,7 +128,7 @@ fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<BTreeMap<SP::Ver
 
 impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type PrivateData = ();
-    type SharedData = PartyGroup<SP::Verifier>;
+    type SharedData = ThresholdGroup<SP::Verifier>;
     type Output = BTreeMap<SP::Verifier, u64>;
 
     fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
@@ -143,13 +144,13 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     }
 
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.ids().cloned().collect()
+        shared_data.ids().clone()
     }
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     type OutputNode = Node<ComputeScalar<SP>>;
-    type BuildData = PartyGroup<SP::Verifier>;
+    type BuildData = ThresholdGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
         ProtocolSignature::new()
@@ -253,7 +254,7 @@ mod tests {
     fn happy_path() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = PartyGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();
@@ -277,7 +278,7 @@ mod tests {
     fn provable_error() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = PartyGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

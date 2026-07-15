@@ -137,7 +137,8 @@ fn check_echo<SP: SessionParameters>(
         return Err(SenderError::new("echo source is incorrect").into());
     }
 
-    // TODO: check the message name. Note that it may be prefixed.
+    // TODO (#93): check the message name. Note that it may be prefixed.
+    // This may be done automatically when #93 is fixed.
 
     let Ok(serialized_value) = echo.0.clone().verify_and_unpack() else {
         return Err(SenderError::new("echo contains a message with an invalid signature").into());
@@ -384,7 +385,7 @@ where
             let shards_sent = direct_message(&message_value, &value_messages);
             // TODO: this should be a "trigger" node since we don't care about the values
             // TODO: what should be the threshold here?
-            Dependency::from(&collect(&shards_sent, &PartyGroup::new(&ids)))
+            Dependency::from(&collect(&shards_sent, &ThresholdGroup::new(&ids)))
         } else {
             Dependency::from(&constant("empty_dependency", ()))
         };
@@ -394,7 +395,7 @@ where
 
             let sender = constant("sender", build_data.sender.clone());
 
-            let sender_party = PartyGroup::new(core::slice::from_ref(&build_data.sender));
+            let sender_party = ThresholdGroup::new(core::slice::from_ref(&build_data.sender));
             let value_signed_scalar = collect(&value_signed, &sender_party).with_dependency(all_shards_sent);
             let value_deserialized_scalar = collect(&value_deserialized, &sender_party);
 
@@ -446,12 +447,12 @@ where
             // Seems like the "0" threshold would be applicable here, but it creates problems
             // since the action of collecting does not find any values in the storage.
             // The "0" threshold basically means "we don't care if these were sent or not, just add the node to the tree"
-            let all_echos_sent = collect(&echo_sent, &PartyGroup::new(&ids));
+            let all_echos_sent = collect(&echo_sent, &ThresholdGroup::new(&ids));
 
             let all_echos_to_check_root = collect_into(
                 "echos_to_check_root",
                 &echo_processed,
-                &PartyGroup::new_threshold(&ids, echos_to_check_root),
+                &ThresholdGroup::new_threshold(&ids, echos_to_check_root),
             )
             .with_dependency(&all_echos_sent);
 
@@ -472,7 +473,7 @@ where
             let all_readies_to_send_ready = collect_into(
                 "readies_to_send_ready",
                 &ready_received,
-                &PartyGroup::new_threshold(&ids, readies_to_send_ready),
+                &ThresholdGroup::new_threshold(&ids, readies_to_send_ready),
             );
 
             let send_ready_trigger = merge_scalars(&root_checked, &all_readies_to_send_ready);
@@ -482,14 +483,14 @@ where
             let all_echos_to_finalize = collect_into(
                 "echos_to_finalize",
                 &echo_processed,
-                &PartyGroup::new_threshold(&ids, echos_to_finalize),
+                &ThresholdGroup::new_threshold(&ids, echos_to_finalize),
             )
             .with_dependency(&all_echos_sent);
 
             let all_readies_to_finalize = collect_into(
                 "readies_to_finalize",
                 &ready_received,
-                &PartyGroup::new_threshold(&ids, readies_to_finalize),
+                &ThresholdGroup::new_threshold(&ids, readies_to_finalize),
             );
 
             let finalize_trigger = merge_scalars(&all_echos_to_finalize, &all_readies_to_finalize);
@@ -504,7 +505,7 @@ where
             )
             .with_dependency(&finalize_trigger)
             // TODO: see above about the 0 threshold, this would be applicable here too.
-            .with_dependency(&collect(&ready_sent, &PartyGroup::new(&ids)));
+            .with_dependency(&collect(&ready_sent, &ThresholdGroup::new(&ids)));
 
             Ok(output)
         } else {

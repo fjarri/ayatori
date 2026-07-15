@@ -1,4 +1,5 @@
 use alloc::{
+    boxed::Box,
     collections::BTreeMap,
     format,
     string::{String, ToString},
@@ -258,7 +259,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeScalar<SP>> {
 pub struct Collect<SP: SessionParameters> {
     pub(crate) store_in: CollectedTag,
     pub(crate) values: CollectArg<SP>,
-    pub(crate) group: PartyGroup<SP::Verifier>,
+    pub(crate) group: Box<dyn PartyGroup<SP::Verifier>>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
@@ -267,7 +268,7 @@ impl<SP: SessionParameters> ShallowClone for Collect<SP> {
         Self {
             store_in: self.store_in.clone(),
             values: self.values.get_strong_ref(),
-            group: self.group.clone(),
+            group: self.group.clone_box(),
             dependencies: node_slice_to_owned(&self.dependencies),
         }
     }

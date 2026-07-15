@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeSet, format};
+use alloc::{boxed::Box, collections::BTreeSet, format};
 use core::fmt::{self, Debug, Display};
 
 use itertools::Itertools;
@@ -7,13 +7,29 @@ use crate::traits::PartyId;
 
 /// A group of parties that, in the context of a protocol, are required to provide certain information
 /// (could be all of the parties, or some threshold subset).
+pub trait PartyGroup<Id: PartyId>: Debug + Send + Sync {
+    /// Returns all IDs in this group.
+    fn ids(&self) -> &BTreeSet<Id>;
+
+    /// Returns `true` if the information from `ids` is enough to move on in the protocol.
+    fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool;
+
+    /// Returns `true` if it is not possible for [`Self::has_quorum`] to return `true`
+    /// if `without_ids` are guaranteed not to be present in `ids`.
+    fn is_quorum_possible(&self, without_ids: &BTreeSet<Id>) -> bool;
+
+    /// Clones this object into a `Box`.
+    fn clone_box(&self) -> Box<dyn PartyGroup<Id>>;
+}
+
+/// A party group with quorum achievable with any subset of parties with the size over a given threshold.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PartyGroup<Id: PartyId> {
+pub struct ThresholdGroup<Id: PartyId> {
     ids: BTreeSet<Id>,
     threshold: usize,
 }
 
-impl<Id: PartyId> PartyGroup<Id> {
+impl<Id: PartyId> ThresholdGroup<Id> {
     /// Creates a new group from party IDs.
     ///
     /// Repeating IDs are ignored.
@@ -33,24 +49,6 @@ impl<Id: PartyId> PartyGroup<Id> {
         }
     }
 
-    /// Returns all IDs in this group.
-    pub fn ids(&self) -> impl Iterator<Item = &Id> {
-        self.ids.iter()
-    }
-
-    /// Returns `true` if the information from `ids` is enough to move on in the protocol.
-    #[must_use]
-    pub fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool {
-        ids.intersection(&self.ids).count() >= self.threshold
-    }
-
-    /// Returns `true` if it is not possible for [`Self::has_quorum`] to return `true`
-    /// if `banned_ids` are guaranteed not to be present in `ids`.
-    #[must_use]
-    pub fn is_quorum_possible(&self, banned_ids: &BTreeSet<Id>) -> bool {
-        self.ids.difference(banned_ids).count() >= self.threshold
-    }
-
     /// Returns the quorum threshold.
     #[must_use]
     pub fn threshold(&self) -> usize {
@@ -58,7 +56,25 @@ impl<Id: PartyId> PartyGroup<Id> {
     }
 }
 
-impl<Id: PartyId> Display for PartyGroup<Id> {
+impl<Id: PartyId> PartyGroup<Id> for ThresholdGroup<Id> {
+    fn ids(&self) -> &BTreeSet<Id> {
+        &self.ids
+    }
+
+    fn has_quorum(&self, ids: &BTreeSet<Id>) -> bool {
+        ids.intersection(&self.ids).count() >= self.threshold
+    }
+
+    fn is_quorum_possible(&self, without_ids: &BTreeSet<Id>) -> bool {
+        self.ids.difference(without_ids).count() >= self.threshold
+    }
+
+    fn clone_box(&self) -> Box<dyn PartyGroup<Id>> {
+        Box::new(self.clone())
+    }
+}
+
+impl<Id: PartyId> Display for ThresholdGroup<Id> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let ids = self.ids.iter().map(|id| format!("{id:?}")).join(", ");
         write!(f, "{{{ids}}}")

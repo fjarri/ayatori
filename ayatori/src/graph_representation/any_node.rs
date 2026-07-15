@@ -21,7 +21,7 @@ use super::{
 use crate::{
     entities::{
         AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, MaybeAttributableError,
-        PartyGroup, RuntimeError, ScalarTagRef, SimpleMappingFunction, SimpleScalarFunction, UnattributableError,
+        RuntimeError, ScalarTagRef, SimpleMappingFunction, SimpleScalarFunction, ThresholdGroup, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     traced_error::TraceableResult,
@@ -352,7 +352,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
 
         // The output must be a scalar node, and `node` is a mapping node.
         // So we wrap it in a collect.
-        let collected = collect(node, &PartyGroup::new(core::slice::from_ref(guilty_party)));
+        let collected = collect(node, &ThresholdGroup::new(core::slice::from_ref(guilty_party)));
 
         // This is a bit of a hack.
         // To make the node tree suitable for a ruleset generation, the root node must be a scalar computation node.

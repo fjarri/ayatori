@@ -29,7 +29,7 @@ pub use errors::{
 };
 pub use function::EvidenceVerdict;
 pub use message::{Message, MessageId, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedValue};
-pub use party::PartyGroup;
+pub use party::{PartyGroup, ThresholdGroup};
 pub use session_id::SessionId;
 pub use tag::FullName;
 pub use value::{Erasable, SerdeAdapter, SerializedValue};

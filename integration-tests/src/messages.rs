@@ -58,7 +58,7 @@ fn gen_output<SP: SessionParameters>(args: &Args<SP>) -> Result<(), Unattributab
 
 impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type PrivateData = ();
-    type SharedData = PartyGroup<SP::Verifier>;
+    type SharedData = ThresholdGroup<SP::Verifier>;
     type Output = ();
 
     fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
@@ -74,13 +74,13 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     }
 
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.ids().cloned().collect()
+        shared_data.ids().clone()
     }
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     type OutputNode = Node<ComputeScalar<SP>>;
-    type BuildData = PartyGroup<SP::Verifier>;
+    type BuildData = ThresholdGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
         ProtocolSignature::new()
@@ -107,10 +107,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let y = receive(&message_y);
         let all_y = collect(&y, all_parties).with_dependency(&collect(&y_sent, all_parties));
 
-        // TODO: expose the internal set of PartyGroup?
-        let mut ids = all_parties.ids().cloned().collect::<BTreeSet<_>>();
+        let mut ids = all_parties.ids().clone();
         ids.remove(party_build_data.id());
-        let my_z_group = PartyGroup::new(&ids.into_iter().collect::<Vec<_>>());
+        let my_z_group = ThresholdGroup::new(&ids.into_iter().collect::<Vec<_>>());
         let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[]);
         let z_sent = direct_message(&message_z, &my_z);
         let z = receive(&message_z);
@@ -142,7 +141,7 @@ mod tests {
     fn happy_path() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = PartyGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

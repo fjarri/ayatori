@@ -533,14 +533,14 @@ pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Node<Des
 /// Collects the elements of a mapping node into a scalar node.
 pub fn collect<SP: SessionParameters>(
     values: impl Into<CollectArg<SP>>,
-    group: &PartyGroup<SP::Verifier>,
+    group: &impl PartyGroup<SP::Verifier>,
 ) -> Node<Collect<SP>> {
     let values = values.into();
     let store_in = values.store_in().to_collected();
     Node::new(Collect {
         store_in,
         values,
-        group: group.clone(),
+        group: group.clone_box(),
         dependencies: Vec::new(),
     })
 }
@@ -552,14 +552,14 @@ pub fn collect<SP: SessionParameters>(
 pub fn collect_into<SP: SessionParameters>(
     name: &str,
     values: impl Into<CollectArg<SP>>,
-    group: &PartyGroup<SP::Verifier>,
+    group: &impl PartyGroup<SP::Verifier>,
 ) -> Node<Collect<SP>> {
     let values = values.into();
     let store_in = CollectedTag::new(name);
     Node::new(Collect {
         store_in,
         values,
-        group: group.clone(),
+        group: group.clone_box(),
         dependencies: Vec::new(),
     })
 }
