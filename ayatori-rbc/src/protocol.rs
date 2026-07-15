@@ -52,14 +52,8 @@ fn make_value_message<SP: SessionParameters>(
 ) -> Result<ValueMessage<SP>, UnattributableError> {
     let (scheme, shards) = args.get::<(Scheme, BTreeMap<SP::Verifier, Shard>)>("scheme_and_shards")?;
     let merkle_tree = args.get::<MerkleTree<SP::Digest>>("merkle_tree")?;
-    let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
+    let ids_to_indices = args.get::<BTreeMap<SP::Verifier, usize>>("ids_to_indices")?;
 
-    // TODO: only generate once
-    let ids_to_indices = ids
-        .iter()
-        .enumerate()
-        .map(|(idx, id)| (id, idx))
-        .collect::<BTreeMap<_, _>>();
     let idx = ids_to_indices
         .get(id)
         .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the list of all party IDs")))?;
@@ -369,6 +363,8 @@ where
         let ids = build_data.all_parties.iter().cloned().collect::<Vec<_>>();
         let ids_set = constant("ids", ids.iter().cloned().collect::<BTreeSet<SP::Verifier>>());
 
+        let ids_to_indices = compute_scalar("ids_to_indices", make_ids_to_indices, &[("ids", (&ids_set).into())]);
+
         let all_shards_sent = if &build_data.sender == party_build_data.id() {
             let threshold = constant("threshold", echos_to_finalize);
             let scheme_and_shards = compute_scalar(
@@ -392,7 +388,7 @@ where
                 &[
                     ("scheme_and_shards", (&scheme_and_shards).into()),
                     ("merkle_tree", (&merkle_tree).into()),
-                    ("ids", (&ids_set).into()),
+                    ("ids_to_indices", (&ids_to_indices).into()),
                 ],
             );
 
@@ -407,7 +403,6 @@ where
         let (value_signed, value_deserialized) = receive_split(&message_value);
 
         let sender = constant("sender", build_data.sender.clone());
-        let ids_to_indices = compute_scalar("ids_to_indices", make_ids_to_indices, &[("ids", (&ids_set).into())]);
 
         let sender_party = PartyGroup::new(core::slice::from_ref(&build_data.sender));
         let value_signed_scalar = collect(&value_signed, &sender_party).with_dependency(all_shards_sent);
