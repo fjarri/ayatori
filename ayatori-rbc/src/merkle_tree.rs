@@ -47,7 +47,6 @@ pub(crate) trait Hashable<D: FixedOutput> {
 }
 
 impl<D: FixedOutput + Default> MerkleTree<D> {
-    // TODO: enforce via types that it's a "full set" of shards, not just some of them
     #[expect(
         // This can only fail if we have more items than the capacity of `usize`
         clippy::arithmetic_side_effects,

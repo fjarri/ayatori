@@ -1,9 +1,6 @@
 #![expect(clippy::indexing_slicing)]
 
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    vec::Vec,
-};
+use alloc::{collections::BTreeSet, vec::Vec};
 
 use rand_chacha::ChaCha8Rng;
 
@@ -18,7 +15,7 @@ use ayatori::{
 
 use crate::{
     BuildData, ReliableBroadcast,
-    sharding::{Scheme, Shard, ShardKind},
+    sharding::{FullShardSet, Scheme, ShardKind},
 };
 
 type Value = u64;
@@ -29,7 +26,6 @@ pub enum PrivateData {
     NotSender,
 }
 
-// TODO: this implementation is only needed for tests
 impl<SP: SessionParameters> ExecutableProtocol<SP> for ReliableBroadcast<Value> {
     type PrivateData = PrivateData;
     type SharedData = BuildData<SP>;
@@ -185,11 +181,11 @@ fn unresponsive_party() {
 
 #[expect(clippy::unnecessary_wraps)]
 fn malicious_make_shards<SP: SessionParameters>(
-    orig_value: &(Scheme, BTreeMap<SP::Verifier, Shard>),
+    orig_value: &(Scheme, FullShardSet),
     _args: &Args<SP>,
-) -> Result<(Scheme, BTreeMap<SP::Verifier, Shard>), UnattributableError> {
+) -> Result<(Scheme, FullShardSet), UnattributableError> {
     let (scheme, mut shards) = orig_value.clone();
-    for shard in shards.values_mut() {
+    for shard in shards.as_mut() {
         if shard.kind() == ShardKind::Recovery {
             shard.data_mut().copy_from_slice(&[0xff, 0xff]);
             break;

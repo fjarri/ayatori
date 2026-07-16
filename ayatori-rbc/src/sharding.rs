@@ -1,14 +1,9 @@
 //! Sharding API for arbitrary serializable types.
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet},
-    format, vec,
-    vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeMap, format, vec, vec::Vec};
 
 use ayatori::{
-    protocol_author_api::{RuntimeError, SessionParameters, WireFormat},
+    protocol_author_api::{RuntimeError, WireFormat},
     signature::digest::{self, FixedOutput},
 };
 use reed_solomon_simd::{ReedSolomonDecoder, ReedSolomonEncoder};
@@ -379,45 +374,57 @@ impl Encoded {
     }
 }
 
-// TODO: do we need to match shards with IDs here, or can it be done a level above?
-pub(crate) fn new_set<SP: SessionParameters, T: Serialize>(
-    value: &T,
-    threshold: usize,
-    ids: &BTreeSet<SP::Verifier>,
-) -> Result<(Scheme, BTreeMap<SP::Verifier, Shard>), RuntimeError> {
-    let mut serialized = SP::WireFormat::serialize(value)?.into_vec();
+/// A set of all original and recovery shards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FullShardSet(Vec<Shard>);
 
-    let scheme = Scheme::new(serialized.len(), ids.len(), threshold)?;
+impl FullShardSet {
+    pub fn as_numbered_shards(&self) -> impl Iterator<Item = (usize, &Shard)> {
+        self.0.iter().enumerate()
+    }
+}
+
+impl AsRef<Vec<Shard>> for FullShardSet {
+    fn as_ref(&self) -> &Vec<Shard> {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl AsMut<Vec<Shard>> for FullShardSet {
+    fn as_mut(&mut self) -> &mut Vec<Shard> {
+        &mut self.0
+    }
+}
+
+pub(crate) fn new_set<WF: WireFormat, T: Serialize>(
+    value: &T,
+    shards_num: usize,
+    threshold: usize,
+) -> Result<(Scheme, FullShardSet), RuntimeError> {
+    let mut serialized = WF::serialize(value)?.into_vec();
+
+    let scheme = Scheme::new(serialized.len(), shards_num, threshold)?;
 
     serialized.resize(scheme.padded_size(), 0);
 
     let encoded = Encoded::new(scheme, serialized.chunks(scheme.shard_size))?;
+    let shard_set = FullShardSet(encoded.into_shards());
 
-    let mut shards = BTreeMap::new();
-    for (id, shard) in ids.iter().zip(encoded.into_shards()) {
-        shards.insert(id.clone(), shard);
-    }
-
-    Ok((scheme, shards))
+    Ok((scheme, shard_set))
 }
 
-pub(crate) fn interpolate<'a, SP: SessionParameters>(
+pub(crate) fn interpolate<'a>(
     scheme: Scheme,
     shards: impl Iterator<Item = &'a Shard>,
-    ids: &BTreeSet<SP::Verifier>,
-) -> Result<BTreeMap<SP::Verifier, Shard>, RuntimeError> {
+) -> Result<FullShardSet, RuntimeError> {
     let decoded = Decoded::new(scheme, shards.map(|shard| shard.as_ref()))?;
     let encoded = Encoded::from_decoded(scheme, &decoded)?;
-
-    let mut shards = BTreeMap::new();
-    for (id, shard) in ids.iter().zip(encoded.into_shards()) {
-        shards.insert(id.clone(), shard);
-    }
-
-    Ok(shards)
+    let shard_set = FullShardSet(encoded.into_shards());
+    Ok(shard_set)
 }
 
-pub(crate) fn assemble<'a, SP: SessionParameters, T: for<'de> Deserialize<'de>>(
+pub(crate) fn assemble<'a, WF: WireFormat, T: for<'de> Deserialize<'de>>(
     scheme: Scheme,
     shards: impl Iterator<Item = &'a Shard>,
 ) -> Result<T, RuntimeError> {
@@ -434,23 +441,19 @@ pub(crate) fn assemble<'a, SP: SessionParameters, T: for<'de> Deserialize<'de>>(
 
     original_data.truncate(scheme.original_size());
 
-    SP::WireFormat::deserialize::<T>(&original_data)
-        .map_err(|err| RuntimeError::new(format!("Failed to deserialize: {err}")))
+    WF::deserialize::<T>(&original_data).map_err(|err| RuntimeError::new(format!("Failed to deserialize: {err}")))
 }
 
 #[cfg(test)]
 #[expect(clippy::indexing_slicing)]
 mod tests {
-    use alloc::{boxed::Box, collections::BTreeSet, vec::Vec};
+    use alloc::boxed::Box;
 
-    use ayatori::dev::{BinaryFormat, TestSessionParams, TestVerifier};
-    use rand_chacha::ChaCha8Rng;
+    use ayatori::dev::BinaryFormat;
     use serde::{Deserialize, Serialize};
     use serde_encoded_bytes::{Hex, SliceLike};
 
     use super::{assemble, interpolate, new_set};
-
-    type SP = TestSessionParams<BinaryFormat, ChaCha8Rng>;
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     struct Value {
@@ -471,16 +474,14 @@ mod tests {
         let threshold = 3;
         let shards_num = 5;
 
-        let ids = (0..shards_num).map(TestVerifier::new).collect::<Vec<_>>();
-        let ids_set = ids.iter().copied().collect::<BTreeSet<_>>();
-        let (scheme, shards) = new_set::<SP, _>(&value, threshold, &ids_set).unwrap();
+        let (scheme, shard_set) = new_set::<BinaryFormat, _>(&value, shards_num, threshold).unwrap();
 
         let some_shards = [
-            shards[&ids[0]].clone(),
-            shards[&ids[2]].clone(),
-            shards[&ids[4]].clone(),
+            shard_set.as_ref()[0].clone(),
+            shard_set.as_ref()[2].clone(),
+            shard_set.as_ref()[4].clone(),
         ];
-        let value_back = assemble::<SP, Value>(scheme, some_shards.iter()).unwrap();
+        let value_back = assemble::<BinaryFormat, Value>(scheme, some_shards.iter()).unwrap();
 
         assert_eq!(value, value_back);
     }
@@ -496,11 +497,9 @@ mod tests {
         let threshold = 5;
         let shards_num = 5;
 
-        let ids = (0..shards_num).map(TestVerifier::new).collect::<Vec<_>>();
-        let ids_set = ids.iter().copied().collect::<BTreeSet<_>>();
-        let (scheme, shards) = new_set::<SP, _>(&value, threshold, &ids_set).unwrap();
-
-        let value_back = assemble::<SP, Value>(scheme, shards.values()).unwrap();
+        let (scheme, shard_set) = new_set::<BinaryFormat, _>(&value, shards_num, threshold).unwrap();
+        let value_back =
+            assemble::<BinaryFormat, Value>(scheme, shard_set.as_numbered_shards().map(|(_idx, shard)| shard)).unwrap();
 
         assert_eq!(value, value_back);
     }
@@ -516,17 +515,15 @@ mod tests {
         let threshold = 3;
         let shards_num = 5;
 
-        let ids = (0..shards_num).map(TestVerifier::new).collect::<Vec<_>>();
-        let ids_set = ids.iter().copied().collect::<BTreeSet<_>>();
-        let (scheme, shards) = new_set::<SP, _>(&value, threshold, &ids_set).unwrap();
+        let (scheme, shard_set) = new_set::<BinaryFormat, _>(&value, shards_num, threshold).unwrap();
 
         let some_shards = [
-            shards[&ids[0]].clone(),
-            shards[&ids[2]].clone(),
-            shards[&ids[4]].clone(),
+            shard_set.as_ref()[0].clone(),
+            shard_set.as_ref()[2].clone(),
+            shard_set.as_ref()[4].clone(),
         ];
-        let interpolated = interpolate::<SP>(scheme, some_shards.iter(), &ids_set).unwrap();
+        let interpolated = interpolate(scheme, some_shards.iter()).unwrap();
 
-        assert_eq!(shards, interpolated);
+        assert_eq!(shard_set, interpolated);
     }
 }

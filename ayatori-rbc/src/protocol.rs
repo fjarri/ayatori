@@ -11,7 +11,7 @@ use ayatori::protocol_author_api::*;
 
 use super::{
     merkle_tree::{MerkleBranch, MerkleTree},
-    sharding::{self, Scheme, Shard},
+    sharding::{self, FullShardSet, Scheme, Shard},
 };
 
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
@@ -26,17 +26,17 @@ struct EchoMessage<SP: SessionParameters>(SignedValue<SP>);
 
 fn make_shards<SP: SessionParameters, T: Erasable + Serialize>(
     args: &Args<SP>,
-) -> Result<(Scheme, BTreeMap<SP::Verifier, Shard>), UnattributableError> {
+) -> Result<(Scheme, FullShardSet), UnattributableError> {
     let value = args.get::<T>("value")?;
     let threshold = args.get::<usize>("threshold")?;
     let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
-    let (scheme, shards) = sharding::new_set::<SP, _>(value, *threshold, ids)?;
+    let (scheme, shards) = sharding::new_set::<SP::WireFormat, _>(value, ids.len(), *threshold)?;
     Ok((scheme, shards))
 }
 
 fn make_merkle_tree<SP: SessionParameters>(args: &Args<SP>) -> Result<MerkleTree<SP::Digest>, UnattributableError> {
-    let scheme_and_shards = args.get::<(Scheme, BTreeMap<SP::Verifier, Shard>)>("scheme_and_shards")?;
-    let tree = MerkleTree::new(scheme_and_shards.1.values().enumerate())?;
+    let scheme_and_shards = args.get::<(Scheme, FullShardSet)>("scheme_and_shards")?;
+    let tree = MerkleTree::new(scheme_and_shards.1.as_numbered_shards())?;
     Ok(tree)
 }
 
@@ -44,7 +44,7 @@ fn make_value_message<SP: SessionParameters>(
     id: &SP::Verifier,
     args: &Args<SP>,
 ) -> Result<ValueMessage<SP>, UnattributableError> {
-    let (scheme, shards) = args.get::<(Scheme, BTreeMap<SP::Verifier, Shard>)>("scheme_and_shards")?;
+    let (scheme, shards) = args.get::<(Scheme, FullShardSet)>("scheme_and_shards")?;
     let merkle_tree = args.get::<MerkleTree<SP::Digest>>("merkle_tree")?;
     let ids_to_indices = args.get::<BTreeMap<SP::Verifier, usize>>("ids_to_indices")?;
 
@@ -53,7 +53,8 @@ fn make_value_message<SP: SessionParameters>(
         .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the list of all party IDs")))?;
 
     let shard = shards
-        .get(id)
+        .as_ref()
+        .get(*idx)
         .ok_or_else(|| RuntimeError::new(format!("{id:?} is expected to be present in the generated shards")))?
         .clone();
     let branch = merkle_tree.branch(*idx);
@@ -198,6 +199,7 @@ fn verify_process_echo<SP: SessionParameters>(
     _session_id: &SessionId<SP>,
     _associated_data: &AssociatedData<SP>,
 ) -> Result<EvidenceVerdict, RuntimeError> {
+    // TODO (#93): will not need this once the issue is fixed.
     todo!()
 }
 
@@ -210,7 +212,6 @@ struct AssemblyError<SP: SessionParameters> {
 fn interpolate_and_check_root<SP: SessionParameters>(
     args: &Args<SP>,
 ) -> Result<(), MaybeAttributableError<ThirdPartyError<SP>>> {
-    let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
     let sender = args.get::<SP::Verifier>("sender")?;
     let original_message = args.get::<OriginalMessage<SP>>("original_message")?;
     let echoed_messages = args.get_map::<ProcessedEchoMessage<SP>>("processed_echos")?;
@@ -233,12 +234,11 @@ fn interpolate_and_check_root<SP: SessionParameters>(
         );
     }
 
-    let all_shards = sharding::interpolate::<SP>(
+    let all_shards = sharding::interpolate(
         original_message.value_message.scheme,
         messages.values().map(|message| &message.shard),
-        ids,
     )?;
-    let tree = MerkleTree::new(all_shards.values().enumerate())?;
+    let tree = MerkleTree::new(all_shards.as_numbered_shards())?;
 
     if &tree.root() != original_message.value_message.branch.root() {
         return Err(ThirdPartyError::new("Merkle root mismatch", sender, error_package)?.into());
@@ -252,6 +252,7 @@ fn verify_interpolate_and_check_root_error<SP: SessionParameters>(
     _session_id: &SessionId<SP>,
     _associated_data: &AssociatedData<SP>,
 ) -> Result<EvidenceVerdict, RuntimeError> {
+    // TODO (#93): will not need this once the issue is fixed.
     todo!()
 }
 
@@ -260,7 +261,7 @@ fn finalize<SP: SessionParameters, T: Erasable + for<'de> Deserialize<'de>>(
 ) -> Result<Option<T>, UnattributableError> {
     let original_message = args.get::<OriginalMessage<SP>>("original_message")?;
     let processed_echos = args.get_map::<ProcessedEchoMessage<SP>>("processed_echos")?;
-    let value = sharding::assemble::<SP, T>(
+    let value = sharding::assemble::<SP::WireFormat, T>(
         original_message.value_message.scheme,
         processed_echos.values().map(|echo| &echo.value_message.shard),
     )?;
@@ -276,7 +277,6 @@ pub struct BuildData<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> BuildData<SP> {
-    // TODO: can we allow `sender` to be separate from `all_parties`?
     /// Creates the new build data.
     ///
     /// `sender` must be a member of `all_parties`.
@@ -383,8 +383,7 @@ where
             );
 
             let shards_sent = direct_message(&message_value, &value_messages);
-            // TODO: this should be a "trigger" node since we don't care about the values
-            // TODO: what should be the threshold here?
+            // TODO (#27): the question of what threshold should be used here becomes moot when the issue is fixed.
             Dependency::from(&collect(&shards_sent, &ThresholdGroup::new(&ids)))
         } else {
             Dependency::from(&constant("empty_dependency", ()))
@@ -399,7 +398,6 @@ where
             let value_signed_scalar = collect(&value_signed, &sender_party).with_dependency(all_shards_sent);
             let value_deserialized_scalar = collect(&value_deserialized, &sender_party);
 
-            // TODO: conversion of 1-element collection map to a scalar seems like a common operation
             let original_message = compute_scalar(
                 "scheme",
                 make_original_message,
@@ -442,11 +440,7 @@ where
                 verify_process_echo,
             );
 
-            // TODO: can this be relaxed? The algorithm in the paper only asks to send and echo when we received a share.
-            // Can we proceed if only a few echos were sent?
-            // Seems like the "0" threshold would be applicable here, but it creates problems
-            // since the action of collecting does not find any values in the storage.
-            // The "0" threshold basically means "we don't care if these were sent or not, just add the node to the tree"
+            // TODO (#27): the question of what threshold should be used here becomes moot when the issue is fixed.
             let all_echos_sent = collect(&echo_sent, &ThresholdGroup::new(&ids));
 
             let all_echos_to_check_root = collect_into(
@@ -462,7 +456,6 @@ where
                 &[
                     ("processed_echos", (&all_echos_to_check_root).into()),
                     ("sender", (&sender).into()),
-                    ("ids", (&ids_set).into()),
                     ("original_message", (&original_message).into()),
                 ],
                 verify_interpolate_and_check_root_error,
@@ -504,7 +497,7 @@ where
                 ],
             )
             .with_dependency(&finalize_trigger)
-            // TODO: see above about the 0 threshold, this would be applicable here too.
+            // TODO (#27): the question of what threshold should be used here becomes moot when the issue is fixed.
             .with_dependency(&collect(&ready_sent, &ThresholdGroup::new(&ids)));
 
             Ok(output)
