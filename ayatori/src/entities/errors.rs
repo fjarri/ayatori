@@ -160,7 +160,7 @@ impl<SP: SessionParameters> AssociatedData<SP> {
     ///
     /// Fails on type mismatch.
     pub fn extract<T: for<'de> Deserialize<'de>>(&self) -> Result<T, RuntimeError> {
-        SP::WireFormat::deserialize::<T>(self.serialized_value.as_ref())
+        SP::WireFormat::deserialize::<T>(self.serialized_value.data())
             .map_err(|err| RuntimeError::new(format!("Failed to deserialize: {err}")))
     }
 }

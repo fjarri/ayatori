@@ -12,15 +12,16 @@ use super::{
     args::BoundProtocolArgs,
     constructors::collect,
     typed_nodes::{
-        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
-        GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SerializeAndSign, args_to_owned,
+        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
+        DirectMessage, GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SerializeAndSign,
+        args_to_owned,
     },
     unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
 use crate::{
     entities::{
         AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, MaybeAttributableError,
-        PartyGroup, RuntimeError, ScalarFunction, ScalarTagRef, SimpleMappingFunction, UnattributableError,
+        RuntimeError, ScalarTagRef, SimpleMappingFunction, SimpleScalarFunction, ThresholdGroup, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     traced_error::TraceableResult,
@@ -182,6 +183,10 @@ impl<SP: SessionParameters> AnyNode<SP> {
         true
     }
 
+    /// If the node is reproducible in the evidence verification setting
+    /// (where we only know the protocol's shared public data),
+    /// returns a `Reproducibility::Available` with the required arguments and messages.
+    /// Otherwise, returns a `Reproducibility::NoteAvailable`.
     pub(crate) fn reproducibility(&self) -> Reproducibility {
         let mut arguments = BTreeSet::<String>::new();
         let mut messages = BTreeSet::<FullName>::new();
@@ -201,19 +206,26 @@ impl<SP: SessionParameters> AnyNode<SP> {
         for node in subnodes {
             match node {
                 Self::ComputeScalar(node) => {
-                    if !node.as_ref().function.is_reproducible() {
-                        return Reproducibility::NotAvailable;
+                    match &node.as_ref().kind {
+                        ComputeScalarKind::Simple { function } => {
+                            if !function.is_deterministic() {
+                                return Reproducibility::NotAvailable;
+                            }
+                        }
+                        ComputeScalarKind::ThirdPartyAttributable { .. } => {
+                            // Verification functions do not depend on RNG, so they are always reproducible.
+                        }
                     }
                 }
                 Self::ComputeMapping(node) => {
                     match &node.as_ref().kind {
                         ComputeMappingKind::Simple { function } => {
-                            if !function.is_reproducible() {
+                            if !function.is_deterministic() {
                                 return Reproducibility::NotAvailable;
                             }
                         }
                         ComputeMappingKind::WithReveal { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
-                            // `function` here does not depend on RNG, so is always reproducible.
+                            // Verification functions do not depend on RNG, so they are always reproducible.
                         }
                     }
                 }
@@ -342,7 +354,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
 
         // The output must be a scalar node, and `node` is a mapping node.
         // So we wrap it in a collect.
-        let collected = collect(node, &PartyGroup::new(core::slice::from_ref(guilty_party)));
+        let collected = collect(node, &ThresholdGroup::new(core::slice::from_ref(guilty_party)));
 
         // This is a bit of a hack.
         // To make the node tree suitable for a ruleset generation, the root node must be a scalar computation node.
@@ -358,16 +370,18 @@ impl<SP: SessionParameters> AnyNode<SP> {
         let guilty_party = guilty_party.clone();
         let wrapped = OutputNode::ComputeScalar(Node::new(ComputeScalar {
             store_in: original_output_tag.clone(),
-            function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
-                "<evidence_verification_output>",
-                move |args| {
-                    let map = args.get_map::<EvidenceVerdict>(arg_name)?;
-                    let verdict: &EvidenceVerdict = map
-                        .get(&guilty_party)
-                        .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))?;
-                    Ok(Value::new(verdict.clone()))
-                },
-            )),
+            kind: ComputeScalarKind::Simple {
+                function: SimpleScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
+                    "<evidence_verification_output>",
+                    move |args| {
+                        let map = args.get_map::<EvidenceVerdict>(arg_name)?;
+                        let verdict: &EvidenceVerdict = map
+                            .get(&guilty_party)
+                            .ok_or_else(|| RuntimeError::new("Guilty party entry not found"))?;
+                        Ok(Value::new(verdict.clone()))
+                    },
+                )),
+            },
             args: [(arg_name.into(), ComputeScalarArg::Collect(collected.get_strong_ref()))].into(),
             dependencies: Vec::new(),
         }));
@@ -562,6 +576,7 @@ impl<SP: SessionParameters> From<Dependency<SP>> for AnyNode<SP> {
         match source {
             Dependency::ComputeScalar(node) => Self::ComputeScalar(node),
             Dependency::Collect(node) => Self::Collect(node),
+            Dependency::MergeScalars(node) => Self::MergeScalars(node),
         }
     }
 }

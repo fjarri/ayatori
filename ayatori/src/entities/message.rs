@@ -1,6 +1,7 @@
 use alloc::{boxed::Box, format, vec::Vec};
 use core::fmt::{self, Debug};
 
+use itertools::Itertools;
 use serde_encoded_bytes::{Hex, SliceLike};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
@@ -59,11 +60,11 @@ impl From<RuntimeError> for VerificationError {
 impl core::error::Error for VerificationError {}
 
 fn hash_serialized_value<D: Update + FixedOutput + Default>(value: &SerializedValue) -> digest::Output<D> {
-    let value_len = u128::try_from(value.as_ref().len()).expect("Serialized value length is less than 2^128 bytes");
+    let value_len = u128::try_from(value.data().len()).expect("Serialized value length is less than 2^128 bytes");
     let mut digest = D::default();
     digest.update(b"SerializedValueDigest");
     digest.update(&value_len.to_be_bytes());
-    digest.update(value.as_ref());
+    digest.update(value.data());
     digest.finalize_fixed()
 }
 
@@ -150,7 +151,9 @@ impl<SP: SessionParameters> SignedValue<SP> {
             .map_err(|_err| VerificationError::SignatureMismatch)
     }
 
-    pub(crate) fn verify_and_unpack(self) -> Result<SerializedValue, VerificationError> {
+    // TODO (#93): this can be made `pub(crate)` after the issue is closed.
+    /// Verifies the value and returns the encapsulated serialized value.
+    pub fn verify_and_unpack(self) -> Result<SerializedValue, VerificationError> {
         self.verify_inner()?;
         Ok(self.value)
     }
@@ -234,7 +237,9 @@ impl<SP: SessionParameters> VerifiedValue<SP> {
         &self.message_id
     }
 
-    pub(crate) fn serialized_value(&self) -> &SerializedValue {
+    // TODO (#93): this can be made `pub(crate)` after the issue is closed.
+    /// Returns the encapsulated serialized value.
+    pub fn serialized_value(&self) -> &SerializedValue {
         &self.value
     }
 
@@ -301,14 +306,21 @@ impl<SP: SessionParameters> Debug for MessageId<SP> {
 
 /// A message to be sent to another party, containing multiple signed values.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+#[serde(into = "WireMessage<SP>")]
+#[serde(try_from = "WireMessage<SP>")]
 pub struct Message<SP: SessionParameters> {
     destination: SP::Verifier,
     values: Vec<SignedValue<SP>>,
 }
 
 impl<SP: SessionParameters> Message<SP> {
-    pub(crate) fn new(destination: SP::Verifier, values: Vec<SignedValue<SP>>) -> Self {
-        Self { destination, values }
+    pub(crate) fn new(values: Vec<SignedValue<SP>>) -> Result<Self, RuntimeError> {
+        let first = values.first().ok_or_else(|| RuntimeError::new(""))?;
+        if !values.iter().map(|value| value.metadata().destination()).all_equal() {
+            return Err(RuntimeError::new(""));
+        }
+        let destination = first.metadata().destination().clone();
+        Ok(Self { destination, values })
     }
 
     /// The party for which the message is intended.
@@ -316,7 +328,25 @@ impl<SP: SessionParameters> Message<SP> {
         &self.destination
     }
 
-    pub(crate) fn into_values(self) -> impl Iterator<Item = SignedValue<SP>> {
-        self.values.into_iter()
+    pub(crate) fn into_values(self) -> Vec<SignedValue<SP>> {
+        self.values
+    }
+}
+
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+struct WireMessage<SP: SessionParameters> {
+    values: Vec<SignedValue<SP>>,
+}
+
+impl<SP: SessionParameters> From<Message<SP>> for WireMessage<SP> {
+    fn from(source: Message<SP>) -> Self {
+        Self { values: source.values }
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<WireMessage<SP>> for Message<SP> {
+    type Error = RuntimeError;
+    fn try_from(source: WireMessage<SP>) -> Result<Self, Self::Error> {
+        Self::new(source.values)
     }
 }

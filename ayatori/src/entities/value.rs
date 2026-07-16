@@ -156,7 +156,7 @@ impl<F: WireFormat, T: Erasable + Serialize + for<'de> Deserialize<'de>> DynAdap
     }
 
     fn deserialize(&self, serialized_value: &SerializedValue) -> Result<Value, DeserializationError> {
-        F::deserialize::<T>(serialized_value.as_ref())
+        F::deserialize::<T>(serialized_value.data())
             .map(Value::new)
             .map_err(|err| DeserializationError::new::<T>(err.to_string()))
     }
@@ -217,7 +217,10 @@ impl SerializedValue {
         Self(data)
     }
 
-    pub(crate) fn as_ref(&self) -> &[u8] {
+    // TODO (#93): this can be made `pub(crate)` after the issue is closed.
+    /// Returns a reference to the serialized data.
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
         self.0.as_ref()
     }
 }

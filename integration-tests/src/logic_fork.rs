@@ -20,7 +20,7 @@ fn merging_computation<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, Un
 
 impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     type PrivateData = ();
-    type SharedData = PartyGroup<SP::Verifier>;
+    type SharedData = ThresholdGroup<SP::Verifier>;
     type Output = u64;
 
     fn make_private_inputs(_private_data: &Self::PrivateData) -> PrivateInputs {
@@ -36,13 +36,13 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for TestProtocol {
     }
 
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.ids().cloned().collect()
+        shared_data.ids().clone()
     }
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
     type OutputNode = Node<ComputeScalar<SP>>;
-    type BuildData = PartyGroup<SP::Verifier>;
+    type BuildData = ThresholdGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
         ProtocolSignature::new()
@@ -78,7 +78,7 @@ mod tests {
     fn happy_path() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = PartyGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

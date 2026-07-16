@@ -11,4 +11,4 @@ pub use session::{
     DuplicateMessagesError, InvalidMessageError, MessageAttributableError, ReachedOutputSession, Session,
     SessionOutcome, SessionReport, SessionState, UnfinishableOutcome,
 };
-pub use task::Task;
+pub use task::{DeterministicTask, RandomizedTask, SendTask, SendTaskResult, SessionUpdate, Task};

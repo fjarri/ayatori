@@ -5,7 +5,7 @@ mod tests {
     use ayatori::{
         dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async},
         protocol_user_api::{
-            PartyGroup, Session, SessionId,
+            Session, SessionId, ThresholdGroup,
             tokio::{SessionRunner, par_run_session, run_session},
         },
         signature::{Keypair, rand_core::SeedableRng},
@@ -24,7 +24,7 @@ mod tests {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
 
-        let shared_data = PartyGroup::new(&ids);
+        let shared_data = ThresholdGroup::new(&ids);
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

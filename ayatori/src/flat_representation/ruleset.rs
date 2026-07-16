@@ -18,7 +18,9 @@ use crate::{
         LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, MergedScalarTag, ReceivedTag, RemoteSignedTag,
         RuntimeError, ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
     },
-    graph_representation::{AnyNode, ComputeMappingKind, GeneralizedNode, OutputNode, Reproducibility},
+    graph_representation::{
+        AnyNode, ComputeMappingKind, ComputeScalarKind, GeneralizedNode, OutputNode, Reproducibility,
+    },
     traits::SessionParameters,
 };
 
@@ -230,10 +232,7 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                     result.insert(MappingTagRef::LocalSigned(&node.as_ref().data.as_ref().store_in), ids);
                 }
                 AnyNode::Collect(node) => {
-                    result.insert(
-                        node.as_ref().values.store_in(),
-                        node.as_ref().group.ids().cloned().collect(),
-                    );
+                    result.insert(node.as_ref().values.store_in(), node.as_ref().group.ids().clone());
                 }
             }
         }
@@ -288,6 +287,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let node = node.as_ref();
                     let scalar_condition = ScalarCondition::from_compute_scalar(node);
 
+                    let function = match &node.kind {
+                        ComputeScalarKind::Simple { function } => ScalarFunction::from(function.clone()),
+                        ComputeScalarKind::ThirdPartyAttributable { function, .. } => {
+                            ScalarFunction::ThirdPartyAttributable(function.clone())
+                        }
+                    };
+
                     let arg_tags = node
                         .args
                         .iter()
@@ -302,7 +308,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         scalar_condition: ScalarConditionWithState::new(scalar_condition),
                         kind: ScalarRuleKind::Compute {
                             store_in: node.store_in.clone(),
-                            function: node.function.clone(),
+                            function,
                             args: arg_tags,
                         },
                     });

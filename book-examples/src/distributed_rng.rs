@@ -9,7 +9,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
     // ANCHOR_END: composable
 
     // ANCHOR: composable-build-data
-    type BuildData = PartyGroup<SP::Verifier>;
+    type BuildData = ThresholdGroup<SP::Verifier>;
     // ANCHOR_END: composable-build-data
 
     // ANCHOR: composable-output-node
@@ -143,7 +143,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRng {
     // ANCHOR_END: executable-private-data
 
     // ANCHOR: executable-shared-data
-    type SharedData = (u32, PartyGroup<SP::Verifier>);
+    type SharedData = (u32, ThresholdGroup<SP::Verifier>);
 
     fn make_public_inputs(shared_data: &Self::SharedData) -> PublicInputs {
         PublicInputs::new().input("x", shared_data.0)
@@ -158,7 +158,7 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for DistributedRng {
 
     // ANCHOR: executable-participants
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.1.ids().cloned().collect()
+        shared_data.1.ids().clone()
     }
     // ANCHOR_END: executable-participants
 
@@ -198,7 +198,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let private_data = 999;
-        let shared_data = (1001, PartyGroup::new(&ids));
+        let shared_data = (1001, ThresholdGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();
@@ -227,7 +227,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let private_data = 999;
-        let shared_data = (1001, PartyGroup::new(&ids));
+        let shared_data = (1001, ThresholdGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

@@ -11,9 +11,10 @@ pub(crate) use errors::StoredThirdPartyError;
 pub(crate) use function::{
     DeserializeFunction, MappingFunction, ScalarFunction, SenderAttributableMappingFunction,
     SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SerializeAndSignFunction,
-    SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
-    UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
-    UnattributableScalarFunction, UnattributableScalarFunctionWithRng,
+    SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+    ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction, UnattributableMappingFunction,
+    UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
+    UnattributableScalarFunctionWithRng,
 };
 pub(crate) use tag::{
     AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedTag, MappingTag, MappingTagRef,
@@ -28,7 +29,7 @@ pub use errors::{
 };
 pub use function::EvidenceVerdict;
 pub use message::{Message, MessageId, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedValue};
-pub use party::PartyGroup;
+pub use party::{PartyGroup, ThresholdGroup};
 pub use session_id::SessionId;
 pub use tag::FullName;
 pub use value::{Erasable, SerdeAdapter, SerializedValue};

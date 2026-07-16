@@ -3,6 +3,7 @@ use alloc::{
     format,
     string::String,
     sync::Arc,
+    vec,
     vec::Vec,
 };
 use core::{
@@ -22,8 +23,9 @@ use super::{
     task::{
         DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
         ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
-        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarUnattributableOptionalTask,
-        ScalarUnattributableTask, SendTask, SerializeAndSignElementTask, Task, TaskResult, TaskResultEnum,
+        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarThirdPartyAttributableTask,
+        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SendTask, SerializeAndSignElementTask,
+        SessionUpdate, SessionUpdateEnum, Task,
     },
 };
 #[cfg(feature = "dev")]
@@ -32,7 +34,7 @@ use crate::{
     entities::{
         AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
         MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, SpuriousError, Value, VerifiedValue,
+        SerializeArgs, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
@@ -246,15 +248,19 @@ where
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
     }
 
+    fn register_send_error(&mut self, guilty_party: SP::Verifier) {
+        self.ruleset.update_with_banned_party(&guilty_party);
+        self.attributable_errors
+            .insert(guilty_party, "Error when sending a message".into());
+    }
+
     fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
     }
 
-    /// Bans a party internally, resulting in all of its messages and values calculated from them being discarded,
-    /// and new messages ignored.
-    pub fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
+    fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.external_bans.insert(guilty_party, reason);
     }
@@ -295,9 +301,10 @@ where
     }
 
     /// Registers a received message.
-    pub fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
+    fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
         let tasks = message
             .into_values()
+            .into_iter()
             .map(|signed_value| PreprocessMessageTask::new(&self.data, message_id.clone(), signed_value))
             .collect::<Vec<_>>();
         self.preprocessing_tasks.extend(tasks);
@@ -318,11 +325,15 @@ where
                     to_send,
                     destination,
                 } => {
-                    let signed_value = self
+                    let value = self
                         .storage
                         .get_elem(&MappingTag::LocalSigned(to_send), &destination)
                         .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-                    return Ok(Some(SendTask::new(store_in, destination, signed_value).into()));
+                    let signed_value = value
+                        .downcast::<SignedValue<SP>>()
+                        .or_with_context(|| "Failed to downcast the value to be sent".into())?;
+                    let message = Message::new(vec![signed_value])?;
+                    return Ok(Some(SendTask::new(store_in, destination, message).into()));
                 }
                 Action::ComputeScalar {
                     store_in,
@@ -343,6 +354,9 @@ where
                         }
                         ScalarFunction::UnattributableWithRng(function) => {
                             RngScalarUnattributableTask::new(store_in, function, args).into()
+                        }
+                        ScalarFunction::ThirdPartyAttributable(function) => {
+                            ScalarThirdPartyAttributableTask::new(store_in, function, args).into()
                         }
                     }));
                 }
@@ -449,10 +463,10 @@ where
     }
 
     /// Registers the result of an executed task.
-    pub fn add_result(mut self, result: TaskResult<SP>) -> Result<SessionState<SP, P>, RuntimeError> {
-        let add_result = self.add_result_inner(result)?;
-        Ok(match add_result {
-            AddTaskResult::StateChanged => {
+    pub fn with_update(mut self, result: SessionUpdate<SP>) -> Result<SessionState<SP, P>, RuntimeError> {
+        let new_state = self.with_update_inner(result)?;
+        Ok(match new_state {
+            AddSessionUpdate::StateChanged => {
                 let state = self.ruleset.state().clone();
                 match state {
                     RulesetState::InProgress => SessionState::InProgress(self),
@@ -463,11 +477,11 @@ where
                     }
                 }
             }
-            AddTaskResult::StateDidNotChange => SessionState::InProgress(self),
-            AddTaskResult::MessageAttributableError(error) => {
+            AddSessionUpdate::StateDidNotChange => SessionState::InProgress(self),
+            AddSessionUpdate::MessageAttributableError(error) => {
                 SessionState::InProgressWithMessageError { session: self, error }
             }
-            AddTaskResult::SpuriousError { store_in, error } => {
+            AddSessionUpdate::SpuriousError { store_in, error } => {
                 let report = self.make_report(SessionOutcome::SpuriousError(SpuriousErrorOutcome { store_in, error }));
                 SessionState::Unfinishable(report)
             }
@@ -475,28 +489,34 @@ where
     }
 
     /// Registers the result of an executed task.
-    fn add_result_inner(&mut self, result: TaskResult<SP>) -> Result<AddTaskResult<SP>, RuntimeError> {
+    fn with_update_inner(&mut self, result: SessionUpdate<SP>) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         match result.into_inner() {
-            TaskResultEnum::NoActionNeeded => Ok(AddTaskResult::StateDidNotChange),
-            TaskResultEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
-            TaskResultEnum::SpuriousError { store_in, error } => Ok(AddTaskResult::SpuriousError { store_in, error }),
-            TaskResultEnum::Sent { store_in, destination } => {
+            SessionUpdateEnum::NoActionNeeded => Ok(AddSessionUpdate::StateDidNotChange),
+            SessionUpdateEnum::Received { id, message } => {
+                self.add_message(&id, message);
+                Ok(AddSessionUpdate::StateDidNotChange)
+            }
+            SessionUpdateEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
+            SessionUpdateEnum::SpuriousError { store_in, error } => {
+                Ok(AddSessionUpdate::SpuriousError { store_in, error })
+            }
+            SessionUpdateEnum::Sent { store_in, destination } => {
                 self.add_element(&store_in, &destination, Value::new(()))?;
-                Ok(AddTaskResult::StateChanged)
+                Ok(AddSessionUpdate::StateChanged)
             }
-            TaskResultEnum::ComputedScalar { store_in, result } => {
+            SessionUpdateEnum::ComputedScalar { store_in, result } => {
                 self.add_scalar(&store_in, result)?;
-                Ok(AddTaskResult::StateChanged)
+                Ok(AddSessionUpdate::StateChanged)
             }
-            TaskResultEnum::ComputedMappingElement {
+            SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index,
                 result,
             } => {
                 self.add_element(&store_in, &index, result)?;
-                Ok(AddTaskResult::StateChanged)
+                Ok(AddSessionUpdate::StateChanged)
             }
-            TaskResultEnum::SenderError {
+            SessionUpdateEnum::SenderError {
                 store_in,
                 guilty_party,
                 error,
@@ -504,7 +524,7 @@ where
             } => match on_error {
                 OnError::Escalate => {
                     self.register_attributable_error(guilty_party, &store_in);
-                    Ok(AddTaskResult::StateChanged)
+                    Ok(AddSessionUpdate::StateChanged)
                 }
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
@@ -546,10 +566,10 @@ where
                         error,
                     ));
                     self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                    Ok(AddTaskResult::StateChanged)
+                    Ok(AddSessionUpdate::StateChanged)
                 }
             },
-            TaskResultEnum::SenderErrorWithReveal {
+            SessionUpdateEnum::SenderErrorWithReveal {
                 store_in,
                 guilty_party,
                 error,
@@ -557,7 +577,7 @@ where
             } => match on_error {
                 OnError::Escalate => {
                     self.register_attributable_error(guilty_party, &store_in);
-                    Ok(AddTaskResult::StateChanged)
+                    Ok(AddSessionUpdate::StateChanged)
                 }
                 OnError::CollectEvidence(message_names) => {
                     let mut signed_values = Vec::new();
@@ -599,17 +619,17 @@ where
                         error,
                     ));
                     self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                    Ok(AddTaskResult::StateChanged)
+                    Ok(AddSessionUpdate::StateChanged)
                 }
             },
-            TaskResultEnum::ThirdPartyError { store_in, error } => {
+            SessionUpdateEnum::ThirdPartyError { store_in, error } => {
                 let (guilty_party, error) = error.unpack();
                 let evidence =
                     EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
                 self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                Ok(AddTaskResult::StateChanged)
+                Ok(AddSessionUpdate::StateChanged)
             }
-            TaskResultEnum::Preprocessed {
+            SessionUpdateEnum::Preprocessed {
                 store_in,
                 source,
                 value,
@@ -635,7 +655,7 @@ where
                             typed_received_value,
                         ));
                         self.register_provable_error(Evidence::new(&self.data.id, &source, evidence));
-                        return Ok(AddTaskResult::StateChanged);
+                        return Ok(AddSessionUpdate::StateChanged);
                     }
 
                     // The message is a duplicate, we cannot do anything at this point.
@@ -646,13 +666,13 @@ where
                         first: typed_existing_value.message_id().clone(),
                         second: typed_existing_value.message_id().clone(),
                     });
-                    return Ok(AddTaskResult::MessageAttributableError(error));
+                    return Ok(AddSessionUpdate::MessageAttributableError(error));
                 }
 
                 self.add_element(&store_in, &source, value)?;
-                Ok(AddTaskResult::StateChanged)
+                Ok(AddSessionUpdate::StateChanged)
             }
-            TaskResultEnum::MessageError {
+            SessionUpdateEnum::MessageError {
                 message_id,
                 description,
             } => {
@@ -660,7 +680,15 @@ where
                     message_id,
                     description,
                 });
-                Ok(AddTaskResult::MessageAttributableError(error))
+                Ok(AddSessionUpdate::MessageAttributableError(error))
+            }
+            SessionUpdateEnum::SendError { destination } => {
+                self.register_send_error(destination);
+                Ok(AddSessionUpdate::StateChanged)
+            }
+            SessionUpdateEnum::ExternalBan { party_id, reason } => {
+                self.register_banned_party(party_id, reason);
+                Ok(AddSessionUpdate::StateChanged)
             }
         }
     }
@@ -826,7 +854,7 @@ pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     SpuriousError(SpuriousErrorOutcome),
 }
 
-enum AddTaskResult<SP: SessionParameters> {
+enum AddSessionUpdate<SP: SessionParameters> {
     StateChanged,
     StateDidNotChange,
     MessageAttributableError(MessageAttributableError<SP>),

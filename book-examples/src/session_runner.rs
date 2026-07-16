@@ -3,15 +3,14 @@ use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
     ExecutableProtocol, RuntimeError, Session, SessionParameters, SessionReport,
-    SessionState, Task,
-    tokio::{MessageIn, MessageOut},
+    SessionState, SessionUpdate, Task, tokio::MessageOut,
 };
 
 // ANCHOR: signature
 pub async fn run_session<SP, P>(
     rng: &mut SP::Rng,
     tx: &mpsc::Sender<MessageOut<SP>>,
-    rx: &mut mpsc::Receiver<MessageIn<SP>>,
+    rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
 ) -> Result<SessionReport<SP, P>, RuntimeError>
@@ -22,67 +21,64 @@ where
     // ANCHOR_END: signature
 
     // ANCHOR: event_loop
+    let mut cached_update = None;
     loop {
         // ANCHOR_END: event_loop
-
         // ANCHOR: task_loop
-        while let Some(task) = session.make_task()? {
-            let new_state = match task {
-                // ANCHOR_END: task_loop
-                // ANCHOR: task_deterministic
-                Task::Deterministic(task) => session.add_result(task.execute()),
-                // ANCHOR_END: task_deterministic
-
-                // ANCHOR: task_randomized
-                Task::Randomized(task) => session.add_result(task.execute(rng)),
-                // ANCHOR_END: task_randomized
-
-                // ANCHOR: task_send
-                Task::Send(task) => {
-                    let (message, result) = task.execute();
-                    if let Some(message) = message {
-                        tx.send(MessageOut::Message(message)).await.unwrap();
-                    }
-                    session.add_result(result)
-                } // ANCHOR_END: task_send
+        loop {
+            let update = if let Some(update) = cached_update.take() {
+                update
+            } else if let Some(task) = session.make_task().unwrap() {
+                match task {
+                    // ANCHOR_END: task_loop
+                    // ANCHOR: task_deterministic
+                    Task::Deterministic(task) => task.execute(),
+                    // ANCHOR_END: task_deterministic
+                    // ANCHOR: task_randomized
+                    Task::Randomized(task) => task.execute(rng),
+                    // ANCHOR_END: task_randomized
+                    // ANCHOR: task_send
+                    Task::Send(task) => {
+                        tx.send(MessageOut::Message(task)).await.unwrap();
+                        continue;
+                    } // ANCHOR_END: task_send
+                      // ANCHOR: task_loop_end
+                }
+            } else {
+                break;
             };
+            // ANCHOR_END: task_loop_end
 
-            // ANCHOR: task_result
-            session = match new_state? {
-                // ANCHOR_END: task_result
-                // ANCHOR: task_result_in_progress
+            // ANCHOR: with_update
+            session = match session.with_update(update)? {
+                // ANCHOR_END: with_update
+                // ANCHOR: with_update_in_progress
                 SessionState::InProgress(session) => session,
-                // ANCHOR_END: task_result_in_progress
-                // ANCHOR: task_result_message_error
+                // ANCHOR_END: with_update_in_progress
+                // ANCHOR: with_update_message_error
                 SessionState::InProgressWithMessageError { error, session } => {
                     tx.send(MessageOut::Error(error)).await.unwrap();
                     session
                 }
-                // ANCHOR_END: task_result_message_error
-                // ANCHOR: task_result_reached_output
+                // ANCHOR_END: with_update_message_error
+                // ANCHOR: with_update_reached_output
                 SessionState::ReachedOutput(success) => {
                     return success.finalize();
                 }
-                // ANCHOR_END: task_result_reached_output
-                // ANCHOR: task_result_unfinishable
-                SessionState::Unfinishable(report) => {
-                    return Ok(report);
-                } // ANCHOR_END: task_result_unfinishable
+                // ANCHOR_END: with_update_reached_output
+                // ANCHOR: with_update_unfinishable
+                SessionState::Unfinishable(report) => return Ok(report),
             }
+            // ANCHOR_END: with_update_unfinishable
         }
 
         // ANCHOR: get_message
-        let message_in = tokio::select! {
-            message_in = rx.recv() => message_in.unwrap(),
+        cached_update = Some(tokio::select! {
+            message_in = rx.recv() => message_in.ok_or_else(|| {
+                RuntimeError::new("Failed to pop a message from the input channel")
+            })?,
             () = cancellation.cancelled() => return Ok(session.terminate()),
-        };
-
-        match message_in {
-            MessageIn::Message { message, id } => session.add_message(&id, message),
-            MessageIn::Ban { id, reason } => {
-                session.register_banned_party(id, reason)
-            }
-        }
+        });
         // ANCHOR_END: get_message
     }
 }
@@ -95,7 +91,7 @@ mod tests {
         dev::{
             BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async,
         },
-        protocol_user_api::{PartyGroup, Session, SessionId},
+        protocol_user_api::{Session, SessionId, ThresholdGroup},
         signature::{Keypair, rand_core::SeedableRng},
     };
     use rand_chacha::ChaCha8Rng;
@@ -115,7 +111,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let private_data = 999;
-        let shared_data = (1001, PartyGroup::new(&ids));
+        let shared_data = (1001, ThresholdGroup::new(&ids));
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

@@ -22,7 +22,7 @@ fn make_protocol2_output<SP: SessionParameters>(args: &Args<SP>) -> Result<u64, 
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
     type OutputNode = Node<ComputeScalar<SP>>;
-    type BuildData = PartyGroup<SP::Verifier>;
+    type BuildData = ThresholdGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
         ProtocolSignature::new().input("p2")
@@ -57,7 +57,7 @@ pub struct Protocol1;
 #[derive(Debug, Clone)]
 pub struct Protocol1SharedData<SP: SessionParameters> {
     p1: u64,
-    party_group: PartyGroup<SP::Verifier>,
+    party_group: ThresholdGroup<SP::Verifier>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,13 +91,13 @@ impl<SP: SessionParameters> ExecutableProtocol<SP> for Protocol1 {
     }
 
     fn all_participants(shared_data: &Self::SharedData) -> BTreeSet<SP::Verifier> {
-        shared_data.party_group.ids().cloned().collect()
+        shared_data.party_group.ids().clone()
     }
 }
 
 impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
     type OutputNode = Node<ComputeScalar<SP>>;
-    type BuildData = PartyGroup<SP::Verifier>;
+    type BuildData = ThresholdGroup<SP::Verifier>;
 
     fn signature() -> ProtocolSignature {
         ProtocolSignature::new().input("p1")
@@ -145,7 +145,7 @@ mod tests {
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
         let shared_data = Protocol1SharedData {
             p1: 1,
-            party_group: PartyGroup::new(&ids),
+            party_group: ThresholdGroup::new(&ids),
         };
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);

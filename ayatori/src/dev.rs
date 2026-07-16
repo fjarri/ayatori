@@ -9,6 +9,6 @@ mod wire_format;
 pub mod tokio;
 
 pub use replacements::Replacement;
-pub use run_sync::{ExecutionResult, run_sessions_sync};
-pub use session_parameters::{TestSessionParams, TestSigner, TestVerifier};
+pub use run_sync::{BlockMessagesRule, ExecutionResult, RunSyncConfig, run_sessions_sync};
+pub use session_parameters::{TestHasher, TestSessionParams, TestSigner, TestVerifier};
 pub use wire_format::{BinaryFormat, HumanReadableFormat};

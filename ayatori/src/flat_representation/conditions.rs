@@ -1,4 +1,5 @@
 use alloc::{
+    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     string::ToString,
 };
@@ -154,17 +155,17 @@ impl ElementCondition {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct QuorumCondition<Id: PartyId> {
     tag: MappingTag,
-    group: PartyGroup<Id>,
+    group: Box<dyn PartyGroup<Id>>,
 }
 
 impl<Id: PartyId> QuorumCondition<Id> {
     pub fn from_collect<SP: SessionParameters<Verifier = Id>>(node: &Collect<SP>) -> Self {
         Self {
             tag: node.values.store_in().to_owned(),
-            group: node.group.clone(),
+            group: node.group.clone_box(),
         }
     }
 
@@ -250,7 +251,7 @@ impl<Id: PartyId> ElementConditionWithState<Id> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct QuorumConditionWithState<Id: PartyId> {
     original_condition: QuorumCondition<Id>,
     got_ids: BTreeSet<Id>,
@@ -314,7 +315,7 @@ impl<Id: PartyId> Display for QuorumConditionWithState<Id> {
             "quorum({}, {}/{} (-{}))",
             self.original_condition.tag,
             self.got_ids.len(),
-            self.original_condition.group.ids().count(),
+            self.original_condition.group.ids().len(),
             self.banned_ids.len()
         )
     }

@@ -12,8 +12,8 @@ use super::{
     any_node::AnyNode,
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
     typed_nodes::{
-        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, DeserializeAndCheck, DirectMessage,
-        GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SerializeAndSign,
+        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
+        DirectMessage, GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SerializeAndSign,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
 };
@@ -21,11 +21,12 @@ use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
         EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError, MergedScalarTag, OneOrBoth, PartyGroup,
-        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, SenderAttributableMappingFunction,
+        RemoteSignedTag, RuntimeError, ScalarArgumentTag, SenderAttributableMappingFunction,
         SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SenderError,
         SenderErrorWithReveal, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
-        SimpleMappingFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableVerificationFunction,
-        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction, ThirdPartyError,
+        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
     traced_error::TraceableResult,
@@ -71,9 +72,12 @@ pub fn constant<SP: SessionParameters, Ret: Erasable>(name: &str, value: Ret) ->
     let erased_value = Value::new(value);
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
-        function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(name, move |_args| {
-            Ok(erased_value.clone())
-        })),
+        kind: ComputeScalarKind::Simple {
+            function: SimpleScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
+                name,
+                move |_args| Ok(erased_value.clone()),
+            )),
+        },
         args: BTreeMap::new(),
         dependencies: Vec::new(),
     })
@@ -90,9 +94,12 @@ pub fn scalar_alias<SP: SessionParameters>(
     let arg_name = "value";
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
-        function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name("alias", move |args| {
-            Ok(args.get_value(arg_name)?.clone())
-        })),
+        kind: ComputeScalarKind::Simple {
+            function: SimpleScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
+                "alias",
+                move |args| Ok(args.get_value(arg_name)?.clone()),
+            )),
+        },
         args: [(arg_name.into(), node.into())].into(),
         dependencies: Vec::new(),
     })
@@ -161,7 +168,9 @@ pub fn compute_scalar<SP: SessionParameters, Ret: Erasable>(
     let args: ComputeScalarArgs<SP> = args.into();
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
-        function: ScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(function)),
+        kind: ComputeScalarKind::Simple {
+            function: SimpleScalarFunction::Unattributable(UnattributableScalarFunction::new_erased(function)),
+        },
         args: args.0,
         dependencies: Vec::new(),
     })
@@ -176,7 +185,11 @@ pub fn compute_scalar_with_rng<SP: SessionParameters, Ret: Erasable>(
     let args: ComputeScalarArgs<SP> = args.into();
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(name),
-        function: ScalarFunction::UnattributableWithRng(UnattributableScalarFunctionWithRng::new_erased(function)),
+        kind: ComputeScalarKind::Simple {
+            function: SimpleScalarFunction::UnattributableWithRng(UnattributableScalarFunctionWithRng::new_erased(
+                function,
+            )),
+        },
         args: args.0,
         dependencies: Vec::new(),
     })
@@ -189,12 +202,14 @@ fn fork_left<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Clo
     let largs = ComputeScalarArgs::from(&[("fork", fork.into())]);
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(lname),
-        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
-            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
-                OneOrBoth::Left(left) | OneOrBoth::Both { left, .. } => Ok(Some(Value::new(left.clone()))),
-                OneOrBoth::Right(_) => Ok(None),
-            }
-        })),
+        kind: ComputeScalarKind::Simple {
+            function: SimpleScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
+                match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
+                    OneOrBoth::Left(left) | OneOrBoth::Both { left, .. } => Ok(Some(Value::new(left.clone()))),
+                    OneOrBoth::Right(_) => Ok(None),
+                }
+            })),
+        },
         args: largs.0,
         dependencies: Vec::new(),
     })
@@ -207,12 +222,14 @@ fn fork_right<SP: SessionParameters, LRet: Erasable + Clone, RRet: Erasable + Cl
     let rargs = ComputeScalarArgs::from(&[("fork", fork.into())]);
     Node::new(ComputeScalar {
         store_in: ComputedScalarTag::new(rname),
-        function: ScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
-            match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
-                OneOrBoth::Right(right) | OneOrBoth::Both { right, .. } => Ok(Some(Value::new(right.clone()))),
-                OneOrBoth::Left(_) => Ok(None),
-            }
-        })),
+        kind: ComputeScalarKind::Simple {
+            function: SimpleScalarFunction::UnattributableOptional(UnattributableOptionalScalarFunction::new(|args| {
+                match args.get::<OneOrBoth<LRet, RRet>>("fork")? {
+                    OneOrBoth::Right(right) | OneOrBoth::Both { right, .. } => Ok(Some(Value::new(right.clone()))),
+                    OneOrBoth::Left(_) => Ok(None),
+                }
+            })),
+        },
         args: rargs.0,
         dependencies: Vec::new(),
     })
@@ -247,6 +264,28 @@ pub fn compute_forked_scalar_with_rng<SP: SessionParameters, LRet: Erasable + Cl
     let lnode = fork_left::<SP, LRet, RRet>(lname, &fork);
     let rnode = fork_right::<SP, LRet, RRet>(rname, &fork);
     (lnode, rnode)
+}
+
+/// Calls `function` and saves the result to the scalar slot `name`.
+pub fn compute_scalar_third_party_attributable<SP: SessionParameters, Ret: Erasable>(
+    name: &str,
+    function: impl 'static + Send + Sync + Fn(&Args<SP>) -> Result<Ret, MaybeAttributableError<ThirdPartyError<SP>>>,
+    args: impl Into<ComputeScalarArgs<SP>>,
+    verification: impl 'static
+    + Send
+    + Sync
+    + Fn(&SP::Verifier, &SessionId<SP>, &AssociatedData<SP>) -> Result<EvidenceVerdict, RuntimeError>,
+) -> Node<ComputeScalar<SP>> {
+    let args: ComputeScalarArgs<SP> = args.into();
+    Node::new(ComputeScalar {
+        store_in: ComputedScalarTag::new(name),
+        kind: ComputeScalarKind::ThirdPartyAttributable {
+            function: ThirdPartyAttributableScalarFunction::new_erased(function),
+            verification: ThirdPartyAttributableVerificationFunction::new(verification),
+        },
+        args: args.0,
+        dependencies: Vec::new(),
+    })
 }
 
 /// Calls `function` for a set of party IDs and saves the results to the mapping slot `name`.
@@ -493,14 +532,33 @@ pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Node<Des
 /// Collects the elements of a mapping node into a scalar node.
 pub fn collect<SP: SessionParameters>(
     values: impl Into<CollectArg<SP>>,
-    group: &PartyGroup<SP::Verifier>,
+    group: &impl PartyGroup<SP::Verifier>,
 ) -> Node<Collect<SP>> {
     let values = values.into();
-    let store_in = values.store_in().to_collected();
+    let store_in = values.store_in().to_collected(None);
     Node::new(Collect {
         store_in,
         values,
-        group: group.clone(),
+        group: group.clone_box(),
+        dependencies: Vec::new(),
+    })
+}
+
+/// Collects the elements of a mapping node into a scalar node with a given disambiguator.
+///
+/// Use instead of [`collect`] when you need to collect the same mapping into two different scalars
+/// (usng two different groups).
+pub fn collect_into<SP: SessionParameters>(
+    disambiguator: &str,
+    values: impl Into<CollectArg<SP>>,
+    group: &impl PartyGroup<SP::Verifier>,
+) -> Node<Collect<SP>> {
+    let values = values.into();
+    let store_in = values.store_in().to_collected(Some(disambiguator));
+    Node::new(Collect {
+        store_in,
+        values,
+        group: group.clone_box(),
         dependencies: Vec::new(),
     })
 }

@@ -1,4 +1,5 @@
 use alloc::{
+    boxed::Box,
     collections::BTreeMap,
     format,
     string::{String, ToString},
@@ -19,10 +20,10 @@ use super::{
 use crate::{
     entities::{
         CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedTag,
-        MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction,
+        MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
         SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
-        SerializeAndSignFunction, SimpleMappingFunction, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableVerificationFunction,
+        SerializeAndSignFunction, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction,
     },
     traced_error::TraceableResult,
     traits::SessionParameters,
@@ -156,11 +157,40 @@ impl<T> GeneralizedNode for Node<T> {
     }
 }
 
+#[derive_where::derive_where(Debug, Clone)]
+pub(crate) enum ComputeScalarKind<SP: SessionParameters> {
+    Simple {
+        function: SimpleScalarFunction<SP>,
+    },
+    ThirdPartyAttributable {
+        function: ThirdPartyAttributableScalarFunction<SP>,
+        verification: ThirdPartyAttributableVerificationFunction<SP>,
+    },
+}
+
+impl<SP: SessionParameters> ComputeScalarKind<SP> {
+    fn shallow_clone(&self) -> Self {
+        match self {
+            Self::Simple { function } => Self::Simple {
+                function: function.clone(),
+            },
+            Self::ThirdPartyAttributable { function, verification } => Self::ThirdPartyAttributable {
+                function: function.clone(),
+                verification: verification.clone(),
+            },
+        }
+    }
+
+    fn with_replacements(self, _store_in: &ComputedScalarTag, _replacements: &BTreeMap<usize, AnyNode<SP>>) -> Self {
+        self
+    }
+}
+
 /// A node that executes a user-provided function to compute a scalar value.
 #[derive_where::derive_where(Debug)]
 pub struct ComputeScalar<SP: SessionParameters> {
     pub(crate) store_in: ComputedScalarTag,
-    pub(crate) function: ScalarFunction<SP>,
+    pub(crate) kind: ComputeScalarKind<SP>,
     pub(crate) args: BTreeMap<String, ComputeScalarArg<SP>>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
@@ -169,7 +199,7 @@ impl<SP: SessionParameters> ShallowClone for ComputeScalar<SP> {
     fn shallow_clone(&self) -> Self {
         Self {
             store_in: self.store_in.clone(),
-            function: self.function.clone(),
+            kind: self.kind.shallow_clone(),
             args: args_to_owned(&self.args),
             dependencies: node_slice_to_owned(&self.dependencies),
         }
@@ -187,6 +217,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeScalar<SP> {
         let mut node = self;
         replace_in_btreemap(&mut node.args, replacements)
             .or_with_context(|| format!("Failed to replace nodes in the arguments of node `{}`", node.store_in))?;
+        node.kind = node.kind.with_replacements(&node.store_in, replacements);
         replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
             format!(
                 "Failed to replace nodes in the dependencies of node `{}`",
@@ -228,7 +259,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeScalar<SP>> {
 pub struct Collect<SP: SessionParameters> {
     pub(crate) store_in: CollectedTag,
     pub(crate) values: CollectArg<SP>,
-    pub(crate) group: PartyGroup<SP::Verifier>,
+    pub(crate) group: Box<dyn PartyGroup<SP::Verifier>>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
@@ -237,7 +268,7 @@ impl<SP: SessionParameters> ShallowClone for Collect<SP> {
         Self {
             store_in: self.store_in.clone(),
             values: self.values.get_strong_ref(),
-            group: self.group.clone(),
+            group: self.group.clone_box(),
             dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
@@ -781,10 +812,19 @@ impl<SP: SessionParameters> Display for ComputeScalar<SP> {
             f,
             "{} = {}({}){}",
             self.store_in,
-            self.function,
+            self.kind,
             display_args(&self.args),
             display_dependencies(&self.dependencies)
         )
+    }
+}
+
+impl<SP: SessionParameters> Display for ComputeScalarKind<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::Simple { function } => write!(f, "{function}"),
+            Self::ThirdPartyAttributable { function, .. } => write!(f, "{function}"),
+        }
     }
 }
 

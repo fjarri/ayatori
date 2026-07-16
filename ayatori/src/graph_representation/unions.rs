@@ -184,6 +184,12 @@ impl<SP: SessionParameters> GeneralizedNode for ComputeMappingArg<SP> {
     }
 }
 
+impl<SP: SessionParameters> From<&Node<ScalarArgument<SP>>> for ComputeMappingArg<SP> {
+    fn from(source: &Node<ScalarArgument<SP>>) -> Self {
+        Self::ScalarArgument(source.get_strong_ref())
+    }
+}
+
 impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for ComputeMappingArg<SP> {
     fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
@@ -510,6 +516,8 @@ pub enum Dependency<SP: SessionParameters> {
     ComputeScalar(Node<ComputeScalar<SP>>),
     /// A result of collecting mapping elements.
     Collect(Node<Collect<SP>>),
+    /// A result of merging two scalar values.
+    MergeScalars(Node<MergeScalars<SP>>),
 }
 
 impl<SP: SessionParameters> Dependency<SP> {
@@ -517,6 +525,7 @@ impl<SP: SessionParameters> Dependency<SP> {
         match self {
             Self::ComputeScalar(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
             Self::Collect(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
+            Self::MergeScalars(node) => ScalarTagRef::Merged(&node.as_ref().store_in),
         }
     }
 }
@@ -526,6 +535,7 @@ impl<SP: SessionParameters> GeneralizedNode for Dependency<SP> {
         match self {
             Self::ComputeScalar(node) => node.id(),
             Self::Collect(node) => node.id(),
+            Self::MergeScalars(node) => node.id(),
         }
     }
 
@@ -533,6 +543,7 @@ impl<SP: SessionParameters> GeneralizedNode for Dependency<SP> {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.get_strong_ref()),
             Self::Collect(node) => Self::Collect(node.get_strong_ref()),
+            Self::MergeScalars(node) => Self::MergeScalars(node.get_strong_ref()),
         }
     }
 }
@@ -549,6 +560,12 @@ impl<SP: SessionParameters> From<&Node<Collect<SP>>> for Dependency<SP> {
     }
 }
 
+impl<SP: SessionParameters> From<&Node<MergeScalars<SP>>> for Dependency<SP> {
+    fn from(source: &Node<MergeScalars<SP>>) -> Self {
+        Self::MergeScalars(source.get_strong_ref())
+    }
+}
+
 impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Dependency<SP> {
     type Error = UnionCastError;
 
@@ -556,6 +573,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Dependency<SP> {
         match source {
             AnyNode::ComputeScalar(node) => Ok(Self::ComputeScalar(node)),
             AnyNode::Collect(node) => Ok(Self::Collect(node)),
+            AnyNode::MergeScalars(node) => Ok(Self::MergeScalars(node)),
             _ => Err(UnionCastError),
         }
     }

@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, string::ToString};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Error as _};
 
 use crate::{entities::RuntimeError, traits::WireFormat};
 
@@ -18,7 +18,11 @@ impl WireFormat for BinaryFormat {
     type DeError = postcard::Error;
 
     fn deserialize<'de, T: Deserialize<'de>>(bytes: &'de [u8]) -> Result<T, Self::DeError> {
-        postcard::from_bytes(bytes)
+        let (result, unused_bytes) = postcard::take_from_bytes(bytes)?;
+        if !unused_bytes.is_empty() {
+            return Err(postcard::Error::custom("Unused data left after deserialization"));
+        }
+        Ok(result)
     }
 }
 
