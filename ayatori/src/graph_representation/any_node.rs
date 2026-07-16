@@ -183,6 +183,10 @@ impl<SP: SessionParameters> AnyNode<SP> {
         true
     }
 
+    /// If the node is reproducible in the evidence verification setting
+    /// (where we only know the protocol's shared public data),
+    /// returns a `Reproducibility::Available` with the required arguments and messages.
+    /// Otherwise, returns a `Reproducibility::NoteAvailable`.
     pub(crate) fn reproducibility(&self) -> Reproducibility {
         let mut arguments = BTreeSet::<String>::new();
         let mut messages = BTreeSet::<FullName>::new();
@@ -204,26 +208,24 @@ impl<SP: SessionParameters> AnyNode<SP> {
                 Self::ComputeScalar(node) => {
                     match &node.as_ref().kind {
                         ComputeScalarKind::Simple { function } => {
-                            if !function.is_reproducible() {
+                            if !function.is_deterministic() {
                                 return Reproducibility::NotAvailable;
                             }
                         }
                         ComputeScalarKind::ThirdPartyAttributable { .. } => {
-                            // TODO: should we have `kind.is_reproducible()`? Or defer to `function` here too
-                            // instead of assuming that it will never depend on RNG?
-                            // `function` here does not depend on RNG, so is always reproducible.
+                            // Verification functions do not depend on RNG, so they are always reproducible.
                         }
                     }
                 }
                 Self::ComputeMapping(node) => {
                     match &node.as_ref().kind {
                         ComputeMappingKind::Simple { function } => {
-                            if !function.is_reproducible() {
+                            if !function.is_deterministic() {
                                 return Reproducibility::NotAvailable;
                             }
                         }
                         ComputeMappingKind::WithReveal { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
-                            // `function` here does not depend on RNG, so is always reproducible.
+                            // Verification functions do not depend on RNG, so they are always reproducible.
                         }
                     }
                 }

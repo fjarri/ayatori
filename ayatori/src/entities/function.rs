@@ -191,7 +191,7 @@ pub(crate) enum SimpleScalarFunction<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SimpleScalarFunction<SP> {
-    pub fn is_reproducible(&self) -> bool {
+    pub fn is_deterministic(&self) -> bool {
         !matches!(self, Self::UnattributableWithRng(_))
     }
 }
@@ -223,7 +223,7 @@ pub(crate) enum SimpleMappingFunction<SP: SessionParameters> {
 }
 
 impl<SP: SessionParameters> SimpleMappingFunction<SP> {
-    pub fn is_reproducible(&self) -> bool {
+    pub fn is_deterministic(&self) -> bool {
         !matches!(self, Self::UnattributableWithRng(_))
     }
 }
