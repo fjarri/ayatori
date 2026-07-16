@@ -19,16 +19,15 @@ use super::{
 };
 use crate::{
     entities::{
-        Args, AssociatedData, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeArgs,
-        DeserializeFunction, Erasable, EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError,
-        MergedScalarTag, OneOrBoth, PartyGroup, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
-        SenderAttributableMappingFunction, SenderAttributableVerificationFunction,
-        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SerdeAdapter,
-        SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue, SimpleMappingFunction, SimpleScalarFunction,
-        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction,
-        ThirdPartyAttributableVerificationFunction, ThirdPartyError, UnattributableError,
-        UnattributableMappingFunction, UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction,
-        UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
+        Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
+        EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError, MergedScalarTag, OneOrBoth, PartyGroup,
+        RemoteSignedTag, RuntimeError, ScalarArgumentTag, SenderAttributableMappingFunction,
+        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SenderError,
+        SenderErrorWithReveal, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
+        SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction, ThirdPartyError,
+        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
     },
     traced_error::TraceableResult,
     traits::{ComposableProtocol, SessionParameters},
@@ -536,7 +535,7 @@ pub fn collect<SP: SessionParameters>(
     group: &impl PartyGroup<SP::Verifier>,
 ) -> Node<Collect<SP>> {
     let values = values.into();
-    let store_in = values.store_in().to_collected();
+    let store_in = values.store_in().to_collected(None);
     Node::new(Collect {
         store_in,
         values,
@@ -545,17 +544,17 @@ pub fn collect<SP: SessionParameters>(
     })
 }
 
-/// Collects the elements of a mapping node into a scalar node with a given name.
+/// Collects the elements of a mapping node into a scalar node with a given disambiguator.
 ///
 /// Use instead of [`collect`] when you need to collect the same mapping into two different scalars
 /// (usng two different groups).
 pub fn collect_into<SP: SessionParameters>(
-    name: &str,
+    disambiguator: &str,
     values: impl Into<CollectArg<SP>>,
     group: &impl PartyGroup<SP::Verifier>,
 ) -> Node<Collect<SP>> {
     let values = values.into();
-    let store_in = CollectedTag::new(name);
+    let store_in = values.store_in().to_collected(Some(disambiguator));
     Node::new(Collect {
         store_in,
         values,

@@ -444,7 +444,7 @@ where
             let all_echos_sent = collect(&echo_sent, &ThresholdGroup::new(&ids));
 
             let all_echos_to_check_root = collect_into(
-                "echos_to_check_root",
+                "to_check_root",
                 &echo_processed,
                 &ThresholdGroup::new_threshold(&ids, echos_to_check_root),
             )
@@ -464,7 +464,7 @@ where
             let ready_received = receive(&message_ready);
 
             let all_readies_to_send_ready = collect_into(
-                "readies_to_send_ready",
+                "to_send_ready",
                 &ready_received,
                 &ThresholdGroup::new_threshold(&ids, readies_to_send_ready),
             );

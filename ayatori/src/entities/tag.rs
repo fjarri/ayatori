@@ -66,7 +66,7 @@ impl Display for FullName {
 /// The contents are of some user type.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("{0}")]
-pub(crate) struct ComputedScalarTag(pub(crate) FullName);
+pub(crate) struct ComputedScalarTag(FullName);
 
 impl ComputedScalarTag {
     pub fn new(name: &str) -> Self {
@@ -86,7 +86,7 @@ impl ComputedScalarTag {
 /// Two merged scalar values; can contain either one or both of them.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("merged({0})")]
-pub(crate) struct MergedScalarTag(pub(crate) FullName);
+pub(crate) struct MergedScalarTag(FullName);
 
 impl MergedScalarTag {
     pub fn new(name: &str) -> Self {
@@ -100,7 +100,7 @@ impl MergedScalarTag {
 
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("arg({0})")]
-pub(crate) struct ScalarArgumentTag(pub(crate) FullName);
+pub(crate) struct ScalarArgumentTag(FullName);
 
 impl ScalarArgumentTag {
     pub fn new(name: &str) -> Self {
@@ -112,18 +112,36 @@ impl ScalarArgumentTag {
     }
 }
 
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("collected({0})")]
-pub(crate) struct CollectedTag(pub(crate) MappingTag);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) struct CollectedTag {
+    collected_from: MappingTag,
+    /// A part of the tag that is used to distinguish between several nodes collected from the same mapping node.
+    disambiguator: Option<String>,
+}
+
+impl Display for CollectedTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "collected({}", self.collected_from)?;
+        if let Some(disambiguator) = &self.disambiguator {
+            write!(f, ", {disambiguator}")?;
+        }
+        write!(f, ")")
+    }
+}
 
 impl CollectedTag {
-    pub fn new(name: &str) -> Self {
-        // TODO: have a special variant for directly created CollectedTags?
-        Self(MappingTag::Computed(ComputedMappingTag::new(name)))
+    fn new(collected_from: MappingTag, disambiguator: Option<&str>) -> Self {
+        Self {
+            collected_from,
+            disambiguator: disambiguator.map(String::from),
+        }
     }
 
     pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+        Self {
+            collected_from: self.collected_from.with_added_prefix(prefix),
+            disambiguator: self.disambiguator,
+        }
     }
 }
 
@@ -133,7 +151,7 @@ impl CollectedTag {
 /// The contents are of some user type.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("{0}")]
-pub(crate) struct ComputedMappingTag(pub(crate) FullName);
+pub(crate) struct ComputedMappingTag(FullName);
 
 impl ComputedMappingTag {
     pub fn new(name: &str) -> Self {
@@ -155,7 +173,7 @@ impl ComputedMappingTag {
 /// The contents of the value are `()`.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("sent({0})")]
-pub(crate) struct SentTag(pub(crate) FullName);
+pub(crate) struct SentTag(FullName);
 
 impl SentTag {
     pub fn with_added_prefix(self, prefix: &str) -> Self {
@@ -168,7 +186,7 @@ impl SentTag {
 /// The contents are of some user type.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("received({0})")]
-pub(crate) struct ReceivedTag(pub(crate) FullName);
+pub(crate) struct ReceivedTag(FullName);
 
 impl ReceivedTag {
     pub fn with_added_prefix(self, prefix: &str) -> Self {
@@ -181,7 +199,7 @@ impl ReceivedTag {
 /// The contents are `SignedValue`.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("signed-local({0})")]
-pub(crate) struct LocalSignedTag(pub(crate) FullName);
+pub(crate) struct LocalSignedTag(FullName);
 
 impl LocalSignedTag {
     pub fn new(name: &str) -> Self {
@@ -207,7 +225,7 @@ impl LocalSignedTag {
 /// The contents are `SignedValue`.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[displaydoc("signed-remote({0})")]
-pub(crate) struct RemoteSignedTag(pub(crate) FullName);
+pub(crate) struct RemoteSignedTag(FullName);
 
 impl RemoteSignedTag {
     pub fn new(name: &str) -> Self {
@@ -336,8 +354,8 @@ impl MappingTagRef<'_> {
         }
     }
 
-    pub fn to_collected(self) -> CollectedTag {
-        CollectedTag(self.to_owned())
+    pub fn to_collected(self, disambiguator: Option<&str>) -> CollectedTag {
+        CollectedTag::new(self.to_owned(), disambiguator)
     }
 }
 
