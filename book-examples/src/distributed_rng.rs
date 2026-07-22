@@ -262,10 +262,7 @@ mod tests {
         let results = run_sessions_sync(&mut rng, sessions).unwrap();
 
         let report1 = &results.reports[&ids[0]];
-        assert!(matches!(
-            report1.outcome,
-            SessionOutcome::ManuallyTerminated
-        ));
+        assert!(report1.success_ref().is_some());
         assert!(report1.provable_errors.is_empty());
 
         // ANCHOR: test_report

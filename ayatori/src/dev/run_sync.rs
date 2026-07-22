@@ -7,12 +7,9 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-#[cfg(doc)]
-use crate::protocol_user_api::SendTaskResult;
-
 /// A rule that determines if a specific protocol message will be blocked during execution
 ///
-/// The node attempting to send it will receive the error result of [`SendTaskResult`].
+/// The node attempting to send it will have the message destination banned.
 #[derive_where::derive_where(Debug, Default)]
 pub struct BlockMessagesRule<SP: SessionParameters> {
     /// If `Some`, messages from this source will be blocked.
@@ -84,7 +81,7 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
         let mut reports = BTreeMap::new();
 
         while !sessions.is_empty() {
-            let mut session_updated = false;
+            let mut stalled = true;
 
             let sessions_to_process = core::mem::take(&mut sessions);
 
@@ -102,34 +99,41 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
                     updates.push(SessionUpdate::add_message(message_id, message));
                 }
 
+                // TODO: ideally here we want to loop until all incoming messages are exhausted,
+                // and all tasks are exhausted.
                 loop {
+                    // TODO: can this be made less awkward?
                     let update = if let Some(update) = updates.pop() {
-                        update
+                        stalled = false;
+                        Some(update)
                     } else if let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
+                        stalled = false;
                         match task {
-                            Task::Deterministic(task) => task.execute(),
-                            Task::Randomized(task) => task.execute(rng),
-                            Task::Send(task) => {
-                                let (message, result) = task.unpack();
+                            Task::Deterministic(task) => Some(task.execute()),
+                            Task::Randomized(task) => Some(task.execute(rng)),
+                            Task::Send(message) => {
                                 let destination = message.destination().clone();
                                 let queue = messages.get_mut(&destination).ok_or_else(|| {
                                     RuntimeError::new(format!("{id:?} not found in the map of message queues"))
                                 })?;
 
-                                if let Some(message) = self.filter_message(message) {
-                                    queue.push(message);
-                                    result.success()
-                                } else {
-                                    result.error()
-                                }
+                                self.filter_message(message).map_or_else(
+                                    || Some(SessionUpdate::ban_party(destination, "Unreahable")),
+                                    |message| {
+                                        queue.push(message);
+                                        None
+                                    },
+                                )
                             }
                         }
                     } else {
+                        None
+                    };
+
+                    let Some(update) = update else {
                         sessions.push(session);
                         break;
                     };
-
-                    session_updated = true;
 
                     session = match session.with_update(update)? {
                         SessionState::InProgress(session) => session,
@@ -149,7 +153,7 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
                 }
             }
 
-            if !session_updated {
+            if stalled {
                 // That's where in production the sessions would time out and get terminated externally.
                 for session in sessions {
                     reports.insert(session.verifier().clone(), session.terminate());

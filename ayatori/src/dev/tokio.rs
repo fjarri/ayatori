@@ -9,33 +9,28 @@ use tokio_util::sync::CancellationToken;
 
 use super::run_sync::ExecutionResult;
 use crate::{
-    entities::{MessageId, RuntimeError},
+    entities::{Message, MessageId, RuntimeError},
     execution::{
-        SendTask, Session, SessionReport, SessionUpdate,
+        Session, SessionReport, SessionUpdate,
         tokio::{MessageOut, SessionRunner},
     },
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-struct WrappedMessageOut<SP: SessionParameters> {
-    message: MessageOut<SP>,
-    source: SP::Verifier,
-}
-
 async fn message_dispatcher<SP>(
     mut rng: SP::Rng,
     txs: BTreeMap<SP::Verifier, mpsc::Sender<SessionUpdate<SP>>>,
-    rx: mpsc::Receiver<WrappedMessageOut<SP>>,
+    rx: mpsc::Receiver<MessageOut<SP>>,
 ) -> Result<(), RuntimeError>
 where
     SP: SessionParameters,
 {
     let mut rx = rx;
-    let mut messages = Vec::<(SP::Verifier, SendTask<SP>)>::new();
+    let mut messages = Vec::<Message<SP>>::new();
 
     loop {
-        let mut messages_out = Vec::<WrappedMessageOut<SP>>::new();
+        let mut messages_out = Vec::<MessageOut<SP>>::new();
 
         // Wait for a message to appear in the channel, or the channel to be closed.
         let Some(msg_out) = rx.recv().await else {
@@ -49,10 +44,8 @@ where
         }
 
         for msg_out in messages_out {
-            match msg_out.message {
-                MessageOut::Message(task) => {
-                    messages.push((msg_out.source, task));
-                }
+            match msg_out {
+                MessageOut::Message(message) => messages.push(message),
                 MessageOut::Error(error) => return Err(RuntimeError::new(format!("{error}"))),
             }
         }
@@ -62,9 +55,7 @@ where
             // to increase the chances that they are delivered out of order.
             let mut infallible_rng = UnwrapErr(&mut rng);
             let message_idx = infallible_rng.random_range(0..messages.len());
-            let (source, outgoing) = messages.swap_remove(message_idx);
-
-            let (message, result) = outgoing.unpack();
+            let message = messages.swap_remove(message_idx);
 
             let tx = txs.get(message.destination()).ok_or_else(|| {
                 RuntimeError::new(format!(
@@ -79,15 +70,6 @@ where
             tx.send(update)
                 .await
                 .map_err(|err| RuntimeError::new(format!("Could not send an outgoing message: {err}")))?;
-
-            let source_tx = txs
-                .get(&source)
-                .ok_or_else(|| RuntimeError::new(format!("Source ({source:?}) is missing in the map of channels")))?;
-
-            source_tx
-                .send(result.success())
-                .await
-                .map_err(|err| RuntimeError::new(format!("Could not send back the result: {err}")))?;
 
             // Give up execution so that the tasks could process messages.
             tokio::time::sleep(tokio::time::Duration::from_millis(0)).await;
@@ -140,7 +122,7 @@ where
     let mut tx_map = BTreeMap::new();
     let mut session_handles = BTreeMap::new();
     let mut forwarding_handles = Vec::new();
-    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<WrappedMessageOut<SP>>(100);
+    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<MessageOut<SP>>(100);
 
     let cancellation = CancellationToken::new();
     let session_runner = Arc::new(session_runner);
@@ -159,14 +141,10 @@ where
 
         // We need to match the outgoing messages with their source
         // to be able to send back results of attempting to send a message.
-        let source = id.clone();
         let forwarding_task: JoinHandle<Result<(), RuntimeError>> = tokio::spawn(async move {
             while let Some(message) = out_rx.recv().await {
                 dispatcher_tx
-                    .send(WrappedMessageOut {
-                        source: source.clone(),
-                        message,
-                    })
+                    .send(message)
                     .await
                     .map_err(|err| RuntimeError::new(format!("Failed to forward a message: {err}")))?;
             }

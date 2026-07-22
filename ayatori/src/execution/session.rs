@@ -24,8 +24,8 @@ use super::{
         DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
         ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
         RngElementUnattributableTask, RngScalarUnattributableTask, ScalarThirdPartyAttributableTask,
-        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SendTask, SerializeAndSignElementTask,
-        SessionUpdate, SessionUpdateEnum, Task,
+        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SerializeAndSignElementTask, SessionUpdate,
+        SessionUpdateEnum, Task,
     },
 };
 #[cfg(feature = "dev")]
@@ -248,12 +248,6 @@ where
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
     }
 
-    fn register_send_error(&mut self, guilty_party: SP::Verifier) {
-        self.ruleset.update_with_banned_party(&guilty_party);
-        self.attributable_errors
-            .insert(guilty_party, "Error when sending a message".into());
-    }
-
     fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
@@ -333,7 +327,13 @@ where
                         .downcast::<SignedValue<SP>>()
                         .or_with_context(|| "Failed to downcast the value to be sent".into())?;
                     let message = Message::new(vec![signed_value])?;
-                    return Ok(Some(SendTask::new(store_in, destination, message).into()));
+                    // Note that we record the fact that the message was *sent*, not *delivered*.
+                    //
+                    // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
+                    // and we can get away with it because it does not change the state.
+                    // Can we enforce it in types somehow? In general, `add_element()` never changes state.
+                    self.add_element(&MappingTag::Sent(store_in), &destination, Value::new(()))?;
+                    return Ok(Some(Task::Send(message)));
                 }
                 Action::ComputeScalar {
                     store_in,
@@ -499,10 +499,6 @@ where
             SessionUpdateEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
             SessionUpdateEnum::SpuriousError { store_in, error } => {
                 Ok(AddSessionUpdate::SpuriousError { store_in, error })
-            }
-            SessionUpdateEnum::Sent { store_in, destination } => {
-                self.add_element(&store_in, &destination, Value::new(()))?;
-                Ok(AddSessionUpdate::StateChanged)
             }
             SessionUpdateEnum::ComputedScalar { store_in, result } => {
                 self.add_scalar(&store_in, result)?;
@@ -681,10 +677,6 @@ where
                     description,
                 });
                 Ok(AddSessionUpdate::MessageAttributableError(error))
-            }
-            SessionUpdateEnum::SendError { destination } => {
-                self.register_send_error(destination);
-                Ok(AddSessionUpdate::StateChanged)
             }
             SessionUpdateEnum::ExternalBan { party_id, reason } => {
                 self.register_banned_party(party_id, reason);

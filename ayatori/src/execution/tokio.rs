@@ -9,10 +9,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     session::{MessageAttributableError, Session, SessionReport, SessionState},
-    task::{SendTask, SessionUpdate, Task},
+    task::{SessionUpdate, Task},
 };
 use crate::{
-    entities::RuntimeError,
+    entities::{Message, RuntimeError},
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -21,11 +21,12 @@ use crate::{
 #[derive_where::derive_where(Debug)]
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.
-    Message(SendTask<SP>),
+    Message(Message<SP>),
     /// A non-fatal problem attributable to message(s) but not to a specific party.
     Error(MessageAttributableError<SP>),
 }
 
+// TODO: should this be moved to `dev`?
 /// A trait defined for `async fn`s that execute a single session.
 pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: 'static + Send + Sync {
     /// The returned future.
@@ -66,8 +67,8 @@ where
                 match task {
                     Task::Deterministic(task) => task.execute(),
                     Task::Randomized(task) => task.execute(rng),
-                    Task::Send(task) => {
-                        tx.send(MessageOut::Message(task)).await.map_err(|err| {
+                    Task::Send(message) => {
+                        tx.send(MessageOut::Message(message)).await.map_err(|err| {
                             RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
                         })?;
                         continue;
@@ -185,8 +186,8 @@ where
                     let mut task_rng = SP::Rng::from_seed(seed);
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
-                Task::Send(task) => {
-                    tx.send(MessageOut::Message(task)).await.map_err(|err| {
+                Task::Send(message) => {
+                    tx.send(MessageOut::Message(message)).await.map_err(|err| {
                         RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
                     })?;
                 }

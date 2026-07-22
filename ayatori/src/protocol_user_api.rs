@@ -4,8 +4,8 @@ pub use crate::{
     entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, SpuriousError, ThresholdGroup},
     execution::{
         DeterministicTask, DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError,
-        RandomizedTask, ReachedOutputSession, SendTask, SendTaskResult, Session, SessionOutcome, SessionReport,
-        SessionState, SessionUpdate, Task, UnfinishableOutcome,
+        RandomizedTask, ReachedOutputSession, Session, SessionOutcome, SessionReport, SessionState, SessionUpdate,
+        Task, UnfinishableOutcome,
     },
     traits::{ExecutableProtocol, SessionParameters},
 };

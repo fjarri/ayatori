@@ -6,7 +6,7 @@ use crate::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedTag,
         MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag,
         SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SenderError,
-        SenderErrorWithReveal, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError,
+        SenderErrorWithReveal, SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError,
         ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction, ThirdPartyError,
         UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
@@ -514,63 +514,6 @@ impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
     }
 }
 
-/// An object used to report the result of attempting to send a message to a remote party.
-#[derive_where::derive_where(Debug)]
-pub struct SendTaskResult<SP: SessionParameters> {
-    store_in: MappingTag,
-    destination: SP::Verifier,
-}
-
-impl<SP: SessionParameters> SendTaskResult<SP> {
-    /// Returns a result indicating that the message was successfully sent.
-    pub fn success(self) -> SessionUpdate<SP> {
-        SessionUpdate(SessionUpdateEnum::Sent {
-            store_in: self.store_in,
-            destination: self.destination,
-        })
-    }
-
-    /// Returns a result indicating that there was an error delivering the message.
-    pub fn error(self) -> SessionUpdate<SP> {
-        SessionUpdate(SessionUpdateEnum::SendError {
-            destination: self.destination,
-        })
-    }
-}
-
-/// A task requiring the user to send a message to a remote party.
-#[derive_where::derive_where(Debug)]
-pub struct SendTask<SP: SessionParameters> {
-    store_in: SentTag,
-    destination: SP::Verifier,
-    message: Message<SP>,
-}
-
-impl<SP: SessionParameters> SendTask<SP> {
-    pub(crate) fn new(store_in: SentTag, destination: SP::Verifier, message: Message<SP>) -> Self {
-        Self {
-            store_in,
-            destination,
-            message,
-        }
-    }
-
-    /// Returns the message to be sent and an object used to report the result of that.
-    pub fn unpack(self) -> (Message<SP>, SendTaskResult<SP>) {
-        let result = SendTaskResult {
-            store_in: MappingTag::Sent(self.store_in),
-            destination: self.destination,
-        };
-        (self.message, result)
-    }
-}
-
-impl<SP: SessionParameters> From<SendTask<SP>> for Task<SP> {
-    fn from(source: SendTask<SP>) -> Self {
-        Self::Send(source)
-    }
-}
-
 #[derive_where::derive_where(Debug)]
 pub(crate) struct PreprocessMessageTask<SP: SessionParameters> {
     session_data: Arc<SessionData<SP>>,
@@ -720,7 +663,7 @@ impl<SP: SessionParameters> RandomizedTask<SP> {
 #[derive_where::derive_where(Debug)]
 pub enum Task<SP: SessionParameters> {
     /// Send an outgoing message.
-    Send(SendTask<SP>),
+    Send(Message<SP>),
     /// Perform a dererministic computation.
     Deterministic(DeterministicTask<SP>),
     /// Perform a computation that needs access to an RNG.
@@ -739,8 +682,11 @@ impl<SP: SessionParameters> SessionUpdate<SP> {
     /// Creates an update that, when applied, bans a party internally,
     /// resulting in all of its messages and values calculated from them being discarded,
     /// and new messages ignored.
-    pub fn ban_party(party_id: SP::Verifier, reason: String) -> Self {
-        Self(SessionUpdateEnum::ExternalBan { party_id, reason })
+    pub fn ban_party(party_id: SP::Verifier, reason: impl Into<String>) -> Self {
+        Self(SessionUpdateEnum::ExternalBan {
+            party_id,
+            reason: reason.into(),
+        })
     }
 
     /// Creates an update that adds a newly received message to the session.
@@ -758,10 +704,6 @@ pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     Received {
         id: MessageId<SP>,
         message: Message<SP>,
-    },
-    Sent {
-        store_in: MappingTag,
-        destination: SP::Verifier,
     },
     ComputedScalar {
         store_in: ScalarTag,
@@ -801,9 +743,6 @@ pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     MessageError {
         message_id: MessageId<SP>,
         description: String,
-    },
-    SendError {
-        destination: SP::Verifier,
     },
     ExternalBan {
         party_id: SP::Verifier,
