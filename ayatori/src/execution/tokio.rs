@@ -26,23 +26,6 @@ pub enum MessageOut<SP: SessionParameters> {
     Error(MessageAttributableError<SP>),
 }
 
-// TODO: should this be moved to `dev`?
-/// A trait defined for `async fn`s that execute a single session.
-pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: 'static + Send + Sync {
-    /// The returned future.
-    type Fut: Future<Output = Result<SessionReport<SP, P>, RuntimeError>> + 'a + Send;
-
-    /// Calls the function returning the future.
-    fn call(
-        &self,
-        rng: &'a mut SP::Rng,
-        tx: &'a mpsc::Sender<MessageOut<SP>>,
-        rx: &'a mut mpsc::Receiver<SessionUpdate<SP>>,
-        cancellation: CancellationToken,
-        session: Session<SP, P>,
-    ) -> Self::Fut;
-}
-
 /// Executes the session waiting for the messages from the `rx` channel
 /// and pushing outgoing messages into the `tx` channel.
 pub async fn run_session<SP, P>(

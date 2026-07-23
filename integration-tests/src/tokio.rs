@@ -3,10 +3,13 @@ mod tests {
     use alloc::vec::Vec;
 
     use ayatori::{
-        dev::{BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async},
+        dev::{
+            BinaryFormat, TestSessionParams, TestSigner,
+            tokio::{SessionRunner, run_sessions_async},
+        },
         protocol_user_api::{
             Session, SessionId, ThresholdGroup,
-            tokio::{SessionRunner, par_run_session, run_session},
+            tokio::{par_run_session, run_session},
         },
         signature::{Keypair, rand_core::SeedableRng},
     };

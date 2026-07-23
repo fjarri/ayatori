@@ -10,10 +10,7 @@ use tokio_util::sync::CancellationToken;
 use super::run_sync::ExecutionResult;
 use crate::{
     entities::{Message, MessageId, RuntimeError},
-    execution::{
-        Session, SessionReport, SessionUpdate,
-        tokio::{MessageOut, SessionRunner},
-    },
+    execution::{Session, SessionReport, SessionUpdate, tokio::MessageOut},
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -75,6 +72,22 @@ where
             tokio::time::sleep(tokio::time::Duration::from_millis(0)).await;
         }
     }
+}
+
+/// A trait defined for `async fn`s that execute a single session.
+pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: 'static + Send + Sync {
+    /// The returned future.
+    type Fut: Future<Output = Result<SessionReport<SP, P>, RuntimeError>> + 'a + Send;
+
+    /// Calls the function returning the future.
+    fn call(
+        &self,
+        rng: &'a mut SP::Rng,
+        tx: &'a mpsc::Sender<MessageOut<SP>>,
+        rx: &'a mut mpsc::Receiver<SessionUpdate<SP>>,
+        cancellation: CancellationToken,
+        session: Session<SP, P>,
+    ) -> Self::Fut;
 }
 
 impl<'a, SP, P, F, Fut> SessionRunner<'a, SP, P> for F
