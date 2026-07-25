@@ -24,7 +24,7 @@ where
     SP: SessionParameters,
 {
     let mut rx = rx;
-    let mut messages = Vec::<Message<SP>>::new();
+    let mut messages = Vec::<(SP::Verifier, Message<SP>)>::new();
 
     loop {
         let mut messages_out = Vec::<MessageOut<SP>>::new();
@@ -42,7 +42,7 @@ where
 
         for msg_out in messages_out {
             match msg_out {
-                MessageOut::Message(message) => messages.push(message),
+                MessageOut::Message { destination, message } => messages.push((destination, message)),
                 MessageOut::Error(error) => return Err(RuntimeError::new(format!("{error}"))),
             }
         }
@@ -52,12 +52,11 @@ where
             // to increase the chances that they are delivered out of order.
             let mut infallible_rng = UnwrapErr(&mut rng);
             let message_idx = infallible_rng.random_range(0..messages.len());
-            let message = messages.swap_remove(message_idx);
+            let (destination, message) = messages.swap_remove(message_idx);
 
-            let tx = txs.get(message.destination()).ok_or_else(|| {
+            let tx = txs.get(&destination).ok_or_else(|| {
                 RuntimeError::new(format!(
-                    "Destination ({:?}) is missing in the map of channels",
-                    message.destination()
+                    "Destination ({destination:?}) is missing in the map of channels",
                 ))
             })?;
 

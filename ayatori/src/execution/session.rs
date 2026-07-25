@@ -3,7 +3,6 @@ use alloc::{
     format,
     string::String,
     sync::Arc,
-    vec,
     vec::Vec,
 };
 use core::{
@@ -24,8 +23,8 @@ use super::{
         DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
         ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
         RngElementUnattributableTask, RngScalarUnattributableTask, ScalarThirdPartyAttributableTask,
-        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SerializeAndSignElementTask, SessionUpdate,
-        SessionUpdateEnum, Task,
+        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SendTask, SerializeAndSignElementTask,
+        SerializeAndSignScalarTask, SessionUpdate, SessionUpdateEnum, Task,
     },
 };
 #[cfg(feature = "dev")]
@@ -211,12 +210,9 @@ where
         let mut output_node = make_tree::<SP, P>(&verifier, shared_data)
             .or_with_context(|| "Failed to build the protocol graph".into())?;
         for replacement in replacements {
-            output_node = replacement.apply(&output_node).or_with_context(|| {
-                format!(
-                    "Failed to build apply the replacement for node `{}`",
-                    output_node.store_in()
-                )
-            })?;
+            output_node = replacement
+                .apply(&output_node)
+                .or_with_context(|| format!("Failed to apply the replacement for node `{}`", output_node.store_in()))?;
         }
         let private_inputs = P::make_private_inputs(private_data);
         Self::new_inner(id, Some(signer), &verifier, &output_node, private_inputs, shared_data)
@@ -314,6 +310,26 @@ where
 
         while let Some(action) = self.ruleset.pop_action() {
             match action {
+                Action::BroadcastMessage {
+                    store_in,
+                    to_send,
+                    destinations,
+                } => {
+                    let value = self
+                        .storage
+                        .get_scalar(&ScalarTag::LocalSigned(to_send))
+                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+                    let signed_value = value
+                        .downcast::<SignedValue<SP>>()
+                        .or_with_context(|| "Failed to downcast the value to be sent".into())?;
+                    // Note that we record the fact that the message was *sent*, not *delivered*.
+                    //
+                    // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
+                    // and we can get away with it because it does not change the state.
+                    // Can we enforce it in types somehow? In general, `add_element()` never changes state.
+                    self.add_scalar(&ScalarTag::Sent(store_in), Value::new(()))?;
+                    return Ok(Some(SendTask::new_broadcast(destinations, signed_value).into()));
+                }
                 Action::DirectMessage {
                     store_in,
                     to_send,
@@ -326,14 +342,13 @@ where
                     let signed_value = value
                         .downcast::<SignedValue<SP>>()
                         .or_with_context(|| "Failed to downcast the value to be sent".into())?;
-                    let message = Message::new(vec![signed_value])?;
                     // Note that we record the fact that the message was *sent*, not *delivered*.
                     //
                     // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
                     // and we can get away with it because it does not change the state.
                     // Can we enforce it in types somehow? In general, `add_element()` never changes state.
                     self.add_element(&MappingTag::Sent(store_in), &destination, Value::new(()))?;
-                    return Ok(Some(Task::Send(message)));
+                    return Ok(Some(SendTask::new_direct(destination, signed_value).into()));
                 }
                 Action::ComputeScalar {
                     store_in,
@@ -390,6 +405,29 @@ where
                             ElementThirdPartyAttributableTask::new(store_in, function, index, args).into()
                         }
                     }));
+                }
+                Action::ComputeSerializeAndSignScalar {
+                    store_in,
+                    function,
+                    data,
+                    message_name,
+                    serde_adapter,
+                } => {
+                    let signer = self.signer.as_ref().ok_or_else(|| {
+                        // This can happen if a serialization node somehow remains
+                        // in an evidence verification subtree.
+                        RuntimeError::new(
+                            "Attempted to execute a serialize-and-sign node in a session without a signer",
+                        )
+                    })?;
+
+                    let value = self
+                        .storage
+                        .get_scalar(&data)
+                        .or_with_context(|| format!("Failed to get the argument for `{data}` from storage"))?;
+
+                    let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
+                    return Ok(Some(SerializeAndSignScalarTask::new(store_in, function, args).into()));
                 }
                 Action::ComputeSerializeAndSignElement {
                     store_in,

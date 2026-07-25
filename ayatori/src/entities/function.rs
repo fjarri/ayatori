@@ -173,7 +173,12 @@ define_erased_function_type!(
 );
 
 define_erased_function_type!(
-    SerializeAndSignFunction<SP>,
+    SerializeAndSignBCFunction<SP>,
+    (rng: &mut SP::Rng, args: &SerializeArgs<SP>) -> Result<Value, RuntimeError>
+);
+
+define_erased_function_type!(
+    SerializeAndSignDMFunction<SP>,
     (rng: &mut SP::Rng, destination: &SP::Verifier, args: &SerializeArgs<SP>) -> Result<Value, RuntimeError>
 );
 

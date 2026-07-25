@@ -98,9 +98,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let all_parties = build_data;
 
         let my_x = compute_scalar("my_x", make_scalar_value, &[]);
-        let x_broadcasted = broadcast(&message_x, &my_x);
+        let x_broadcasted = broadcast(&message_x, &my_x, all_parties.ids());
         let x = receive(&message_x);
-        let all_x = collect(&x, all_parties).with_dependency(&collect(&x_broadcasted, all_parties));
+        let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
 
         let my_y = compute_mapping("my_y", make_mapping_elem, &[]);
         let y_sent = direct_message(&message_y, &my_y);

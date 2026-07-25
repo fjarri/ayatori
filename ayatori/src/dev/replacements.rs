@@ -3,10 +3,11 @@ use core::fmt::{self, Debug};
 
 use crate::{
     entities::{
-        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedTag, MappingTag,
-        MaybeAttributableError, RuntimeError, ScalarTag, SerializeAndSignFunction, SerializeArgs, SignedValue,
-        SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction, ThirdPartyError,
-        UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedBCTag, LocalSignedDMTag,
+        MappingTag, MaybeAttributableError, RuntimeError, ScalarTag, SerializeAndSignBCFunction,
+        SerializeAndSignDMFunction, SerializeArgs, SignedValue, SimpleMappingFunction, SimpleScalarFunction,
+        ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError, UnattributableMappingFunction,
+        UnattributableScalarFunction, Value,
     },
     graph_representation::{AnyNode, ComputeMappingKind, ComputeScalarKind, GeneralizedNode, OutputNode, ShallowClone},
     traced_error::TraceableResult,
@@ -56,7 +57,10 @@ enum ReplacementEnum<SP: SessionParameters> {
                 + Sync,
         >,
     },
-    Message {
+    SerializeAndSignBC {
+        function: Arc<dyn Fn(&mut SP::Rng, Value, &SerializeArgs<SP>) -> Result<Value, RuntimeError> + Send + Sync>,
+    },
+    SerializeAndSignDM {
         function: Arc<
             dyn Fn(&mut SP::Rng, Value, &SP::Verifier, &SerializeArgs<SP>) -> Result<Value, RuntimeError> + Send + Sync,
         >,
@@ -144,8 +148,34 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    /// Replaces the serialize-and-check part of a [`broadcast`] or [`direct_message`] node.
-    pub fn serialize_and_check<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
+    /// Replaces the serialize-and-check part of a [`direct_message`] node.
+    pub fn serialize_and_check_bc<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
+    where
+        F: 'static
+            + Send
+            + Sync
+            + Fn(&mut SP::Rng, &SignedValue<SP>, &SerializeArgs<SP>) -> Result<SignedValue<SP>, RuntimeError>,
+    {
+        let tag = LocalSignedBCTag::new_with_full_name(
+            FullName::new_with_prefix(name)
+                .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
+        );
+        Ok(Self {
+            tag: AnyTag::Scalar(ScalarTag::LocalSigned(tag.clone())),
+            kind: ReplacementEnum::SerializeAndSignBC {
+                function: Arc::new(move |rng, orig_value, args| {
+                    let typed_value = orig_value
+                        .downcast_ref::<SignedValue<SP>>()
+                        .or_with_context(|| format!("Failed to downcast the result of the node `{tag}`"))?;
+                    let typed_result = function(rng, typed_value, args)?;
+                    Ok(Value::new(typed_result))
+                }),
+            },
+        })
+    }
+
+    /// Replaces the serialize-and-check part of a [`direct_message`] node.
+    pub fn serialize_and_check_dm<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         F: 'static
             + Send
@@ -157,13 +187,13 @@ impl<SP: SessionParameters> Replacement<SP> {
                 &SerializeArgs<SP>,
             ) -> Result<SignedValue<SP>, RuntimeError>,
     {
-        let tag = LocalSignedTag::new_with_full_name(
+        let tag = LocalSignedDMTag::new_with_full_name(
             FullName::new_with_prefix(name)
                 .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
         );
         Ok(Self {
             tag: AnyTag::Mapping(MappingTag::LocalSigned(tag.clone())),
-            kind: ReplacementEnum::Message {
+            kind: ReplacementEnum::SerializeAndSignDM {
                 function: Arc::new(move |rng, orig_value, destination, args| {
                     let typed_value = orig_value
                         .downcast_ref::<SignedValue<SP>>()
@@ -283,14 +313,33 @@ impl<SP: SessionParameters> Replacement<SP> {
                 }))
             }
             (
-                AnyNode::SerializeAndSign(node),
-                ReplacementEnum::Message {
+                AnyNode::SerializeAndSignBC(node),
+                ReplacementEnum::SerializeAndSignBC {
                     function: replacement_function,
                 },
             ) => {
                 let function = node.as_ref().function.clone();
                 let replacement_function = replacement_function.clone();
-                let new_function = SerializeAndSignFunction::new(move |rng, destination, args| {
+                let new_function = SerializeAndSignBCFunction::new(move |rng, args| {
+                    let orig_value = function.call(rng, args)?;
+                    replacement_function(rng, orig_value, args)
+                });
+
+                AnyNode::from(node.get_strong_ref().mutated(|inner| {
+                    let mut inner = inner.shallow_clone();
+                    inner.function = new_function;
+                    inner
+                }))
+            }
+            (
+                AnyNode::SerializeAndSignDM(node),
+                ReplacementEnum::SerializeAndSignDM {
+                    function: replacement_function,
+                },
+            ) => {
+                let function = node.as_ref().function.clone();
+                let replacement_function = replacement_function.clone();
+                let new_function = SerializeAndSignDMFunction::new(move |rng, destination, args| {
                     let orig_value = function.call(rng, destination, args)?;
                     replacement_function(rng, orig_value, destination, args)
                 });

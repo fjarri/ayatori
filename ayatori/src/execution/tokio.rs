@@ -21,7 +21,12 @@ use crate::{
 #[derive_where::derive_where(Debug)]
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.
-    Message(Message<SP>),
+    Message {
+        /// Message destination.
+        destination: SP::Verifier,
+        /// The message to be sent.
+        message: Message<SP>,
+    },
     /// A non-fatal problem attributable to message(s) but not to a specific party.
     Error(MessageAttributableError<SP>),
 }
@@ -50,10 +55,14 @@ where
                 match task {
                     Task::Deterministic(task) => task.execute(),
                     Task::Randomized(task) => task.execute(rng),
-                    Task::Send(message) => {
-                        tx.send(MessageOut::Message(message)).await.map_err(|err| {
-                            RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                        })?;
+                    Task::Send(task) => {
+                        for (destination, message) in task.into_direct_messages() {
+                            tx.send(MessageOut::Message { destination, message })
+                                .await
+                                .map_err(|err| {
+                                    RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                                })?;
+                        }
                         continue;
                     }
                 }
@@ -169,10 +178,14 @@ where
                     let mut task_rng = SP::Rng::from_seed(seed);
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
-                Task::Send(message) => {
-                    tx.send(MessageOut::Message(message)).await.map_err(|err| {
-                        RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
-                    })?;
+                Task::Send(task) => {
+                    for (destination, message) in task.into_direct_messages() {
+                        tx.send(MessageOut::Message { destination, message })
+                            .await
+                            .map_err(|err| {
+                                RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
+                            })?;
+                    }
                 }
             }
         }

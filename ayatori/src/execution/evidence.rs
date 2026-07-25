@@ -286,17 +286,18 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
 
     if !signed_values.is_empty() {
         let message_id = MessageId::from_usize(0);
-        let Ok(message) = Message::new(signed_values.to_vec()) else {
-            return Ok(EvidenceVerdict::invalid(
-                "The stored messages have differing destinations",
-            ));
-        };
 
-        if message.destination() != session_verifier {
-            return Ok(EvidenceVerdict::invalid(
-                "The destination of stored messages differs from the ID of the party that reported the failure",
-            ));
+        for value in signed_values {
+            if let Some(destination) = value.metadata().destination()
+                && destination != session_verifier
+            {
+                return Ok(EvidenceVerdict::invalid(
+                    "The destination of stored messages differs from the ID of the party that reported the failure",
+                ));
+            }
         }
+
+        let message = Message::new(signed_values.to_vec());
 
         let update = SessionUpdate::add_message(message_id, message);
         session = match session.with_update(update)? {

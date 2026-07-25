@@ -168,14 +168,27 @@ impl ComputedMappingTag {
     }
 }
 
+/// A marker indicating that a value was broadcasted.
+/// The name of the tag will come from the protocol message name.
+/// The contents of the value are `()`.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("sent-bc({0})")]
+pub(crate) struct SentBCTag(FullName);
+
+impl SentBCTag {
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
 /// A marker indicating that a value was sent out.
 /// The name of the tag will come from the protocol message name.
 /// The contents of the value are `()`.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("sent({0})")]
-pub(crate) struct SentTag(FullName);
+#[displaydoc("sent-dm({0})")]
+pub(crate) struct SentDMTag(FullName);
 
-impl SentTag {
+impl SentDMTag {
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self(self.0.with_added_prefix(prefix))
     }
@@ -185,7 +198,7 @@ impl SentTag {
 /// The name of the tag will come from the protocol message name.
 /// The contents are of some user type.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("received({0})")]
+#[displaydoc("received-bc({0})")]
 pub(crate) struct ReceivedTag(FullName);
 
 impl ReceivedTag {
@@ -194,14 +207,14 @@ impl ReceivedTag {
     }
 }
 
-/// A signed value + metadata originating from this node.
+/// A signed broadcast value + metadata originating from this node.
 /// The name of the tag will come from the protocol message name.
 /// The contents are `SignedValue`.
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("signed-local({0})")]
-pub(crate) struct LocalSignedTag(FullName);
+#[displaydoc("signed-bc-local({0})")]
+pub(crate) struct LocalSignedBCTag(FullName);
 
-impl LocalSignedTag {
+impl LocalSignedBCTag {
     pub fn new(name: &str) -> Self {
         Self(FullName::new(name))
     }
@@ -211,8 +224,34 @@ impl LocalSignedTag {
         Self(full_name)
     }
 
-    pub fn to_sent(&self) -> SentTag {
-        SentTag(self.0.clone())
+    pub fn to_broadcast_message_sent(&self) -> SentBCTag {
+        SentBCTag(self.0.clone())
+    }
+
+    pub fn with_added_prefix(self, prefix: &str) -> Self {
+        Self(self.0.with_added_prefix(prefix))
+    }
+}
+
+/// A signed direct message value + metadata originating from this node.
+/// The name of the tag will come from the protocol message name.
+/// The contents are `SignedValue`.
+#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[displaydoc("signed-dm-local({0})")]
+pub(crate) struct LocalSignedDMTag(FullName);
+
+impl LocalSignedDMTag {
+    pub fn new(name: &str) -> Self {
+        Self(FullName::new(name))
+    }
+
+    #[cfg(feature = "dev")]
+    pub fn new_with_full_name(full_name: FullName) -> Self {
+        Self(full_name)
+    }
+
+    pub fn to_direct_message_sent(&self) -> SentDMTag {
+        SentDMTag(self.0.clone())
     }
 
     pub fn with_added_prefix(self, prefix: &str) -> Self {
@@ -245,10 +284,15 @@ impl RemoteSignedTag {
     }
 }
 
+// TODO: isn't it more of "scalar dependency tag"?
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) enum ScalarTag {
     #[displaydoc("{0}")]
     Computed(ComputedScalarTag),
+    #[displaydoc("{0}")]
+    LocalSigned(LocalSignedBCTag),
+    #[displaydoc("{0}")]
+    Sent(SentBCTag),
     #[displaydoc("{0}")]
     Merged(MergedScalarTag),
     #[displaydoc("{0}")]
@@ -261,6 +305,8 @@ impl ScalarTag {
     pub fn as_ref(&self) -> ScalarTagRef<'_> {
         match self {
             Self::Computed(tag) => ScalarTagRef::Computed(tag),
+            Self::LocalSigned(tag) => ScalarTagRef::LocalSigned(tag),
+            Self::Sent(tag) => ScalarTagRef::Sent(tag),
             Self::Merged(tag) => ScalarTagRef::Merged(tag),
             Self::Argument(tag) => ScalarTagRef::Argument(tag),
             Self::Collected(tag) => ScalarTagRef::Collected(tag),
@@ -273,11 +319,11 @@ pub(crate) enum MappingTag {
     #[displaydoc("{0}")]
     Computed(ComputedMappingTag),
     #[displaydoc("{0}")]
-    Sent(SentTag),
+    Sent(SentDMTag),
     #[displaydoc("{0}")]
     Received(ReceivedTag),
     #[displaydoc("{0}")]
-    LocalSigned(LocalSignedTag),
+    LocalSigned(LocalSignedDMTag),
     #[displaydoc("{0}")]
     RemoteSigned(RemoteSignedTag),
 }
@@ -311,6 +357,10 @@ pub(crate) enum ScalarTagRef<'a> {
     #[displaydoc("{0}")]
     Computed(&'a ComputedScalarTag),
     #[displaydoc("{0}")]
+    LocalSigned(&'a LocalSignedBCTag),
+    #[displaydoc("{0}")]
+    Sent(&'a SentBCTag),
+    #[displaydoc("{0}")]
     Merged(&'a MergedScalarTag),
     #[displaydoc("{0}")]
     Argument(&'a ScalarArgumentTag),
@@ -322,6 +372,8 @@ impl ScalarTagRef<'_> {
     pub fn to_owned(self) -> ScalarTag {
         match self {
             Self::Computed(tag) => ScalarTag::Computed((*tag).clone()),
+            Self::LocalSigned(tag) => ScalarTag::LocalSigned((*tag).clone()),
+            Self::Sent(tag) => ScalarTag::Sent((*tag).clone()),
             Self::Merged(tag) => ScalarTag::Merged((*tag).clone()),
             Self::Argument(tag) => ScalarTag::Argument((*tag).clone()),
             Self::Collected(tag) => ScalarTag::Collected((*tag).clone()),
@@ -334,11 +386,11 @@ pub(crate) enum MappingTagRef<'a> {
     #[displaydoc("{0}")]
     Computed(&'a ComputedMappingTag),
     #[displaydoc("{0}")]
-    Sent(&'a SentTag),
+    Sent(&'a SentDMTag),
     #[displaydoc("{0}")]
     Received(&'a ReceivedTag),
     #[displaydoc("{0}")]
-    LocalSigned(&'a LocalSignedTag),
+    LocalSigned(&'a LocalSignedDMTag),
     #[displaydoc("{0}")]
     RemoteSigned(&'a RemoteSignedTag),
 }

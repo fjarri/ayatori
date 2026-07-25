@@ -10,8 +10,8 @@ use itertools::Itertools;
 use crate::{
     entities::{AnyTagRef, MappingTag, PartyGroup, ScalarTag},
     graph_representation::{
-        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, Dependency, DeserializeAndCheck, DirectMessage,
-        MergeScalars, SerializeAndSign,
+        Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, Dependency, DeserializeAndCheck, MergeScalars,
+        SendBC, SendDM, SerializeAndSignBC, SerializeAndSignDM,
     },
     traits::{PartyId, SessionParameters},
 };
@@ -37,6 +37,12 @@ impl ScalarCondition {
             all_of.insert(arg.store_in().to_owned());
         }
         Self::And(all_of)
+    }
+
+    pub fn from_broadcast_message<SP: SessionParameters>(node: &SendBC<SP>) -> Self {
+        Self::And(BTreeSet::from([ScalarTag::LocalSigned(
+            node.data.as_ref().store_in.clone(),
+        )]))
     }
 
     pub fn from_merged_scalar<SP: SessionParameters>(node: &MergeScalars<SP>) -> Self {
@@ -70,7 +76,11 @@ impl ScalarCondition {
         Self::And(all_of)
     }
 
-    pub fn from_serialize_and_sign<SP: SessionParameters>(node: &SerializeAndSign<SP>) -> Self {
+    pub fn from_serialize_and_sign_bc<SP: SessionParameters>(node: &SerializeAndSignBC<SP>) -> Self {
+        Self::And(BTreeSet::from([node.data.store_in().to_owned()]))
+    }
+
+    pub fn from_serialize_and_sign_dm<SP: SessionParameters>(node: &SerializeAndSignDM<SP>) -> Self {
         if let AnyTagRef::Scalar(tag) = node.data.store_in() {
             Self::And(BTreeSet::from([tag.to_owned()]))
         } else {
@@ -130,7 +140,7 @@ impl ElementCondition {
         Self { all_of }
     }
 
-    pub fn from_serialize_and_sign<SP: SessionParameters>(node: &SerializeAndSign<SP>) -> Self {
+    pub fn from_serialize_and_sign<SP: SessionParameters>(node: &SerializeAndSignDM<SP>) -> Self {
         if let AnyTagRef::Mapping(tag) = node.data.store_in() {
             Self {
                 all_of: BTreeSet::from([tag.to_owned()]),
@@ -148,7 +158,7 @@ impl ElementCondition {
         }
     }
 
-    pub fn from_direct_message<SP: SessionParameters>(node: &DirectMessage<SP>) -> Self {
+    pub fn from_direct_message<SP: SessionParameters>(node: &SendDM<SP>) -> Self {
         Self {
             all_of: BTreeSet::from([MappingTag::LocalSigned(node.data.as_ref().store_in.clone())]),
         }

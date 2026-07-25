@@ -20,8 +20,8 @@ pub use constructors::{
     mapping_alias, merge_scalars, receive, receive_split, scalar_alias,
 };
 pub use typed_nodes::{
-    Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, DirectMessage, MergeScalars, Node, Receive,
-    ScalarArgument, SerializeAndSign,
+    Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, MergeScalars, Node, Receive, ScalarArgument, SendBC,
+    SendDM, SerializeAndSignBC, SerializeAndSignDM,
 };
 pub use unions::{
     BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode,

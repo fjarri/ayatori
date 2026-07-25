@@ -18,11 +18,11 @@ use crate::{traced_error::TraceableResult, traits::SessionParameters};
 
 #[cfg(doc)]
 use crate::protocol_author_api::{
-    Collect, ComposableProtocol, ComputeMapping, ComputeScalar, MergeScalars, SerializeAndSign, compute_forked_scalar,
-    compute_forked_scalar_with_rng,
+    Collect, ComposableProtocol, ComputeMapping, ComputeScalar, MergeScalars, SerializeAndSignBC, SerializeAndSignDM,
+    compute_forked_scalar, compute_forked_scalar_with_rng,
 };
 
-/// Arguments for the function in [`SerializeAndSign`] node.
+/// Arguments for the function in [`SerializeAndSignBC`] and [`SerializeAndSignDM`] nodes.
 #[derive_where::derive_where(Debug)]
 pub struct SerializeArgs<SP: SessionParameters> {
     signer: Arc<SP::Signer>,

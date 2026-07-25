@@ -1,6 +1,6 @@
 use alloc::{
     boxed::Box,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     format,
     string::{String, ToString},
     sync::Arc,
@@ -15,15 +15,18 @@ use itertools::Itertools;
 
 use super::{
     any_node::AnyNode,
-    unions::{CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, UnionCastError},
+    unions::{
+        BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, UnionCastError,
+    },
 };
 use crate::{
     entities::{
-        CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedTag,
-        MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
-        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SentTag, SerdeAdapter,
-        SerializeAndSignFunction, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction,
+        CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedBCTag,
+        LocalSignedDMTag, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
+        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SentBCTag, SentDMTag,
+        SerdeAdapter, SerializeAndSignBCFunction, SerializeAndSignDMFunction, SimpleMappingFunction,
+        SimpleScalarFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction,
+        ThirdPartyAttributableVerificationFunction,
     },
     traced_error::TraceableResult,
     traits::SessionParameters,
@@ -436,16 +439,16 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeMapping<SP>> {
 
 /// A subtype of mapping computation node that serializes and signs values before sending them to other parties.
 #[derive_where::derive_where(Debug)]
-pub struct SerializeAndSign<SP: SessionParameters> {
-    pub(crate) store_in: LocalSignedTag,
-    pub(crate) function: SerializeAndSignFunction<SP>,
-    pub(crate) data: DirectMessageArg<SP>,
+pub struct SerializeAndSignBC<SP: SessionParameters> {
+    pub(crate) store_in: LocalSignedBCTag,
+    pub(crate) function: SerializeAndSignBCFunction<SP>,
+    pub(crate) data: BroadcastArg<SP>,
     pub(crate) serde_adapter: SerdeAdapter<SP::WireFormat>,
     pub(crate) message_name: FullName,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> ShallowClone for SerializeAndSign<SP> {
+impl<SP: SessionParameters> ShallowClone for SerializeAndSignBC<SP> {
     fn shallow_clone(&self) -> Self {
         Self {
             store_in: self.store_in.clone(),
@@ -458,7 +461,7 @@ impl<SP: SessionParameters> ShallowClone for SerializeAndSign<SP> {
     }
 }
 
-impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSign<SP> {
+impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignBC<SP> {
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -480,7 +483,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSign<SP> {
     }
 }
 
-impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSign<SP> {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSignBC<SP> {
     fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
         let mut node = self;
         let dependency = dependency.into();
@@ -495,12 +498,84 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSig
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SerializeAndSign<SP>> {
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SerializeAndSignBC<SP>> {
     type Error = UnionCastError;
 
     fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
         match source {
-            AnyNode::SerializeAndSign(node) => Ok(node),
+            AnyNode::SerializeAndSignBC(node) => Ok(node),
+            _ => Err(UnionCastError),
+        }
+    }
+}
+
+/// A subtype of mapping computation node that serializes and signs values before sending them to other parties.
+#[derive_where::derive_where(Debug)]
+pub struct SerializeAndSignDM<SP: SessionParameters> {
+    pub(crate) store_in: LocalSignedDMTag,
+    pub(crate) function: SerializeAndSignDMFunction<SP>,
+    pub(crate) data: DirectMessageArg<SP>,
+    pub(crate) serde_adapter: SerdeAdapter<SP::WireFormat>,
+    pub(crate) message_name: FullName,
+    pub(crate) dependencies: Vec<Dependency<SP>>,
+}
+
+impl<SP: SessionParameters> ShallowClone for SerializeAndSignDM<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            function: self.function.clone(),
+            data: self.data.get_strong_ref(),
+            serde_adapter: self.serde_adapter.clone(),
+            message_name: self.message_name.clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
+        }
+    }
+}
+
+impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignDM<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node.message_name = node.message_name.with_added_prefix(prefix);
+        node
+    }
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        replace_in_node(&mut node.data, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
+        Ok(node)
+    }
+}
+
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSignDM<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SerializeAndSignDM<SP>> {
+    type Error = UnionCastError;
+
+    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
+        match source {
+            AnyNode::SerializeAndSignDM(node) => Ok(node),
             _ => Err(UnionCastError),
         }
     }
@@ -580,13 +655,13 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<DeserializeAndCheck<SP
 
 /// A node that denotes sending a direct message to other parties.
 #[derive_where::derive_where(Debug)]
-pub struct DirectMessage<SP: SessionParameters> {
-    pub(crate) store_in: SentTag,
-    pub(crate) data: Node<SerializeAndSign<SP>>,
+pub struct SendDM<SP: SessionParameters> {
+    pub(crate) store_in: SentDMTag,
+    pub(crate) data: Node<SerializeAndSignDM<SP>>,
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
-impl<SP: SessionParameters> ShallowClone for DirectMessage<SP> {
+impl<SP: SessionParameters> ShallowClone for SendDM<SP> {
     fn shallow_clone(&self) -> Self {
         Self {
             store_in: self.store_in.clone(),
@@ -596,7 +671,7 @@ impl<SP: SessionParameters> ShallowClone for DirectMessage<SP> {
     }
 }
 
-impl<SP: SessionParameters> SpecificNode<SP> for DirectMessage<SP> {
+impl<SP: SessionParameters> SpecificNode<SP> for SendDM<SP> {
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -617,7 +692,63 @@ impl<SP: SessionParameters> SpecificNode<SP> for DirectMessage<SP> {
     }
 }
 
-impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for DirectMessage<SP> {
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendDM<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self.shallow_clone();
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
+/// A node that denotes sending a direct message to other parties.
+#[derive_where::derive_where(Debug)]
+pub struct SendBC<SP: SessionParameters> {
+    pub(crate) store_in: SentBCTag,
+    pub(crate) data: Node<SerializeAndSignBC<SP>>,
+    pub(crate) destinations: BTreeSet<SP::Verifier>,
+    pub(crate) dependencies: Vec<Dependency<SP>>,
+}
+
+impl<SP: SessionParameters> ShallowClone for SendBC<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            data: self.data.get_strong_ref(),
+            destinations: self.destinations.clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
+        }
+    }
+}
+
+impl<SP: SessionParameters> SpecificNode<SP> for SendBC<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node
+    }
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        replace_in_node(&mut node.data, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
+        Ok(node)
+    }
+}
+
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendBC<SP> {
     fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
         let mut node = self;
         let dependency = dependency.into();
@@ -863,11 +994,23 @@ impl<SP: SessionParameters> Display for Collect<SP> {
     }
 }
 
-impl<SP: SessionParameters> Display for SerializeAndSign<SP> {
+impl<SP: SessionParameters> Display for SerializeAndSignBC<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "{}[*] = <serialize_and_sign>(*, {}){}",
+            "{}[*] = <serialize_and_sign_bc>(*, {}){}",
+            self.store_in,
+            self.data.store_in(),
+            display_dependencies(&self.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for SerializeAndSignDM<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{}[*] = <serialize_and_sign_dm>(*, {}){}",
             self.store_in,
             self.data.store_in(),
             display_dependencies(&self.dependencies)
@@ -887,11 +1030,23 @@ impl<SP: SessionParameters> Display for DeserializeAndCheck<SP> {
     }
 }
 
-impl<SP: SessionParameters> Display for DirectMessage<SP> {
+impl<SP: SessionParameters> Display for SendDM<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
             "{}[*] = <send>(*, {}){}",
+            self.store_in,
+            self.data.as_ref().store_in,
+            display_dependencies(&self.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for SendBC<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{} = <broadcast>({}){}",
             self.store_in,
             self.data.as_ref().store_in,
             display_dependencies(&self.dependencies)

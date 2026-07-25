@@ -31,7 +31,8 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         // ANCHOR_END: composable-build
 
         // ANCHOR: build-inputs
-        let all_parties = build_data;
+        let threshold_parties = build_data;
+        let all_parties = threshold_parties.ids();
         let x = inputs.get("x")?;
         let y = inputs.get("y")?;
         // ANCHOR_END: build-inputs
@@ -72,22 +73,23 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
 
         // ANCHOR: build-send-c
         let message_c = ProtocolMessage::new::<u32>("c");
-        let c_broadcasted = broadcast(&message_c, &my_c);
+        let c_broadcasted = broadcast(&message_c, &my_c, all_parties);
         let c = receive(&message_c);
         // ANCHOR_END: build-send-c
 
         // ANCHOR: build-collect-c
-        let all_c = collect(&c, all_parties)
-            .with_dependency(&collect(&c_broadcasted, all_parties));
+        let all_c = collect(&c, threshold_parties).with_dependency(&c_broadcasted);
         // ANCHOR_END: build-collect-c
 
         // ANCHOR: build-send-b-r
         let message_b = ProtocolMessage::new::<u32>("b");
-        let b_broadcasted = broadcast(&message_b, &my_b).with_dependency(&all_c);
+        let b_broadcasted =
+            broadcast(&message_b, &my_b, all_parties).with_dependency(&all_c);
         let b = receive(&message_b);
 
         let message_r = ProtocolMessage::new::<u32>("r");
-        let r_broadcasted = broadcast(&message_r, &my_r).with_dependency(&all_c);
+        let r_broadcasted =
+            broadcast(&message_r, &my_r, all_parties).with_dependency(&all_c);
         let r = receive(&message_r);
         // ANCHOR_END: build-send-b-r
 
@@ -114,10 +116,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         // ANCHOR_END: build-check-commitment
 
         // ANCHOR: build-finalize
-        let all_commitments_correct = collect(&commitment_correct, all_parties)
-            .with_dependency(&collect(&b_broadcasted, all_parties))
-            .with_dependency(&collect(&r_broadcasted, all_parties));
-        let all_b = collect(&b, all_parties);
+        let all_commitments_correct = collect(&commitment_correct, threshold_parties)
+            .with_dependency(&b_broadcasted)
+            .with_dependency(&r_broadcasted);
+        let all_b = collect(&b, threshold_parties);
         let output = compute_scalar(
             "output",
             |args| {

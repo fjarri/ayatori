@@ -180,7 +180,14 @@ fn process_echo<SP: SessionParameters>(
         return Err(ThirdPartyError::new("Scheme mismatch", sender, error_package)?.into());
     }
 
-    let id = echo.signed_value.metadata().destination();
+    let Some(id) = echo.signed_value.metadata().destination() else {
+        return Err(ThirdPartyError::new(
+            "The echoed value is supposed to have a non-None destination",
+            sender,
+            error_package,
+        )?
+        .into());
+    };
     let idx = ids_to_indices
         .get(id)
         .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the list of all party IDs")))?;
@@ -229,7 +236,7 @@ fn interpolate_and_check_root<SP: SessionParameters>(
     let mut messages = BTreeMap::new();
     for echo_message in echoed_messages.values() {
         messages.insert(
-            echo_message.signed_value.metadata().destination().clone(),
+            echo_message.signed_value.metadata().destination(),
             echo_message.value_message.clone(),
         );
     }
@@ -419,7 +426,7 @@ where
             )
             .with_dependency(&value_deserialized_scalar);
 
-            let echo_sent = broadcast(&message_echo, &echo);
+            let echo_sent = broadcast(&message_echo, &echo, &build_data.receivers);
             let echo_received = receive(&message_echo);
 
             let echo_checked = compute_mapping_sender_fallible(
@@ -440,15 +447,12 @@ where
                 verify_process_echo,
             );
 
-            // TODO (#27): the question of what threshold should be used here becomes moot when the issue is fixed.
-            let all_echos_sent = collect(&echo_sent, &ThresholdGroup::new(&ids));
-
             let all_echos_to_check_root = collect_into(
                 "to_check_root",
                 &echo_processed,
                 &ThresholdGroup::new_threshold(&ids, echos_to_check_root),
             )
-            .with_dependency(&all_echos_sent);
+            .with_dependency(&echo_sent);
 
             let root_checked = compute_scalar_third_party_attributable(
                 "root_checked",
@@ -471,14 +475,15 @@ where
 
             let send_ready_trigger = merge_scalars(&root_checked, &all_readies_to_send_ready);
             let ready = constant("ready", ());
-            let ready_sent = broadcast(&message_ready, &ready).with_dependency(&send_ready_trigger);
+            let ready_sent =
+                broadcast(&message_ready, &ready, &build_data.receivers).with_dependency(&send_ready_trigger);
 
             let all_echos_to_finalize = collect_into(
                 "echos_to_finalize",
                 &echo_processed,
                 &ThresholdGroup::new_threshold(&ids, echos_to_finalize),
             )
-            .with_dependency(&all_echos_sent);
+            .with_dependency(&echo_sent);
 
             let all_readies_to_finalize = collect_into(
                 "readies_to_finalize",
@@ -497,8 +502,7 @@ where
                 ],
             )
             .with_dependency(&finalize_trigger)
-            // TODO (#27): the question of what threshold should be used here becomes moot when the issue is fixed.
-            .with_dependency(&collect(&ready_sent, &ThresholdGroup::new(&ids)));
+            .with_dependency(&ready_sent);
 
             Ok(output)
         } else {
