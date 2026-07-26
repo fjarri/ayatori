@@ -39,7 +39,14 @@ where
                     // ANCHOR_END: task_randomized
                     // ANCHOR: task_send
                     Task::Send(task) => {
-                        tx.send(MessageOut::Message(task)).await.unwrap();
+                        for (destination, message) in task.into_direct_messages() {
+                            tx.send(MessageOut::Message {
+                                destination,
+                                message,
+                            })
+                            .await
+                            .unwrap();
+                        }
                         continue;
                     } // ANCHOR_END: task_send
                       // ANCHOR: task_loop_end

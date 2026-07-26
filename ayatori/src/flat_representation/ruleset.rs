@@ -15,8 +15,9 @@ use super::conditions::{
 use crate::{
     entities::{
         AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
-        LocalSignedTag, MappingFunction, MappingTag, MappingTagRef, MergedScalarTag, ReceivedTag, RemoteSignedTag,
-        RuntimeError, ScalarArgumentTag, ScalarFunction, ScalarTag, SentTag, SerdeAdapter, SerializeAndSignFunction,
+        LocalSignedBCTag, LocalSignedDMTag, MappingFunction, MappingTag, MappingTagRef, MergedScalarTag, ReceivedTag,
+        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, ScalarTag, SentBCTag, SentDMTag,
+        SerdeAdapter, SerializeAndSignBCFunction, SerializeAndSignDMFunction,
     },
     graph_representation::{
         AnyNode, ComputeMappingKind, ComputeScalarKind, GeneralizedNode, OutputNode, Reproducibility,
@@ -31,12 +32,19 @@ struct ScalarRule<SP: SessionParameters> {
     kind: ScalarRuleKind<SP>,
 }
 
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug)]
 enum ScalarRuleKind<SP: SessionParameters> {
     Compute {
         store_in: ComputedScalarTag,
         function: ScalarFunction<SP>,
         args: BTreeMap<String, ScalarTag>,
+    },
+    SerializeAndSign {
+        store_in: LocalSignedBCTag,
+        function: SerializeAndSignBCFunction<SP>,
+        data: ScalarTag,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
     },
     Merge {
         store_in: MergedScalarTag,
@@ -61,7 +69,7 @@ struct MappingRule<SP: SessionParameters> {
     kind: MappingRuleKind<SP>,
 }
 
-#[derive_where::derive_where(Debug, Clone)]
+#[derive_where::derive_where(Debug)]
 enum MappingRuleKind<SP: SessionParameters> {
     Compute {
         store_in: ComputedMappingTag,
@@ -70,8 +78,8 @@ enum MappingRuleKind<SP: SessionParameters> {
         on_error: OnError,
     },
     SerializeAndSign {
-        store_in: LocalSignedTag,
-        function: SerializeAndSignFunction<SP>,
+        store_in: LocalSignedDMTag,
+        function: SerializeAndSignDMFunction<SP>,
         data: AnyTag,
         message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
@@ -87,12 +95,20 @@ enum MappingRuleKind<SP: SessionParameters> {
 }
 
 #[derive_where::derive_where(Debug)]
-struct SendRule<SP: SessionParameters> {
+struct SendBCRule<SP: SessionParameters> {
     dependencies_condition: ScalarConditionWithState,
     scalar_condition: ScalarConditionWithState,
+    store_in: SentBCTag,
+    to_send: LocalSignedBCTag,
+    destinations: BTreeSet<SP::Verifier>,
+}
+
+#[derive_where::derive_where(Debug)]
+struct SendDMRule<SP: SessionParameters> {
+    dependencies_condition: ScalarConditionWithState,
     element_condition: ElementConditionWithState<SP::Verifier>,
-    store_in: SentTag,
-    to_send: LocalSignedTag,
+    store_in: SentDMTag,
+    to_send: LocalSignedDMTag,
 }
 
 #[derive(Debug, Clone)]
@@ -115,10 +131,17 @@ pub(crate) enum Action<SP: SessionParameters> {
         args: BTreeMap<String, AnyTag>,
         on_error: OnError,
     },
+    ComputeSerializeAndSignScalar {
+        store_in: LocalSignedBCTag,
+        function: SerializeAndSignBCFunction<SP>,
+        data: ScalarTag,
+        message_name: FullName,
+        serde_adapter: SerdeAdapter<SP::WireFormat>,
+    },
     ComputeSerializeAndSignElement {
-        store_in: LocalSignedTag,
+        store_in: LocalSignedDMTag,
         index: SP::Verifier,
-        function: SerializeAndSignFunction<SP>,
+        function: SerializeAndSignDMFunction<SP>,
         data: AnyTag,
         message_name: FullName,
         serde_adapter: SerdeAdapter<SP::WireFormat>,
@@ -132,14 +155,20 @@ pub(crate) enum Action<SP: SessionParameters> {
         expected_senders: BTreeSet<SP::Verifier>,
         on_error: OnError,
     },
-    DirectMessage {
-        store_in: SentTag,
-        to_send: LocalSignedTag,
+    SendBC {
+        store_in: SentBCTag,
+        to_send: LocalSignedBCTag,
+        destinations: BTreeSet<SP::Verifier>,
+    },
+    SendDM {
+        store_in: SentDMTag,
+        to_send: LocalSignedDMTag,
         destination: SP::Verifier,
     },
     Collect {
         store_in: CollectedTag,
         values: MappingTag,
+        // TODO: "sources"
         indices: BTreeSet<SP::Verifier>,
     },
     MergeScalar {
@@ -197,6 +226,8 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                 AnyNode::ScalarArgument(_)
                 | AnyNode::MergeScalars(_)
                 | AnyNode::ComputeScalar(_)
+                | AnyNode::SerializeAndSignBC(_)
+                | AnyNode::SendBC(_)
                 | AnyNode::Receive(_) => {}
                 AnyNode::ComputeMapping(node) => {
                     let ids = result.get(MappingTagRef::Computed(&node.as_ref().store_in))?.clone();
@@ -217,7 +248,7 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                         }
                     }
                 }
-                AnyNode::SerializeAndSign(node) => {
+                AnyNode::SerializeAndSignDM(node) => {
                     let ids = result.get(MappingTagRef::LocalSigned(&node.as_ref().store_in))?.clone();
                     if let AnyTagRef::Mapping(tag) = node.as_ref().data.store_in() {
                         result.insert(tag, ids);
@@ -227,12 +258,18 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                     let ids = result.get(MappingTagRef::Received(&node.as_ref().store_in))?.clone();
                     result.insert(MappingTagRef::RemoteSigned(&node.as_ref().data.as_ref().store_in), ids);
                 }
-                AnyNode::DirectMessage(node) => {
+                AnyNode::SendDM(node) => {
                     let ids = result.get(MappingTagRef::Sent(&node.as_ref().store_in))?.clone();
                     result.insert(MappingTagRef::LocalSigned(&node.as_ref().data.as_ref().store_in), ids);
                 }
                 AnyNode::Collect(node) => {
                     result.insert(node.as_ref().values.store_in(), node.as_ref().group.ids().clone());
+                }
+                AnyNode::SendAll(node) => {
+                    result.insert(
+                        MappingTagRef::Sent(&node.as_ref().values.as_ref().store_in),
+                        node.as_ref().destinations.clone(),
+                    );
                 }
             }
         }
@@ -254,7 +291,8 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     scalar_rules: Vec<ScalarRule<SP>>,
     collect_rules: Vec<CollectRule<SP>>,
     mapping_rules: Vec<MappingRule<SP>>,
-    send_rules: Vec<SendRule<SP>>,
+    send_bc_rules: Vec<SendBCRule<SP>>,
+    send_dm_rules: Vec<SendDMRule<SP>>,
     arguments: BTreeMap<String, ScalarArgumentTag>,
     state: RulesetState,
 }
@@ -268,7 +306,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
         let mut scalar_rules = Vec::new();
         let mut collect_rules = Vec::new();
         let mut mapping_rules = Vec::new();
-        let mut send_rules = Vec::new();
+        let mut send_bc_rules = Vec::new();
+        let mut send_dm_rules = Vec::new();
         let mut expected_messages = BTreeMap::new();
 
         let mut arguments = BTreeMap::new();
@@ -352,11 +391,28 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         },
                     });
                 }
-                AnyNode::SerializeAndSign(node) => {
+                AnyNode::SerializeAndSignBC(node) => {
+                    let node = node.as_ref();
+
+                    let scalar_condition = ScalarCondition::from_serialize_and_sign_bc(node);
+
+                    scalar_rules.push(ScalarRule {
+                        dependencies_condition,
+                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        kind: ScalarRuleKind::SerializeAndSign {
+                            store_in: node.store_in.clone(),
+                            function: node.function.clone(),
+                            data: node.data.store_in().to_owned(),
+                            message_name: node.message_name.clone(),
+                            serde_adapter: node.serde_adapter.clone(),
+                        },
+                    });
+                }
+                AnyNode::SerializeAndSignDM(node) => {
                     let node = node.as_ref();
                     let possible_ids = propagated_groups.get(MappingTagRef::LocalSigned(&node.store_in))?;
 
-                    let scalar_condition = ScalarCondition::from_serialize_and_sign(node);
+                    let scalar_condition = ScalarCondition::from_serialize_and_sign_dm(node);
                     let element_condition = ElementCondition::from_serialize_and_sign(node);
 
                     mapping_rules.push(MappingRule {
@@ -399,15 +455,27 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         },
                     });
                 }
-                AnyNode::DirectMessage(node) => {
+                AnyNode::SendBC(node) => {
+                    let node = node.as_ref();
+
+                    let scalar_condition = ScalarCondition::from_broadcast_message(node);
+
+                    send_bc_rules.push(SendBCRule {
+                        dependencies_condition,
+                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        store_in: node.store_in.clone(),
+                        to_send: node.data.as_ref().store_in.clone(),
+                        destinations: node.destinations.clone(),
+                    });
+                }
+                AnyNode::SendDM(node) => {
                     let node = node.as_ref();
                     let possible_ids = propagated_groups.get(MappingTagRef::Sent(&node.store_in))?;
 
                     let element_condition = ElementCondition::from_direct_message(node);
 
-                    send_rules.push(SendRule {
+                    send_dm_rules.push(SendDMRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
                         element_condition: ElementConditionWithState::new(element_condition, possible_ids),
                         store_in: node.store_in.clone(),
                         to_send: node.data.as_ref().store_in.clone(),
@@ -421,6 +489,16 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         quorum_condition: QuorumConditionWithState::new(quorum_condition),
                         store_in: node.store_in.clone(),
                         values: node.values.store_in().to_owned(),
+                    });
+                }
+                AnyNode::SendAll(node) => {
+                    let node = node.as_ref();
+                    let quorum_condition = QuorumCondition::from_send_all(node);
+                    collect_rules.push(CollectRule {
+                        dependencies_condition,
+                        quorum_condition: QuorumConditionWithState::new(quorum_condition),
+                        store_in: node.store_in.clone(),
+                        values: MappingTag::Sent(node.values.as_ref().store_in.clone()),
                     });
                 }
                 AnyNode::Receive(node) => {
@@ -449,7 +527,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
             scalar_rules,
             collect_rules,
             mapping_rules,
-            send_rules,
+            send_bc_rules,
+            send_dm_rules,
             arguments,
             state: RulesetState::InProgress,
         })
@@ -490,9 +569,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
             rule.scalar_condition.update_with_scalar_ready(tag);
         }
 
-        for rule in &mut self.send_rules {
+        for rule in &mut self.send_bc_rules {
             rule.dependencies_condition.update_with_scalar_ready(tag);
             rule.scalar_condition.update_with_scalar_ready(tag);
+        }
+
+        for rule in &mut self.send_dm_rules {
+            rule.dependencies_condition.update_with_scalar_ready(tag);
         }
     }
 
@@ -505,7 +588,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             rule.element_condition.update_with_element_ready(tag, id);
         }
 
-        for rule in &mut self.send_rules {
+        for rule in &mut self.send_dm_rules {
             rule.element_condition.update_with_element_ready(tag, id);
         }
     }
@@ -526,6 +609,19 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     function,
                     args,
                 },
+                ScalarRuleKind::SerializeAndSign {
+                    store_in,
+                    function,
+                    data,
+                    message_name,
+                    serde_adapter,
+                } => Action::ComputeSerializeAndSignScalar {
+                    store_in,
+                    function,
+                    data,
+                    message_name,
+                    serde_adapter,
+                },
                 ScalarRuleKind::Merge { store_in, left, right } => Action::MergeScalar { store_in, left, right },
             })
     }
@@ -543,14 +639,27 @@ impl<SP: SessionParameters> Ruleset<SP> {
             })
     }
 
-    fn pop_send_action(&mut self) -> Option<Action<SP>> {
-        for rule in &mut self.send_rules.iter_mut() {
-            if !rule.dependencies_condition.is_satisfied() || !rule.scalar_condition.is_satisfied() {
+    fn pop_bc_send_action(&mut self) -> Option<Action<SP>> {
+        self.send_bc_rules
+            .extract_if(.., |rule| {
+                rule.dependencies_condition.is_satisfied() && rule.scalar_condition.is_satisfied()
+            })
+            .next()
+            .map(|rule| Action::SendBC {
+                store_in: rule.store_in.clone(),
+                to_send: rule.to_send.clone(),
+                destinations: rule.destinations,
+            })
+    }
+
+    fn pop_dm_send_action(&mut self) -> Option<Action<SP>> {
+        for rule in &mut self.send_dm_rules.iter_mut() {
+            if !rule.dependencies_condition.is_satisfied() {
                 continue;
             }
 
             if let Some(id) = rule.element_condition.pop_satisfied() {
-                return Some(Action::DirectMessage {
+                return Some(Action::SendDM {
                     store_in: rule.store_in.clone(),
                     to_send: rule.to_send.clone(),
                     destination: id,
@@ -622,7 +731,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
         self.pop_scalar_action()
             .or_else(|| self.pop_collect_action())
             .or_else(|| self.pop_mapping_action())
-            .or_else(|| self.pop_send_action())
+            .or_else(|| self.pop_bc_send_action())
+            .or_else(|| self.pop_dm_send_action())
     }
 
     pub fn arguments(&self) -> &BTreeMap<String, ScalarArgumentTag> {
@@ -656,6 +766,12 @@ impl<SP: SessionParameters> Display for ScalarRule<SP> {
                 "  {store_in} = {function}({})",
                 args.values().map(ToString::to_string).join(", ")
             ),
+            ScalarRuleKind::SerializeAndSign {
+                store_in,
+                function,
+                data,
+                ..
+            } => writeln!(f, "{store_in} = {function}({data})"),
             ScalarRuleKind::Merge { store_in, left, right } => writeln!(f, "  {store_in} = {left} | {right}"),
         }
     }
@@ -715,13 +831,22 @@ impl<SP: SessionParameters> Display for MappingRuleKind<SP> {
     }
 }
 
-impl<SP: SessionParameters> Display for SendRule<SP> {
+impl<SP: SessionParameters> Display for SendBCRule<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         if !self.dependencies_condition.is_satisfied() {
             writeln!(f, "if {}", self.dependencies_condition)?;
         }
         if !self.scalar_condition.is_satisfied() {
             writeln!(f, "if {}", self.scalar_condition)?;
+        }
+        writeln!(f, "  {} = broadcast_message({})", self.store_in, self.to_send)
+    }
+}
+
+impl<SP: SessionParameters> Display for SendDMRule<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        if !self.dependencies_condition.is_satisfied() {
+            writeln!(f, "if {}", self.dependencies_condition)?;
         }
         writeln!(f, "if {})", self.element_condition)?;
         writeln!(f, "  {} = direct_message({})", self.store_in, self.to_send)
@@ -734,12 +859,15 @@ impl<SP: SessionParameters> Display for Ruleset<SP> {
         for rule in &self.mapping_rules {
             writeln!(f, "{rule}")?;
         }
-        for rule in &self.send_rules {
+        for rule in &self.send_dm_rules {
             writeln!(f, "{rule}")?;
         }
 
         writeln!(f, "Scalar rules:")?;
         for rule in &self.scalar_rules {
+            writeln!(f, "{rule}")?;
+        }
+        for rule in &self.send_bc_rules {
             writeln!(f, "{rule}")?;
         }
         for rule in &self.collect_rules {

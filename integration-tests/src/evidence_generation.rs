@@ -67,14 +67,14 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 
         let all_parties = build_data;
         let my_x = compute_scalar("my_x", gen_value, &[]);
-        let x_broadcasted = broadcast(&message_x, &my_x);
+        let x_broadcasted = broadcast(&message_x, &my_x, all_parties.ids());
         let x = receive(&message_x);
         // Note that this dependency ensures that the node will send out its messages
         // before checking correctness of incoming values.
         // This means that in the test where we make one node send out incorrect values,
         // it will be able to correctly finish while the others won't.
-        let x_correct = compute_mapping_sender_fallible("x_correct", verify, &[("x", (&x).into())])
-            .with_dependency(&collect(&x_broadcasted, all_parties));
+        let x_correct =
+            compute_mapping_sender_fallible("x_correct", verify, &[("x", (&x).into())]).with_dependency(&x_broadcasted);
         let all_x_correct = collect(&x_correct, all_parties);
         let all_x = collect(&x, all_parties);
         Ok(compute_scalar("output", gen_output, &[("x", (&all_x).into())]).with_dependency(&all_x_correct))

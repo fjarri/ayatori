@@ -8,7 +8,6 @@
 extern crate alloc;
 
 pub mod distributed_rng;
-pub mod echo_broadcast;
 pub mod evidence_generation;
 pub mod logic_fork;
 pub mod messages;

@@ -218,10 +218,10 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
                 ("Y", (&y_echo).into()), // S_j(Y_i,j) (echoed back to us)
             ],
         )
-        .with_dependency(&collect(&x_cap_sent, all_parties))
-        .with_dependency(&collect(&y_cap_sent, all_parties))
-        .with_dependency(&collect(&y_echo_sent, all_parties))
-        .with_dependency(&collect(&c_cap_sent, all_parties));
+        .with_dependency(&send_all(&x_cap_sent, all_parties.ids()))
+        .with_dependency(&send_all(&y_cap_sent, all_parties.ids()))
+        .with_dependency(&send_all(&y_echo_sent, all_parties.ids()))
+        .with_dependency(&send_all(&c_cap_sent, all_parties.ids()));
 
         Ok(compute_scalar(
             "output",

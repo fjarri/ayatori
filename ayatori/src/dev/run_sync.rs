@@ -7,19 +7,16 @@ use crate::{
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-#[cfg(doc)]
-use crate::protocol_user_api::SendTaskResult;
-
 /// A rule that determines if a specific protocol message will be blocked during execution
 ///
-/// The node attempting to send it will receive the error result of [`SendTaskResult`].
+/// The node attempting to send it will have the message destination banned.
 #[derive_where::derive_where(Debug, Default)]
 pub struct BlockMessagesRule<SP: SessionParameters> {
     /// If `Some`, messages from this source will be blocked.
     /// If `None`, messages from any source will be blocked.
     pub source: Option<SP::Verifier>,
-    /// If `Some`, messages from this destination will be blocked.
-    /// If `None`, messages from any destination will be blocked.
+    /// If `Some`, messages to this destination will be blocked.
+    /// If `None`, messages to any destination will be blocked.
     pub destination: Option<SP::Verifier>,
     /// If `Some`, messages with this name will be blocked.
     /// If `None`, messages with any name will be blocked.
@@ -50,10 +47,10 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
             filtered_values.retain(|value| {
                 let metadata = value.metadata();
                 let block_by_source = rule.source.as_ref().is_none_or(|source| source == value.source());
-                let block_by_destination = rule
-                    .destination
-                    .as_ref()
-                    .is_none_or(|destination| destination == metadata.destination());
+                let block_by_destination = match (rule.destination.as_ref(), metadata.destination()) {
+                    (Some(rule_destination), Some(metadata_destination)) => rule_destination == metadata_destination,
+                    _ => true,
+                };
                 let block_by_name = rule.name.as_ref().is_none_or(|name| name == metadata.full_name());
 
                 !(block_by_source && block_by_destination && block_by_name)
@@ -63,10 +60,7 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
         if filtered_values.is_empty() {
             None
         } else {
-            Some(
-                Message::new(filtered_values)
-                    .expect("the values vec is non-empty and they all still have the same destination"),
-            )
+            Some(Message::new(filtered_values))
         }
     }
 
@@ -84,11 +78,11 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
         let mut reports = BTreeMap::new();
 
         while !sessions.is_empty() {
-            let mut session_updated = false;
+            let mut stalled = true;
 
             let sessions_to_process = core::mem::take(&mut sessions);
 
-            for mut session in sessions_to_process {
+            'sessions: for mut session in sessions_to_process {
                 let id = session.verifier().clone();
 
                 let mut updates = Vec::new();
@@ -102,35 +96,32 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
                     updates.push(SessionUpdate::add_message(message_id, message));
                 }
 
-                loop {
-                    let update = if let Some(update) = updates.pop() {
-                        update
-                    } else if let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
-                        match task {
-                            Task::Deterministic(task) => task.execute(),
-                            Task::Randomized(task) => task.execute(rng),
-                            Task::Send(task) => {
-                                let (message, result) = task.unpack();
-                                let destination = message.destination().clone();
+                while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
+                    match task {
+                        Task::Deterministic(task) => updates.push(task.execute()),
+                        Task::Randomized(task) => updates.push(task.execute(rng)),
+                        Task::Send(task) => {
+                            for (destination, message) in task.into_direct_messages() {
                                 let queue = messages.get_mut(&destination).ok_or_else(|| {
                                     RuntimeError::new(format!("{id:?} not found in the map of message queues"))
                                 })?;
 
-                                if let Some(message) = self.filter_message(message) {
-                                    queue.push(message);
-                                    result.success()
-                                } else {
-                                    result.error()
-                                }
+                                self.filter_message(message).map_or_else(
+                                    || updates.push(SessionUpdate::ban_party(destination, "Unreachable")),
+                                    |message| {
+                                        queue.push(message);
+                                    },
+                                );
                             }
                         }
-                    } else {
-                        sessions.push(session);
-                        break;
-                    };
+                    }
+                }
 
-                    session_updated = true;
+                if !updates.is_empty() {
+                    stalled = false;
+                }
 
+                for update in updates {
                     session = match session.with_update(update)? {
                         SessionState::InProgress(session) => session,
                         SessionState::InProgressWithMessageError { error, .. } => {
@@ -139,17 +130,19 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
                         SessionState::ReachedOutput(success) => {
                             let report = success.finalize()?;
                             reports.insert(id, report);
-                            break;
+                            continue 'sessions;
                         }
                         SessionState::Unfinishable(report) => {
                             reports.insert(id, report);
-                            break;
+                            continue 'sessions;
                         }
                     };
                 }
+
+                sessions.push(session);
             }
 
-            if !session_updated {
+            if stalled {
                 // That's where in production the sessions would time out and get terminated externally.
                 for session in sessions {
                     reports.insert(session.verifier().clone(), session.terminate());

@@ -64,7 +64,7 @@ This tasks requests that the user sends the message contained in the task to a r
 After the message is sent successfully, or failed to be sent (because the remote party is unavailable), the resulting update must be sent to the incoming channel as [`SessionUpdate`](protocol_user_api::SessionUpdate) variant.
 
 Note that the message destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
-We are also pushing to the channel not a [`SendTask`](protocol_user_api::SendTask) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
+We are also pushing to the channel not a [`Message`](protocol_user_api::Message) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
 
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_loop_end}}

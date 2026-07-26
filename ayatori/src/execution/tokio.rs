@@ -9,10 +9,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     session::{MessageAttributableError, Session, SessionReport, SessionState},
-    task::{SendTask, SessionUpdate, Task},
+    task::{SessionUpdate, Task},
 };
 use crate::{
-    entities::RuntimeError,
+    entities::{Message, RuntimeError},
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
@@ -21,25 +21,14 @@ use crate::{
 #[derive_where::derive_where(Debug)]
 pub enum MessageOut<SP: SessionParameters> {
     /// A message that needs to be sent out.
-    Message(SendTask<SP>),
+    Message {
+        /// Message destination.
+        destination: SP::Verifier,
+        /// The message to be sent.
+        message: Message<SP>,
+    },
     /// A non-fatal problem attributable to message(s) but not to a specific party.
     Error(MessageAttributableError<SP>),
-}
-
-/// A trait defined for `async fn`s that execute a single session.
-pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: 'static + Send + Sync {
-    /// The returned future.
-    type Fut: Future<Output = Result<SessionReport<SP, P>, RuntimeError>> + 'a + Send;
-
-    /// Calls the function returning the future.
-    fn call(
-        &self,
-        rng: &'a mut SP::Rng,
-        tx: &'a mpsc::Sender<MessageOut<SP>>,
-        rx: &'a mut mpsc::Receiver<SessionUpdate<SP>>,
-        cancellation: CancellationToken,
-        session: Session<SP, P>,
-    ) -> Self::Fut;
 }
 
 /// Executes the session waiting for the messages from the `rx` channel
@@ -67,9 +56,13 @@ where
                     Task::Deterministic(task) => task.execute(),
                     Task::Randomized(task) => task.execute(rng),
                     Task::Send(task) => {
-                        tx.send(MessageOut::Message(task)).await.map_err(|err| {
-                            RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                        })?;
+                        for (destination, message) in task.into_direct_messages() {
+                            tx.send(MessageOut::Message { destination, message })
+                                .await
+                                .map_err(|err| {
+                                    RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                                })?;
+                        }
                         continue;
                     }
                 }
@@ -186,9 +179,13 @@ where
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
                 Task::Send(task) => {
-                    tx.send(MessageOut::Message(task)).await.map_err(|err| {
-                        RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
-                    })?;
+                    for (destination, message) in task.into_direct_messages() {
+                        tx.send(MessageOut::Message { destination, message })
+                            .await
+                            .map_err(|err| {
+                                RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
+                            })?;
+                    }
                 }
             }
         }

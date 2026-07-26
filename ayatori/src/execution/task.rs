@@ -1,14 +1,21 @@
-use alloc::{format, string::String, sync::Arc};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
 
 use super::session::SessionData;
 use crate::{
     entities::{
-        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedTag,
-        MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarTag,
-        SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction, SenderError,
-        SenderErrorWithReveal, SentTag, SerializeAndSignFunction, SerializeArgs, SignedValue, SpuriousError,
-        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction, ThirdPartyError,
-        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedBCTag,
+        LocalSignedDMTag, MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag,
+        RuntimeError, ScalarTag, SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction,
+        SenderError, SenderErrorWithReveal, SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs,
+        SignedValue, SpuriousError, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction,
+        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
         VerificationError,
     },
@@ -473,17 +480,48 @@ impl<SP: SessionParameters> From<RngElementUnattributableTask<SP>> for Task<SP> 
 }
 
 #[derive_where::derive_where(Debug)]
+pub(crate) struct SerializeAndSignScalarTask<SP: SessionParameters> {
+    store_in: LocalSignedBCTag,
+    function: SerializeAndSignBCFunction<SP>,
+    args: SerializeArgs<SP>,
+}
+
+impl<SP: SessionParameters> SerializeAndSignScalarTask<SP> {
+    pub fn new(store_in: LocalSignedBCTag, function: SerializeAndSignBCFunction<SP>, args: SerializeArgs<SP>) -> Self {
+        Self {
+            store_in,
+            function,
+            args,
+        }
+    }
+
+    pub fn execute(self, rng: &mut SP::Rng) -> SessionUpdate<SP> {
+        let store_in = ScalarTag::LocalSigned(self.store_in);
+        match self.function.call(rng, &self.args) {
+            Ok(result) => SessionUpdate(SessionUpdateEnum::ComputedScalar { store_in, result }),
+            Err(error) => SessionUpdate(SessionUpdateEnum::RuntimeError(error)),
+        }
+    }
+}
+
+impl<SP: SessionParameters> From<SerializeAndSignScalarTask<SP>> for Task<SP> {
+    fn from(source: SerializeAndSignScalarTask<SP>) -> Self {
+        Self::Randomized(RandomizedTask(RandomizedTaskEnum::SerializeAndSignScalar(source)))
+    }
+}
+
+#[derive_where::derive_where(Debug)]
 pub(crate) struct SerializeAndSignElementTask<SP: SessionParameters> {
-    store_in: LocalSignedTag,
-    function: SerializeAndSignFunction<SP>,
+    store_in: LocalSignedDMTag,
+    function: SerializeAndSignDMFunction<SP>,
     index: SP::Verifier,
     args: SerializeArgs<SP>,
 }
 
 impl<SP: SessionParameters> SerializeAndSignElementTask<SP> {
     pub fn new(
-        store_in: LocalSignedTag,
-        function: SerializeAndSignFunction<SP>,
+        store_in: LocalSignedDMTag,
+        function: SerializeAndSignDMFunction<SP>,
         index: SP::Verifier,
         args: SerializeArgs<SP>,
     ) -> Self {
@@ -514,54 +552,43 @@ impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
     }
 }
 
-/// An object used to report the result of attempting to send a message to a remote party.
-#[derive_where::derive_where(Debug)]
-pub struct SendTaskResult<SP: SessionParameters> {
-    store_in: MappingTag,
-    destination: SP::Verifier,
-}
-
-impl<SP: SessionParameters> SendTaskResult<SP> {
-    /// Returns a result indicating that the message was successfully sent.
-    pub fn success(self) -> SessionUpdate<SP> {
-        SessionUpdate(SessionUpdateEnum::Sent {
-            store_in: self.store_in,
-            destination: self.destination,
-        })
-    }
-
-    /// Returns a result indicating that there was an error delivering the message.
-    pub fn error(self) -> SessionUpdate<SP> {
-        SessionUpdate(SessionUpdateEnum::SendError {
-            destination: self.destination,
-        })
-    }
-}
-
-/// A task requiring the user to send a message to a remote party.
 #[derive_where::derive_where(Debug)]
 pub struct SendTask<SP: SessionParameters> {
-    store_in: SentTag,
-    destination: SP::Verifier,
-    message: Message<SP>,
+    direct_messages: BTreeMap<SP::Verifier, SignedValue<SP>>,
+    broadcast_messages: Vec<(BTreeSet<SP::Verifier>, SignedValue<SP>)>,
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
-    pub(crate) fn new(store_in: SentTag, destination: SP::Verifier, message: Message<SP>) -> Self {
+    pub(crate) fn new_broadcast(destinations: BTreeSet<SP::Verifier>, value: SignedValue<SP>) -> Self {
         Self {
-            store_in,
-            destination,
-            message,
+            direct_messages: BTreeMap::new(),
+            broadcast_messages: vec![(destinations, value)],
         }
     }
 
-    /// Returns the message to be sent and an object used to report the result of that.
-    pub fn unpack(self) -> (Message<SP>, SendTaskResult<SP>) {
-        let result = SendTaskResult {
-            store_in: MappingTag::Sent(self.store_in),
-            destination: self.destination,
-        };
-        (self.message, result)
+    pub(crate) fn new_direct(destination: SP::Verifier, value: SignedValue<SP>) -> Self {
+        Self {
+            direct_messages: [(destination, value)].into(),
+            broadcast_messages: Vec::new(),
+        }
+    }
+
+    pub fn into_direct_messages(self) -> impl Iterator<Item = (SP::Verifier, Message<SP>)> {
+        let mut result: BTreeMap<SP::Verifier, Vec<SignedValue<SP>>> = BTreeMap::new();
+
+        for (destination, value) in self.direct_messages {
+            result.entry(destination).or_default().push(value);
+        }
+
+        for (destinations, value) in self.broadcast_messages {
+            for destination in destinations {
+                result.entry(destination).or_default().push(value.clone());
+            }
+        }
+
+        result
+            .into_iter()
+            .map(|(destination, values)| (destination, Message::new(values)))
     }
 }
 
@@ -606,20 +633,19 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
             });
         }
 
-        // Check that the message is addressed to a correct destination (one that this node manages).
-        // If it is not, it may be a replay attack.
-        if !self
-            .session_data
-            .local_participants
-            .contains(self.signed_value.metadata().destination())
-        {
-            return SessionUpdate(SessionUpdateEnum::MessageError {
-                message_id: self.message_id,
-                description: format!(
-                    "A destination {:?} is not one of the local participants",
-                    self.signed_value.metadata().destination()
-                ),
-            });
+        // TODO: check the logic here - if it secure to ignore the destination if it is None?
+        if let Some(destination) = self.signed_value.metadata().destination() {
+            // Check that the message is addressed to a correct destination (one that this node manages).
+            // If it is not, it may be a replay attack.
+            if !self.session_data.local_participants.contains(destination) {
+                return SessionUpdate(SessionUpdateEnum::MessageError {
+                    message_id: self.message_id,
+                    description: format!(
+                        "A destination {:?} is not one of the local participants",
+                        self.signed_value.metadata().destination()
+                    ),
+                });
+            }
         }
 
         // Check that the value belongs to the this session.
@@ -698,6 +724,7 @@ impl<SP: SessionParameters> DeterministicTask<SP> {
 enum RandomizedTaskEnum<SP: SessionParameters> {
     ScalarUnattributable(RngScalarUnattributableTask<SP>),
     ElementUnattributable(RngElementUnattributableTask<SP>),
+    SerializeAndSignScalar(SerializeAndSignScalarTask<SP>),
     SerializeAndSignElement(SerializeAndSignElementTask<SP>),
 }
 
@@ -711,6 +738,7 @@ impl<SP: SessionParameters> RandomizedTask<SP> {
         match self.0 {
             RandomizedTaskEnum::ScalarUnattributable(task) => task.execute(rng),
             RandomizedTaskEnum::ElementUnattributable(task) => task.execute(rng),
+            RandomizedTaskEnum::SerializeAndSignScalar(task) => task.execute(rng),
             RandomizedTaskEnum::SerializeAndSignElement(task) => task.execute(rng),
         }
     }
@@ -739,8 +767,11 @@ impl<SP: SessionParameters> SessionUpdate<SP> {
     /// Creates an update that, when applied, bans a party internally,
     /// resulting in all of its messages and values calculated from them being discarded,
     /// and new messages ignored.
-    pub fn ban_party(party_id: SP::Verifier, reason: String) -> Self {
-        Self(SessionUpdateEnum::ExternalBan { party_id, reason })
+    pub fn ban_party(party_id: SP::Verifier, reason: impl Into<String>) -> Self {
+        Self(SessionUpdateEnum::ExternalBan {
+            party_id,
+            reason: reason.into(),
+        })
     }
 
     /// Creates an update that adds a newly received message to the session.
@@ -758,10 +789,6 @@ pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     Received {
         id: MessageId<SP>,
         message: Message<SP>,
-    },
-    Sent {
-        store_in: MappingTag,
-        destination: SP::Verifier,
     },
     ComputedScalar {
         store_in: ScalarTag,
@@ -801,9 +828,6 @@ pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     MessageError {
         message_id: MessageId<SP>,
         description: String,
-    },
-    SendError {
-        destination: SP::Verifier,
     },
     ExternalBan {
         party_id: SP::Verifier,

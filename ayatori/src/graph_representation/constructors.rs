@@ -1,5 +1,5 @@
 use alloc::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     format,
     string::{String, ToString},
     vec::Vec,
@@ -13,18 +13,19 @@ use super::{
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
     typed_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
-        DirectMessage, GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SerializeAndSign,
+        GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SendAll, SendBC, SendDM, SerializeAndSignBC,
+        SerializeAndSignDM,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
 };
 use crate::{
     entities::{
         Args, AssociatedData, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, Erasable,
-        EvidenceVerdict, FullName, LocalSignedTag, MaybeAttributableError, MergedScalarTag, OneOrBoth, PartyGroup,
-        RemoteSignedTag, RuntimeError, ScalarArgumentTag, SenderAttributableMappingFunction,
+        EvidenceVerdict, FullName, LocalSignedBCTag, LocalSignedDMTag, MaybeAttributableError, MergedScalarTag,
+        OneOrBoth, PartyGroup, RemoteSignedTag, RuntimeError, ScalarArgumentTag, SenderAttributableMappingFunction,
         SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SenderError,
-        SenderErrorWithReveal, SerdeAdapter, SerializeAndSignFunction, SerializeArgs, SessionId, SignedValue,
-        SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+        SenderErrorWithReveal, SerdeAdapter, SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs,
+        SessionId, SignedValue, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
         ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction, ThirdPartyError,
         UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
@@ -403,7 +404,7 @@ pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: E
 
 fn default_serialize_and_sign<SP: SessionParameters>(
     rng: &mut SP::Rng,
-    destination: &SP::Verifier,
+    destination: Option<&SP::Verifier>,
     args: &SerializeArgs<SP>,
 ) -> Result<Value, RuntimeError> {
     let serialized_value = args
@@ -428,49 +429,51 @@ fn default_serialize_and_sign<SP: SessionParameters>(
 pub fn broadcast<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     scalar: impl Into<BroadcastArg<SP>>,
-) -> Node<DirectMessage<SP>> {
+    destinations: &BTreeSet<SP::Verifier>,
+) -> Node<SendBC<SP>> {
     let scalar: BroadcastArg<SP> = scalar.into();
-    let signed_tag = LocalSignedTag::new(message.name());
-    let sent_tag = signed_tag.to_sent();
+    let signed_tag = LocalSignedBCTag::new(message.name());
+    let sent_tag = signed_tag.to_broadcast_message_sent();
 
-    let serialize_and_sign = Node::new(SerializeAndSign {
+    let serialize_and_sign = Node::new(SerializeAndSignBC {
         store_in: signed_tag,
-        function: SerializeAndSignFunction::new(default_serialize_and_sign),
-        data: scalar.into(),
+        function: SerializeAndSignBCFunction::new(|rng, args| default_serialize_and_sign(rng, None, args)),
+        data: scalar,
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
         dependencies: Vec::new(),
     });
 
-    Node::new(DirectMessage {
+    Node::new(SendBC {
         store_in: sent_tag,
         data: serialize_and_sign,
+        destinations: destinations.clone(),
         dependencies: Vec::new(),
     })
 }
 
-/// Sends a direct message with the corresponding element from the given mapping.,
+/// Sends a direct message with the corresponding element from the given mapping,
 /// and with the type and name defined by `message`.
 ///
 /// The target nodes are determined by the group this mapping is collected into.
 pub fn direct_message<SP: SessionParameters>(
     message: &ProtocolMessage<SP>,
     data: impl Into<DirectMessageArg<SP>>,
-) -> Node<DirectMessage<SP>> {
+) -> Node<SendDM<SP>> {
     let data: DirectMessageArg<SP> = data.into();
-    let signed_tag = LocalSignedTag::new(message.name());
-    let sent_tag = signed_tag.to_sent();
+    let signed_tag = LocalSignedDMTag::new(message.name());
+    let sent_tag = signed_tag.to_direct_message_sent();
 
-    let serialize_and_sign = Node::new(SerializeAndSign {
+    let serialize_and_sign = Node::new(SerializeAndSignDM {
         store_in: signed_tag,
-        function: SerializeAndSignFunction::new(default_serialize_and_sign),
+        function: SerializeAndSignDMFunction::new(|rng, id, args| default_serialize_and_sign(rng, Some(id), args)),
         data: data.get_strong_ref(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
         dependencies: Vec::new(),
     });
 
-    Node::new(DirectMessage {
+    Node::new(SendDM {
         store_in: sent_tag,
         data: serialize_and_sign,
         dependencies: Vec::new(),
@@ -540,6 +543,21 @@ pub fn collect<SP: SessionParameters>(
         store_in,
         values,
         group: group.clone_box(),
+        dependencies: Vec::new(),
+    })
+}
+
+/// Collects the elements of a mapping node into a scalar node.
+#[must_use]
+pub fn send_all<SP: SessionParameters>(
+    values: &Node<SendDM<SP>>,
+    destinations: &BTreeSet<SP::Verifier>,
+) -> Node<SendAll<SP>> {
+    let store_in = values.as_ref().store_in.to_collected();
+    Node::new(SendAll {
+        store_in,
+        values: values.get_strong_ref(),
+        destinations: destinations.clone(),
         dependencies: Vec::new(),
     })
 }

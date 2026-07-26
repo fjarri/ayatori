@@ -1,7 +1,6 @@
 use alloc::{boxed::Box, format, vec::Vec};
 use core::fmt::{self, Debug};
 
-use itertools::Itertools;
 use serde_encoded_bytes::{Hex, SliceLike};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
@@ -19,7 +18,7 @@ use crate::{
 #[derive_where::derive_where(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValueMetadata<SP: SessionParameters> {
     name: FullName,
-    destination: SP::Verifier,
+    destination: Option<SP::Verifier>,
     session_id: SessionId<SP>,
 }
 
@@ -30,8 +29,8 @@ impl<SP: SessionParameters> ValueMetadata<SP> {
     }
 
     /// The party the value is intended for.
-    pub fn destination(&self) -> &SP::Verifier {
-        &self.destination
+    pub fn destination(&self) -> Option<&SP::Verifier> {
+        self.destination.as_ref()
     }
 
     /// The ID of the session in which the value was created.
@@ -116,12 +115,12 @@ impl<SP: SessionParameters> SignedValue<SP> {
         signer: &SP::Signer,
         session_id: &SessionId<SP>,
         name: &FullName,
-        destination: &SP::Verifier,
+        destination: Option<&SP::Verifier>,
         value: SerializedValue,
     ) -> Result<Self, RuntimeError> {
         let metadata = ValueMetadata {
             name: name.clone(),
-            destination: destination.clone(),
+            destination: destination.cloned(),
             session_id: session_id.clone(),
         };
         //let digest = hash_value_and_metadata::<SP>(&value, &metadata)
@@ -306,47 +305,14 @@ impl<SP: SessionParameters> Debug for MessageId<SP> {
 
 /// A message to be sent to another party, containing multiple signed values.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
-#[serde(into = "WireMessage<SP>")]
-#[serde(try_from = "WireMessage<SP>")]
-pub struct Message<SP: SessionParameters> {
-    destination: SP::Verifier,
-    values: Vec<SignedValue<SP>>,
-}
+pub struct Message<SP: SessionParameters>(Vec<SignedValue<SP>>);
 
 impl<SP: SessionParameters> Message<SP> {
-    pub(crate) fn new(values: Vec<SignedValue<SP>>) -> Result<Self, RuntimeError> {
-        let first = values.first().ok_or_else(|| RuntimeError::new(""))?;
-        if !values.iter().map(|value| value.metadata().destination()).all_equal() {
-            return Err(RuntimeError::new(""));
-        }
-        let destination = first.metadata().destination().clone();
-        Ok(Self { destination, values })
-    }
-
-    /// The party for which the message is intended.
-    pub fn destination(&self) -> &SP::Verifier {
-        &self.destination
+    pub(crate) fn new(values: Vec<SignedValue<SP>>) -> Self {
+        Self(values)
     }
 
     pub(crate) fn into_values(self) -> Vec<SignedValue<SP>> {
-        self.values
-    }
-}
-
-#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
-struct WireMessage<SP: SessionParameters> {
-    values: Vec<SignedValue<SP>>,
-}
-
-impl<SP: SessionParameters> From<Message<SP>> for WireMessage<SP> {
-    fn from(source: Message<SP>) -> Self {
-        Self { values: source.values }
-    }
-}
-
-impl<SP: SessionParameters> TryFrom<WireMessage<SP>> for Message<SP> {
-    type Error = RuntimeError;
-    fn try_from(source: WireMessage<SP>) -> Result<Self, Self::Error> {
-        Self::new(source.values)
+        self.0
     }
 }

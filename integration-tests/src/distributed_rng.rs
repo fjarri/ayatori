@@ -81,11 +81,11 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let my_b = compute_scalar_with_rng("my_b", sample_value, &[]);
         let my_r = compute_scalar_with_rng("my_r", sample_nonce, &[]);
         let my_c = compute_scalar("my_c", commit_to_value, &[("b", (&my_b).into()), ("r", (&my_r).into())]);
-        let c_broadcasted = broadcast(&message_c, &my_c);
+        let c_broadcasted = broadcast(&message_c, &my_c, build_data.ids());
         let c = receive(&message_c);
-        let all_c = collect(&c, all_parties).with_dependency(&collect(&c_broadcasted, all_parties));
-        let b_broadcasted = broadcast(&message_b, &my_b).with_dependency(&all_c);
-        let r_broadcasted = broadcast(&message_r, &my_r).with_dependency(&all_c);
+        let all_c = collect(&c, all_parties).with_dependency(&c_broadcasted);
+        let b_broadcasted = broadcast(&message_b, &my_b, build_data.ids()).with_dependency(&all_c);
+        let r_broadcasted = broadcast(&message_r, &my_r, build_data.ids()).with_dependency(&all_c);
         let b = receive(&message_b);
         let r = receive(&message_r);
         let hash_correct = compute_mapping_sender_fallible(
@@ -94,8 +94,8 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             &[("c", (&c).into()), ("b", (&b).into()), ("r", (&r).into())],
         );
         let all_hash_correct = collect(&hash_correct, all_parties)
-            .with_dependency(&collect(&b_broadcasted, all_parties))
-            .with_dependency(&collect(&r_broadcasted, all_parties));
+            .with_dependency(&b_broadcasted)
+            .with_dependency(&r_broadcasted);
         let all_b = collect(&b, all_parties);
         Ok(compute_scalar("output", gen_output, &[("b", (&all_b).into())]).with_dependency(&all_hash_correct))
     }
