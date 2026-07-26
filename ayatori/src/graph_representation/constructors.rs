@@ -13,7 +13,7 @@ use super::{
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
     typed_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
-        GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SendBC, SendDM, SerializeAndSignBC,
+        GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SendAll, SendBC, SendDM, SerializeAndSignBC,
         SerializeAndSignDM,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
@@ -543,6 +543,21 @@ pub fn collect<SP: SessionParameters>(
         store_in,
         values,
         group: group.clone_box(),
+        dependencies: Vec::new(),
+    })
+}
+
+/// Collects the elements of a mapping node into a scalar node.
+#[must_use]
+pub fn send_all<SP: SessionParameters>(
+    values: &Node<SendDM<SP>>,
+    destinations: &BTreeSet<SP::Verifier>,
+) -> Node<SendAll<SP>> {
+    let store_in = values.as_ref().store_in.to_collected();
+    Node::new(SendAll {
+        store_in,
+        values: values.get_strong_ref(),
+        destinations: destinations.clone(),
         dependencies: Vec::new(),
     })
 }

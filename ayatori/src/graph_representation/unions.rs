@@ -2,7 +2,7 @@ use super::{
     any_node::AnyNode,
     typed_nodes::{
         Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, GeneralizedNode, MergeScalars, Node, NodeId,
-        Receive, ScalarArgument, SendBC, SendDM, SerializeAndSignBC, SerializeAndSignDM,
+        Receive, ScalarArgument, SendAll, SendBC, SerializeAndSignBC, SerializeAndSignDM,
     },
 };
 use crate::{
@@ -260,8 +260,6 @@ pub enum CollectArg<SP: SessionParameters> {
     SerializeAndSign(Node<SerializeAndSignDM<SP>>),
     /// Results of a deserialization.
     DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
-    /// The tokens corresponding to messages successfully sent (will be `()` values).
-    Send(Node<SendDM<SP>>),
     /// Received signed (but not yet verified) values.
     Receive(Node<Receive<SP>>),
 }
@@ -272,7 +270,6 @@ impl<SP: SessionParameters> CollectArg<SP> {
             Self::ComputeMapping(node) => MappingTagRef::Computed(&node.as_ref().store_in),
             Self::SerializeAndSign(node) => MappingTagRef::LocalSigned(&node.as_ref().store_in),
             Self::DeserializeAndCheck(node) => MappingTagRef::Received(&node.as_ref().store_in),
-            Self::Send(node) => MappingTagRef::Sent(&node.as_ref().store_in),
             Self::Receive(node) => MappingTagRef::RemoteSigned(&node.as_ref().store_in),
         }
     }
@@ -284,7 +281,6 @@ impl<SP: SessionParameters> GeneralizedNode for CollectArg<SP> {
             Self::ComputeMapping(node) => node.id(),
             Self::SerializeAndSign(node) => node.id(),
             Self::DeserializeAndCheck(node) => node.id(),
-            Self::Send(node) => node.id(),
             Self::Receive(node) => node.id(),
         }
     }
@@ -294,7 +290,6 @@ impl<SP: SessionParameters> GeneralizedNode for CollectArg<SP> {
             Self::ComputeMapping(node) => Self::ComputeMapping(node.get_strong_ref()),
             Self::SerializeAndSign(node) => Self::SerializeAndSign(node.get_strong_ref()),
             Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.get_strong_ref()),
-            Self::Send(node) => Self::Send(node.get_strong_ref()),
             Self::Receive(node) => Self::Receive(node.get_strong_ref()),
         }
     }
@@ -318,12 +313,6 @@ impl<SP: SessionParameters> From<&Node<DeserializeAndCheck<SP>>> for CollectArg<
     }
 }
 
-impl<SP: SessionParameters> From<&Node<SendDM<SP>>> for CollectArg<SP> {
-    fn from(source: &Node<SendDM<SP>>) -> Self {
-        Self::Send(source.get_strong_ref())
-    }
-}
-
 impl<SP: SessionParameters> From<&Node<Receive<SP>>> for CollectArg<SP> {
     fn from(source: &Node<Receive<SP>>) -> Self {
         Self::Receive(source.get_strong_ref())
@@ -338,7 +327,6 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for CollectArg<SP> {
             AnyNode::ComputeMapping(node) => Ok(Self::ComputeMapping(node)),
             AnyNode::SerializeAndSignDM(node) => Ok(Self::SerializeAndSign(node)),
             AnyNode::DeserializeAndCheck(node) => Ok(Self::DeserializeAndCheck(node)),
-            AnyNode::SendDM(node) => Ok(Self::Send(node)),
             AnyNode::Receive(node) => Ok(Self::Receive(node)),
             _ => Err(UnionCastError),
         }
@@ -535,6 +523,8 @@ pub enum Dependency<SP: SessionParameters> {
     MergeScalars(Node<MergeScalars<SP>>),
     /// A result of sending a broadcast.
     SendBC(Node<SendBC<SP>>),
+    /// A result of sending a set of direct messages.
+    SendAll(Node<SendAll<SP>>),
 }
 
 impl<SP: SessionParameters> Dependency<SP> {
@@ -544,6 +534,7 @@ impl<SP: SessionParameters> Dependency<SP> {
             Self::Collect(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
             Self::MergeScalars(node) => ScalarTagRef::Merged(&node.as_ref().store_in),
             Self::SendBC(node) => ScalarTagRef::Sent(&node.as_ref().store_in),
+            Self::SendAll(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
         }
     }
 }
@@ -555,6 +546,7 @@ impl<SP: SessionParameters> GeneralizedNode for Dependency<SP> {
             Self::Collect(node) => node.id(),
             Self::MergeScalars(node) => node.id(),
             Self::SendBC(node) => node.id(),
+            Self::SendAll(node) => node.id(),
         }
     }
 
@@ -564,6 +556,7 @@ impl<SP: SessionParameters> GeneralizedNode for Dependency<SP> {
             Self::Collect(node) => Self::Collect(node.get_strong_ref()),
             Self::MergeScalars(node) => Self::MergeScalars(node.get_strong_ref()),
             Self::SendBC(node) => Self::SendBC(node.get_strong_ref()),
+            Self::SendAll(node) => Self::SendAll(node.get_strong_ref()),
         }
     }
 }
@@ -592,6 +585,12 @@ impl<SP: SessionParameters> From<&Node<SendBC<SP>>> for Dependency<SP> {
     }
 }
 
+impl<SP: SessionParameters> From<&Node<SendAll<SP>>> for Dependency<SP> {
+    fn from(source: &Node<SendAll<SP>>) -> Self {
+        Self::SendAll(source.get_strong_ref())
+    }
+}
+
 impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Dependency<SP> {
     type Error = UnionCastError;
 
@@ -601,6 +600,7 @@ impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Dependency<SP> {
             AnyNode::Collect(node) => Ok(Self::Collect(node)),
             AnyNode::MergeScalars(node) => Ok(Self::MergeScalars(node)),
             AnyNode::SendBC(node) => Ok(Self::SendBC(node)),
+            AnyNode::SendAll(node) => Ok(Self::SendAll(node)),
             _ => Err(UnionCastError),
         }
     }

@@ -33,6 +33,7 @@ impl<Id: PartyId> ThresholdGroup<Id> {
     /// Creates a new group from party IDs.
     ///
     /// Repeating IDs are ignored.
+    // TODO: take a BTreeSet instead?
     pub fn new(ids: &[Id]) -> Self {
         let ids = ids.iter().cloned().collect::<BTreeSet<_>>();
         let threshold = ids.len();

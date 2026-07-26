@@ -13,8 +13,8 @@ use super::{
     constructors::collect,
     typed_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
-        GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SendBC, SendDM, SerializeAndSignBC,
-        SerializeAndSignDM, args_to_owned,
+        GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SendAll, SendBC, SendDM,
+        SerializeAndSignBC, SerializeAndSignDM, args_to_owned,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
@@ -56,6 +56,8 @@ pub enum AnyNode<SP: SessionParameters> {
     SendBC(Node<SendBC<SP>>),
     /// An outgoing direct message.
     SendDM(Node<SendDM<SP>>),
+    /// A set of outgoing direct messages.
+    SendAll(Node<SendAll<SP>>),
     /// An expected broadcast message.
     Receive(Node<Receive<SP>>),
     /// An argument to the protocol.
@@ -69,6 +71,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
             Self::Collect(node) => Box::new(one_arg_to_any_iter(&node.as_ref().values)),
+            Self::SendAll(node) => Box::new(one_arg_to_any_iter(&node.as_ref().values)),
             Self::ComputeMapping(node) => match &node.as_ref().kind {
                 ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
                     Box::new(arg_map_to_any_iter(&node.as_ref().args))
@@ -104,6 +107,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
             Self::Collect(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
+            Self::SendAll(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
             Self::ComputeMapping(node) => AnyTagRef::Mapping(MappingTagRef::Computed(&node.as_ref().store_in)),
             Self::SerializeAndSignBC(node) => AnyTagRef::Scalar(ScalarTagRef::LocalSigned(&node.as_ref().store_in)),
             Self::SerializeAndSignDM(node) => AnyTagRef::Mapping(MappingTagRef::LocalSigned(&node.as_ref().store_in)),
@@ -120,6 +124,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => &node.as_ref().dependencies,
             Self::Collect(node) => &node.as_ref().dependencies,
+            Self::SendAll(node) => &node.as_ref().dependencies,
             Self::ComputeMapping(node) => &node.as_ref().dependencies,
             Self::SerializeAndSignBC(node) => &node.as_ref().dependencies,
             Self::SerializeAndSignDM(node) => &node.as_ref().dependencies,
@@ -136,6 +141,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         Ok(match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.with_replacements(replacements)?),
             Self::Collect(node) => Self::Collect(node.with_replacements(replacements)?),
+            Self::SendAll(node) => Self::SendAll(node.with_replacements(replacements)?),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.with_replacements(replacements)?),
             Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.with_replacements(replacements)?),
             Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.with_replacements(replacements)?),
@@ -152,6 +158,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.with_added_prefix(prefix)),
             Self::Collect(node) => Self::Collect(node.with_added_prefix(prefix)),
+            Self::SendAll(node) => Self::SendAll(node.with_added_prefix(prefix)),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.with_added_prefix(prefix)),
             Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.with_added_prefix(prefix)),
             Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.with_added_prefix(prefix)),
@@ -168,6 +175,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.without_dependencies()),
             Self::Collect(node) => Self::Collect(node.without_dependencies()),
+            Self::SendAll(node) => Self::SendAll(node.without_dependencies()),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.without_dependencies()),
             Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.without_dependencies()),
             Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.without_dependencies()),
@@ -250,7 +258,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
                 // Reproducible as long as both of its arguments are reproducible
                 Self::MergeScalars(_) |
                 // We can always reproduce the result of this, since it is an infallible `()`.
-                Self::SendDM(_) | Self::SendBC(_) => {}
+                Self::SendDM(_) | Self::SendBC(_) | Self::SendAll(_) => {}
                 // Requires RNG and secret information (signing key), so not reproducible.
                 Self::SerializeAndSignBC(_) | Self::SerializeAndSignDM(_) => return Reproducibility::NotAvailable,
                 Self::Collect(_) => {
@@ -460,6 +468,7 @@ impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => Self::ComputeScalar(node.get_strong_ref()),
             Self::Collect(node) => Self::Collect(node.get_strong_ref()),
+            Self::SendAll(node) => Self::SendAll(node.get_strong_ref()),
             Self::ComputeMapping(node) => Self::ComputeMapping(node.get_strong_ref()),
             Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.get_strong_ref()),
             Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.get_strong_ref()),
@@ -476,6 +485,7 @@ impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => node.id(),
             Self::Collect(node) => node.id(),
+            Self::SendAll(node) => node.id(),
             Self::ComputeMapping(node) => node.id(),
             Self::SerializeAndSignBC(node) => node.id(),
             Self::SerializeAndSignDM(node) => node.id(),
@@ -572,7 +582,6 @@ impl<SP: SessionParameters> From<CollectArg<SP>> for AnyNode<SP> {
             CollectArg::ComputeMapping(node) => Self::ComputeMapping(node),
             CollectArg::SerializeAndSign(node) => Self::SerializeAndSignDM(node),
             CollectArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
-            CollectArg::Send(node) => Self::SendDM(node),
             CollectArg::Receive(node) => Self::Receive(node),
         }
     }
@@ -620,6 +629,7 @@ impl<SP: SessionParameters> From<Dependency<SP>> for AnyNode<SP> {
             Dependency::Collect(node) => Self::Collect(node),
             Dependency::MergeScalars(node) => Self::MergeScalars(node),
             Dependency::SendBC(node) => Self::SendBC(node),
+            Dependency::SendAll(node) => Self::SendAll(node),
         }
     }
 }
@@ -760,6 +770,7 @@ impl<SP: SessionParameters> Display for AnyNode<SP> {
         match self {
             Self::ComputeScalar(node) => write!(f, "{node}"),
             Self::Collect(node) => write!(f, "{node}"),
+            Self::SendAll(node) => write!(f, "{node}"),
             Self::ComputeMapping(node) => write!(f, "{node}"),
             Self::SerializeAndSignBC(node) => write!(f, "{node}"),
             Self::SerializeAndSignDM(node) => write!(f, "{node}"),

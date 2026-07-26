@@ -313,6 +313,63 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Collect<SP> {
     }
 }
 
+/// A node that collects virtual values corresponding to sent direct messages into a scalar value.
+#[derive_where::derive_where(Debug)]
+pub struct SendAll<SP: SessionParameters> {
+    // TODO: a separate tag?
+    pub(crate) store_in: CollectedTag,
+    pub(crate) values: Node<SendDM<SP>>,
+    pub(crate) destinations: BTreeSet<SP::Verifier>,
+    pub(crate) dependencies: Vec<Dependency<SP>>,
+}
+
+impl<SP: SessionParameters> ShallowClone for SendAll<SP> {
+    fn shallow_clone(&self) -> Self {
+        Self {
+            store_in: self.store_in.clone(),
+            values: self.values.get_strong_ref(),
+            destinations: self.destinations.clone(),
+            dependencies: node_slice_to_owned(&self.dependencies),
+        }
+    }
+}
+
+impl<SP: SessionParameters> SpecificNode<SP> for SendAll<SP> {
+    fn with_added_prefix(self, prefix: &str) -> Self {
+        let mut node = self;
+        node.store_in = node.store_in.with_added_prefix(prefix);
+        node
+    }
+
+    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        let mut node = self;
+        replace_in_node(&mut node.values, replacements)
+            .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
+        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
+            format!(
+                "Failed to replace nodes in the dependencies of node `{}`",
+                node.store_in
+            )
+        })?;
+        Ok(node)
+    }
+}
+
+impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendAll<SP> {
+    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
+        let mut node = self;
+        let dependency = dependency.into();
+        node.dependencies.push(dependency);
+        node
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+}
+
 #[derive_where::derive_where(Debug)]
 pub(crate) enum ComputeMappingKind<SP: SessionParameters> {
     Simple {
@@ -707,6 +764,17 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendDM<SP> {
     }
 }
 
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SendDM<SP>> {
+    type Error = UnionCastError;
+
+    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
+        match source {
+            AnyNode::SendDM(node) => Ok(node),
+            _ => Err(UnionCastError),
+        }
+    }
+}
+
 /// A node that denotes sending a direct message to other parties.
 #[derive_where::derive_where(Debug)]
 pub struct SendBC<SP: SessionParameters> {
@@ -760,6 +828,17 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendBC<SP> {
         let mut node = self.shallow_clone();
         node.dependencies = Vec::new();
         node
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SendBC<SP>> {
+    type Error = UnionCastError;
+
+    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
+        match source {
+            AnyNode::SendBC(node) => Ok(node),
+            _ => Err(UnionCastError),
+        }
     }
 }
 
@@ -989,6 +1068,18 @@ impl<SP: SessionParameters> Display for Collect<SP> {
             "{} = collect({}){}",
             self.store_in,
             self.values.store_in(),
+            display_dependencies(&self.dependencies)
+        )
+    }
+}
+
+impl<SP: SessionParameters> Display for SendAll<SP> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{} = send_all({}){}",
+            self.store_in,
+            self.values.as_ref().store_in,
             display_dependencies(&self.dependencies)
         )
     }

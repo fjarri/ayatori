@@ -390,8 +390,7 @@ where
             );
 
             let shards_sent = direct_message(&message_value, &value_messages);
-            // TODO (#27): the question of what threshold should be used here becomes moot when the issue is fixed.
-            Dependency::from(&collect(&shards_sent, &ThresholdGroup::new(&ids)))
+            Dependency::from(&send_all(&shards_sent, &build_data.receivers))
         } else {
             Dependency::from(&constant("empty_dependency", ()))
         };

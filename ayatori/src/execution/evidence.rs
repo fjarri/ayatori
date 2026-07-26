@@ -321,8 +321,9 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
                 ));
             }
             Task::Send(_task) => {
-                // TODO (#82): is that an error if we're in this branch? For now we assume it is.
-                return Ok(EvidenceVerdict::invalid(
+                // Outgoing message nodes can only be dependencies (not arguments),
+                // so they all should have been dropped when we created the reproduction subtree.
+                return Err(RuntimeError::new(
                     "Unexpected outgoing message node encountered when reproducing the failure",
                 ));
             }

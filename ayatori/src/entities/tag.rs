@@ -192,6 +192,10 @@ impl SentDMTag {
     pub fn with_added_prefix(self, prefix: &str) -> Self {
         Self(self.0.with_added_prefix(prefix))
     }
+
+    pub fn to_collected(&self) -> CollectedTag {
+        CollectedTag::new(MappingTag::Sent(self.clone()), None)
+    }
 }
 
 /// A value deserialized from a message received from another node.

@@ -2,16 +2,17 @@ use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
     string::ToString,
+    vec::Vec,
 };
 use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
 use crate::{
-    entities::{AnyTagRef, MappingTag, PartyGroup, ScalarTag},
+    entities::{AnyTagRef, MappingTag, PartyGroup, ScalarTag, ThresholdGroup},
     graph_representation::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, Dependency, DeserializeAndCheck, MergeScalars,
-        SendBC, SendDM, SerializeAndSignBC, SerializeAndSignDM,
+        SendAll, SendBC, SendDM, SerializeAndSignBC, SerializeAndSignDM,
     },
     traits::{PartyId, SessionParameters},
 };
@@ -176,6 +177,15 @@ impl<Id: PartyId> QuorumCondition<Id> {
         Self {
             tag: node.values.store_in().to_owned(),
             group: node.group.clone_box(),
+        }
+    }
+
+    pub fn from_send_all<SP: SessionParameters<Verifier = Id>>(node: &SendAll<SP>) -> Self {
+        Self {
+            tag: MappingTag::Sent(node.values.as_ref().store_in.clone()),
+            group: Box::new(ThresholdGroup::new(
+                &node.destinations.iter().cloned().collect::<Vec<_>>(),
+            )),
         }
     }
 

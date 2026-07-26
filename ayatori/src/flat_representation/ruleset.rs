@@ -265,6 +265,12 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                 AnyNode::Collect(node) => {
                     result.insert(node.as_ref().values.store_in(), node.as_ref().group.ids().clone());
                 }
+                AnyNode::SendAll(node) => {
+                    result.insert(
+                        MappingTagRef::Sent(&node.as_ref().values.as_ref().store_in),
+                        node.as_ref().destinations.clone(),
+                    );
+                }
             }
         }
 
@@ -483,6 +489,16 @@ impl<SP: SessionParameters> Ruleset<SP> {
                         quorum_condition: QuorumConditionWithState::new(quorum_condition),
                         store_in: node.store_in.clone(),
                         values: node.values.store_in().to_owned(),
+                    });
+                }
+                AnyNode::SendAll(node) => {
+                    let node = node.as_ref();
+                    let quorum_condition = QuorumCondition::from_send_all(node);
+                    collect_rules.push(CollectRule {
+                        dependencies_condition,
+                        quorum_condition: QuorumConditionWithState::new(quorum_condition),
+                        store_in: node.store_in.clone(),
+                        values: MappingTag::Sent(node.values.as_ref().store_in.clone()),
                     });
                 }
                 AnyNode::Receive(node) => {
