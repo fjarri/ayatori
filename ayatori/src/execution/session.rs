@@ -310,7 +310,7 @@ where
 
         while let Some(action) = self.ruleset.pop_action() {
             match action {
-                Action::BroadcastMessage {
+                Action::SendBC {
                     store_in,
                     to_send,
                     destinations,
@@ -330,7 +330,7 @@ where
                     self.add_scalar(&ScalarTag::Sent(store_in), Value::new(()))?;
                     return Ok(Some(SendTask::new_broadcast(destinations, signed_value).into()));
                 }
-                Action::DirectMessage {
+                Action::SendDM {
                     store_in,
                     to_send,
                     destination,

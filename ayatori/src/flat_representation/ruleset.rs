@@ -155,12 +155,12 @@ pub(crate) enum Action<SP: SessionParameters> {
         expected_senders: BTreeSet<SP::Verifier>,
         on_error: OnError,
     },
-    BroadcastMessage {
+    SendBC {
         store_in: SentBCTag,
         to_send: LocalSignedBCTag,
         destinations: BTreeSet<SP::Verifier>,
     },
-    DirectMessage {
+    SendDM {
         store_in: SentDMTag,
         to_send: LocalSignedDMTag,
         destination: SP::Verifier,
@@ -629,7 +629,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 rule.dependencies_condition.is_satisfied() && rule.scalar_condition.is_satisfied()
             })
             .next()
-            .map(|rule| Action::BroadcastMessage {
+            .map(|rule| Action::SendBC {
                 store_in: rule.store_in.clone(),
                 to_send: rule.to_send.clone(),
                 destinations: rule.destinations,
@@ -643,7 +643,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
 
             if let Some(id) = rule.element_condition.pop_satisfied() {
-                return Some(Action::DirectMessage {
+                return Some(Action::SendDM {
                     store_in: rule.store_in.clone(),
                     to_send: rule.to_send.clone(),
                     destination: id,
