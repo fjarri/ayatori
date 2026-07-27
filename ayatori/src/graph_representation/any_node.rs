@@ -37,33 +37,83 @@ pub(crate) enum Reproducibility {
     NotAvailable,
 }
 
-/// A union of all possible nodes.
-#[derive_where::derive_where(Debug)]
-pub enum AnyNode<SP: SessionParameters> {
+// Keep the canonical list of node variants here. The generated code below is intentionally
+// limited to forwarding operations whose implementation is identical for every node type.
+// Operations with node-specific semantics remain explicit in `impl AnyNode`.
+macro_rules! define_any_node {
+    ($($(#[$meta:meta])* $variant:ident($node_type:ident)),+ $(,)?) => {
+        /// A union of all possible nodes.
+        #[derive_where::derive_where(Debug)]
+        pub enum AnyNode<SP: SessionParameters> {
+            $(
+                $(#[$meta])*
+                $variant(Node<$node_type<SP>>),
+            )+
+        }
+
+        impl<SP: SessionParameters> AnyNode<SP> {
+            fn with_replacements(self, replacements: &BTreeMap<NodeId, Self>) -> Result<Self, RuntimeError> {
+                Ok(match self {
+                    $(Self::$variant(node) => Self::$variant(node.with_replacements(replacements)?),)+
+                })
+            }
+
+            fn with_added_prefix(self, prefix: &str) -> Self {
+                match self {
+                    $(Self::$variant(node) => Self::$variant(node.with_added_prefix(prefix)),)+
+                }
+            }
+        }
+
+        impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
+            fn get_strong_ref(&self) -> Self {
+                match self {
+                    $(Self::$variant(node) => Self::$variant(node.get_strong_ref()),)+
+                }
+            }
+
+            fn id(&self) -> NodeId {
+                match self {
+                    $(Self::$variant(node) => node.id(),)+
+                }
+            }
+        }
+
+        $(
+            impl<SP: SessionParameters> From<Node<$node_type<SP>>> for AnyNode<SP> {
+                fn from(source: Node<$node_type<SP>>) -> Self {
+                    Self::$variant(source)
+                }
+            }
+        )+
+    };
+}
+
+define_any_node! {
     /// A scalar computation.
-    ComputeScalar(Node<ComputeScalar<SP>>),
+    ComputeScalar(ComputeScalar),
     /// A collection of mapping elements.
-    Collect(Node<Collect<SP>>),
+    Collect(Collect),
     /// A mapping computation.
-    ComputeMapping(Node<ComputeMapping<SP>>),
+    ComputeMapping(ComputeMapping),
     /// A serialization of a broadcast message.
-    SerializeAndSignBC(Node<SerializeAndSignBC<SP>>),
+    SerializeAndSignBC(SerializeAndSignBC),
     /// A serialization of a direct message.
-    SerializeAndSignDM(Node<SerializeAndSignDM<SP>>),
+    SerializeAndSignDM(SerializeAndSignDM),
     /// A deserialization of a broadcast message.
-    DeserializeAndCheck(Node<DeserializeAndCheck<SP>>),
+    DeserializeAndCheck(DeserializeAndCheck),
     /// An outgoing broadcast message.
-    SendBC(Node<SendBC<SP>>),
+    SendBC(SendBC),
     /// An outgoing direct message.
-    SendDM(Node<SendDM<SP>>),
+    SendDM(SendDM),
     /// A set of outgoing direct messages.
-    SendAll(Node<SendAll<SP>>),
+    SendAll(SendAll),
     /// An expected broadcast message.
-    Receive(Node<Receive<SP>>),
+    Receive(Receive),
     /// An argument to the protocol.
-    ScalarArgument(Node<ScalarArgument<SP>>),
+    ScalarArgument(ScalarArgument),
     /// One or both scalar node results merged into one.
-    MergeScalars(Node<MergeScalars<SP>>),
+    MergeScalars(MergeScalars),
 }
 
 impl<SP: SessionParameters> AnyNode<SP> {
@@ -134,40 +184,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
             Self::Receive(node) => &node.as_ref().dependencies,
             Self::ScalarArgument(_node) => &[],
             Self::MergeScalars(_node) => &[],
-        }
-    }
-
-    fn with_replacements(self, replacements: &BTreeMap<NodeId, Self>) -> Result<Self, RuntimeError> {
-        Ok(match self {
-            Self::ComputeScalar(node) => Self::ComputeScalar(node.with_replacements(replacements)?),
-            Self::Collect(node) => Self::Collect(node.with_replacements(replacements)?),
-            Self::SendAll(node) => Self::SendAll(node.with_replacements(replacements)?),
-            Self::ComputeMapping(node) => Self::ComputeMapping(node.with_replacements(replacements)?),
-            Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.with_replacements(replacements)?),
-            Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.with_replacements(replacements)?),
-            Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.with_replacements(replacements)?),
-            Self::SendDM(node) => Self::SendDM(node.with_replacements(replacements)?),
-            Self::SendBC(node) => Self::SendBC(node.with_replacements(replacements)?),
-            Self::Receive(node) => Self::Receive(node.with_replacements(replacements)?),
-            Self::ScalarArgument(node) => Self::ScalarArgument(node.with_replacements(replacements)?),
-            Self::MergeScalars(node) => Self::MergeScalars(node.with_replacements(replacements)?),
-        })
-    }
-
-    fn with_added_prefix(self, prefix: &str) -> Self {
-        match self {
-            Self::ComputeScalar(node) => Self::ComputeScalar(node.with_added_prefix(prefix)),
-            Self::Collect(node) => Self::Collect(node.with_added_prefix(prefix)),
-            Self::SendAll(node) => Self::SendAll(node.with_added_prefix(prefix)),
-            Self::ComputeMapping(node) => Self::ComputeMapping(node.with_added_prefix(prefix)),
-            Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.with_added_prefix(prefix)),
-            Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.with_added_prefix(prefix)),
-            Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.with_added_prefix(prefix)),
-            Self::SendDM(node) => Self::SendDM(node.with_added_prefix(prefix)),
-            Self::SendBC(node) => Self::SendBC(node.with_added_prefix(prefix)),
-            Self::Receive(node) => Self::Receive(node.with_added_prefix(prefix)),
-            Self::ScalarArgument(node) => Self::ScalarArgument(node.with_added_prefix(prefix)),
-            Self::MergeScalars(node) => Self::MergeScalars(node.with_added_prefix(prefix)),
         }
     }
 
@@ -463,105 +479,9 @@ impl<SP: SessionParameters> AnyNode<SP> {
     }
 }
 
-impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
-    fn get_strong_ref(&self) -> Self {
-        match self {
-            Self::ComputeScalar(node) => Self::ComputeScalar(node.get_strong_ref()),
-            Self::Collect(node) => Self::Collect(node.get_strong_ref()),
-            Self::SendAll(node) => Self::SendAll(node.get_strong_ref()),
-            Self::ComputeMapping(node) => Self::ComputeMapping(node.get_strong_ref()),
-            Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.get_strong_ref()),
-            Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.get_strong_ref()),
-            Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.get_strong_ref()),
-            Self::SendDM(node) => Self::SendDM(node.get_strong_ref()),
-            Self::SendBC(node) => Self::SendBC(node.get_strong_ref()),
-            Self::Receive(node) => Self::Receive(node.get_strong_ref()),
-            Self::ScalarArgument(node) => Self::ScalarArgument(node.get_strong_ref()),
-            Self::MergeScalars(node) => Self::MergeScalars(node.get_strong_ref()),
-        }
-    }
-
-    fn id(&self) -> NodeId {
-        match self {
-            Self::ComputeScalar(node) => node.id(),
-            Self::Collect(node) => node.id(),
-            Self::SendAll(node) => node.id(),
-            Self::ComputeMapping(node) => node.id(),
-            Self::SerializeAndSignBC(node) => node.id(),
-            Self::SerializeAndSignDM(node) => node.id(),
-            Self::DeserializeAndCheck(node) => node.id(),
-            Self::SendDM(node) => node.id(),
-            Self::SendBC(node) => node.id(),
-            Self::Receive(node) => node.id(),
-            Self::ScalarArgument(node) => node.id(),
-            Self::MergeScalars(node) => node.id(),
-        }
-    }
-}
-
 impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for AnyNode<SP> {
     fn from(source: &Node<ComputeScalar<SP>>) -> Self {
         Self::ComputeScalar(source.get_strong_ref())
-    }
-}
-
-impl<SP: SessionParameters> From<Node<ComputeScalar<SP>>> for AnyNode<SP> {
-    fn from(source: Node<ComputeScalar<SP>>) -> Self {
-        Self::ComputeScalar(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<Collect<SP>>> for AnyNode<SP> {
-    fn from(source: Node<Collect<SP>>) -> Self {
-        Self::Collect(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<ComputeMapping<SP>>> for AnyNode<SP> {
-    fn from(source: Node<ComputeMapping<SP>>) -> Self {
-        Self::ComputeMapping(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<SerializeAndSignBC<SP>>> for AnyNode<SP> {
-    fn from(source: Node<SerializeAndSignBC<SP>>) -> Self {
-        Self::SerializeAndSignBC(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<SerializeAndSignDM<SP>>> for AnyNode<SP> {
-    fn from(source: Node<SerializeAndSignDM<SP>>) -> Self {
-        Self::SerializeAndSignDM(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<DeserializeAndCheck<SP>>> for AnyNode<SP> {
-    fn from(source: Node<DeserializeAndCheck<SP>>) -> Self {
-        Self::DeserializeAndCheck(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<SendBC<SP>>> for AnyNode<SP> {
-    fn from(source: Node<SendBC<SP>>) -> Self {
-        Self::SendBC(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<SendDM<SP>>> for AnyNode<SP> {
-    fn from(source: Node<SendDM<SP>>) -> Self {
-        Self::SendDM(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<Receive<SP>>> for AnyNode<SP> {
-    fn from(source: Node<Receive<SP>>) -> Self {
-        Self::Receive(source)
-    }
-}
-
-impl<SP: SessionParameters> From<Node<ScalarArgument<SP>>> for AnyNode<SP> {
-    fn from(source: Node<ScalarArgument<SP>>) -> Self {
-        Self::ScalarArgument(source)
     }
 }
 
