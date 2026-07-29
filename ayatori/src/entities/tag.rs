@@ -89,6 +89,23 @@ macro_rules! define_tag_type {
             }
         }
 
+        impl TryFrom<$category> for $type_name {
+            type Error = ();
+            fn try_from(source: $category) -> Result<Self, Self::Error> {
+                match source {
+                    $category::$category_variant(tag) => Ok(tag),
+                    _ => Err(())
+                }
+            }
+        }
+
+        impl TryFrom<AnyTag> for $type_name {
+            type Error = ();
+            fn try_from(source: AnyTag) -> Result<Self, Self::Error> {
+                Self::try_from($category::try_from(source)?)
+            }
+        }
+
         impl<'a> From<&'a $type_name> for $category_ref<'a> {
             fn from(source: &'a $type_name) -> Self {
                 Self::$category_variant(source)
@@ -464,6 +481,26 @@ impl AnyTag {
         match self {
             Self::Scalar(tag) => AnyTagRef::Scalar(tag.as_ref()),
             Self::Mapping(tag) => AnyTagRef::Mapping(tag.as_ref()),
+        }
+    }
+}
+
+impl TryFrom<AnyTag> for ScalarTag {
+    type Error = ();
+    fn try_from(source: AnyTag) -> Result<Self, Self::Error> {
+        match source {
+            AnyTag::Scalar(tag) => Ok(tag),
+            AnyTag::Mapping(_) => Err(()),
+        }
+    }
+}
+
+impl TryFrom<AnyTag> for MappingTag {
+    type Error = ();
+    fn try_from(source: AnyTag) -> Result<Self, Self::Error> {
+        match source {
+            AnyTag::Scalar(_) => Err(()),
+            AnyTag::Mapping(tag) => Ok(tag),
         }
     }
 }
