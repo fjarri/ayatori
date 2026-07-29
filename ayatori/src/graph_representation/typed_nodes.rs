@@ -22,11 +22,11 @@ use super::{
 use crate::{
     entities::{
         CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedBCTag,
-        LocalSignedDMTag, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError, ScalarArgumentTag,
-        SenderAttributableVerificationFunction, SenderAttributableWithRevealMappingFunction, SentBCTag, SentDMTag,
-        SerdeAdapter, SerializeAndSignBCFunction, SerializeAndSignDMFunction, SimpleMappingFunction,
-        SimpleScalarFunction, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction,
-        ThirdPartyAttributableVerificationFunction,
+        LocalSignedDMTag, MappingFunction, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError,
+        ScalarArgumentTag, ScalarFunction, SenderAttributableVerificationFunction,
+        SenderAttributableWithRevealMappingFunction, SentBCTag, SentDMTag, SerdeAdapter, SerializeAndSignBCFunction,
+        SerializeAndSignDMFunction, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction,
     },
     traced_error::TraceableResult,
     traits::SessionParameters,
@@ -119,7 +119,9 @@ pub(crate) trait SpecificNode<SP: SessionParameters>: Sized {
 
     fn without_dependencies(self) -> Self;
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>>;
+    /// Returns an iterator over all arguments required to compute functions in this node.
+    /// Arguments may repeat.
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>>;
 
     fn with_added_prefix(self, prefix: &str) -> Self;
 
@@ -202,6 +204,17 @@ pub struct ComputeScalar<SP: SessionParameters> {
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
+impl<SP: SessionParameters> ComputeScalar<SP> {
+    pub(crate) fn function(&self) -> ScalarFunction<SP> {
+        match &self.kind {
+            ComputeScalarKind::Simple { function } => ScalarFunction::from(function.clone()),
+            ComputeScalarKind::ThirdPartyAttributable { function, .. } => {
+                ScalarFunction::ThirdPartyAttributable(function.clone())
+            }
+        }
+    }
+}
+
 impl<SP: SessionParameters> ShallowClone for ComputeScalar<SP> {
     fn shallow_clone(&self) -> Self {
         Self {
@@ -224,7 +237,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeScalar<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         arg_map_to_any_iter(&self.args)
     }
 
@@ -300,7 +313,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for Collect<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.values)
     }
 
@@ -365,7 +378,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SendAll<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.values)
     }
 
@@ -463,6 +476,20 @@ pub struct ComputeMapping<SP: SessionParameters> {
     pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
+impl<SP: SessionParameters> ComputeMapping<SP> {
+    pub(crate) fn function(&self) -> MappingFunction<SP> {
+        match &self.kind {
+            ComputeMappingKind::Simple { function } => MappingFunction::from(function.clone()),
+            ComputeMappingKind::WithReveal { function, .. } => {
+                MappingFunction::SenderAttributableWithReveal(function.clone())
+            }
+            ComputeMappingKind::ThirdPartyAttributable { function, .. } => {
+                MappingFunction::ThirdPartyAttributable(function.clone())
+            }
+        }
+    }
+}
+
 impl<SP: SessionParameters> ShallowClone for ComputeMapping<SP> {
     fn shallow_clone(&self) -> Self {
         Self {
@@ -485,7 +512,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeMapping<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         let more_args = match &self.kind {
             ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => None,
             ComputeMappingKind::WithReveal { verification_args, .. } => Some(verification_args),
@@ -569,7 +596,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignBC<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.data)
     }
 
@@ -649,7 +676,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignDM<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.data)
     }
 
@@ -729,7 +756,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for DeserializeAndCheck<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.data)
     }
 
@@ -803,7 +830,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SendDM<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.data)
     }
 
@@ -878,7 +905,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SendBC<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.data)
     }
 
@@ -951,7 +978,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for Receive<SP> {
         node
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         core::iter::empty()
     }
 
@@ -1021,7 +1048,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
         self
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         core::iter::empty()
     }
 
@@ -1064,7 +1091,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for MergeScalars<SP> {
         self
     }
 
-    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+    fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
         one_arg_to_any_iter(&self.left).chain(one_arg_to_any_iter(&self.right))
     }
 

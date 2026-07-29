@@ -82,9 +82,9 @@ macro_rules! define_any_node {
                 }
             }
 
-            pub(crate) fn args(&self) -> Box<dyn Iterator<Item = Self> + '_> {
+            pub(crate) fn all_args(&self) -> Box<dyn Iterator<Item = Self> + '_> {
                 match self {
-                    $(Self::$variant(node) => Box::new(node.as_ref().args()),)+
+                    $(Self::$variant(node) => Box::new(node.as_ref().all_args()),)+
                 }
             }
         }
@@ -149,9 +149,9 @@ define_any_node! {
 }
 
 impl<SP: SessionParameters> AnyNode<SP> {
-    pub(crate) fn args_and_dependencies(&self) -> Box<dyn Iterator<Item = Self> + '_> {
+    pub(crate) fn all_args_and_dependencies(&self) -> Box<dyn Iterator<Item = Self> + '_> {
         Box::new(
-            self.args().chain(
+            self.all_args().chain(
                 self.dependencies()
                     .iter()
                     .map(GeneralizedNode::get_strong_ref)
@@ -389,7 +389,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         let mut replacement_nodes = BTreeMap::new();
 
         // The root node will be processed separately
-        for node in LeavesFirstIterator::new_with_nodes(self.args_and_dependencies()) {
+        for node in LeavesFirstIterator::new_with_nodes(self.all_args_and_dependencies()) {
             let old_id = node.id();
             let store_in = node.store_in().to_owned();
             let new_node = f(node)
@@ -547,9 +547,9 @@ impl<SP: SessionParameters> Iterator for UnorderedIterator<SP> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(node) = self.queue.pop() {
             let children = if self.args_only {
-                node.args()
+                node.all_args()
             } else {
-                node.args_and_dependencies()
+                node.all_args_and_dependencies()
             };
             for child_node in children {
                 if !self.emitted.contains(&child_node.id()) {
@@ -597,7 +597,7 @@ impl<SP: SessionParameters> Iterator for LeavesFirstIterator<SP> {
             }
 
             let unprocessed_children = node
-                .args_and_dependencies()
+                .all_args_and_dependencies()
                 .filter_map(|child_node| {
                     let id = child_node.id();
                     if self.emitted.contains(&id) {

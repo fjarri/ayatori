@@ -5,10 +5,10 @@ mod typed_nodes;
 mod unions;
 
 pub(crate) use any_node::Reproducibility;
-pub(crate) use typed_nodes::{ComputeMappingKind, ComputeScalarKind, GeneralizedNode};
+pub(crate) use typed_nodes::{ComputeMappingKind, GeneralizedNode, SpecificNode};
 
 #[cfg(feature = "dev")]
-pub(crate) use typed_nodes::ShallowClone;
+pub(crate) use typed_nodes::{ComputeScalarKind, ShallowClone};
 
 pub use any_node::AnyNode;
 pub use args::{ArgNodes, PartyBuildData, PrivateInputs, ProtocolArgs, ProtocolSignature, PublicInputs};

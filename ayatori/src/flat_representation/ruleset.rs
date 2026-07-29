@@ -19,9 +19,7 @@ use crate::{
         RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, ScalarTag, SentBCTag, SentDMTag,
         SerdeAdapter, SerializeAndSignBCFunction, SerializeAndSignDMFunction,
     },
-    graph_representation::{
-        AnyNode, ComputeMappingKind, ComputeScalarKind, GeneralizedNode, OutputNode, Reproducibility,
-    },
+    graph_representation::{AnyNode, GeneralizedNode, OutputNode, Reproducibility, SpecificNode},
     traits::SessionParameters,
 };
 
@@ -235,20 +233,9 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                 | AnyNode::Receive(_) => {}
                 AnyNode::ComputeMapping(node) => {
                     let ids = result.get(&node.as_ref().store_in)?.clone();
-                    for arg in node.as_ref().args.values() {
+                    for arg in node.as_ref().all_args() {
                         if let AnyTagRef::Mapping(tag) = arg.store_in() {
                             result.insert(tag, ids.clone());
-                        }
-                    }
-
-                    match &node.as_ref().kind {
-                        ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {}
-                        ComputeMappingKind::WithReveal { verification_args, .. } => {
-                            for arg in verification_args.values() {
-                                if let AnyTagRef::Mapping(tag) = arg.store_in() {
-                                    result.insert(tag, ids.clone());
-                                }
-                            }
                         }
                     }
                 }
@@ -330,12 +317,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let node = node.as_ref();
                     let scalar_condition = ScalarCondition::from_compute_scalar(node);
 
-                    let function = match &node.kind {
-                        ComputeScalarKind::Simple { function } => ScalarFunction::from(function.clone()),
-                        ComputeScalarKind::ThirdPartyAttributable { function, .. } => {
-                            ScalarFunction::ThirdPartyAttributable(function.clone())
-                        }
-                    };
+                    let function = node.function();
 
                     let arg_tags = node
                         .args
@@ -364,15 +346,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let scalar_condition = ScalarCondition::from_compute_mapping(node);
                     let element_condition = ElementCondition::from_compute_mapping(node);
 
-                    let function = match &node.kind {
-                        ComputeMappingKind::Simple { function } => MappingFunction::from(function.clone()),
-                        ComputeMappingKind::WithReveal { function, .. } => {
-                            MappingFunction::SenderAttributableWithReveal(function.clone())
-                        }
-                        ComputeMappingKind::ThirdPartyAttributable { function, .. } => {
-                            MappingFunction::ThirdPartyAttributable(function.clone())
-                        }
-                    };
+                    let function = node.function();
 
                     let arg_tags = node
                         .args
