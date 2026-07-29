@@ -60,55 +60,194 @@ impl Display for FullName {
     }
 }
 
-/// A locally computed value coming from an explicit computation/verification node
-/// (not from serialization/deserialization).
-/// The name of the tag will come from what the user provided when creating the node.
-/// The contents are of some user type.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("{0}")]
-pub(crate) struct ComputedScalarTag(FullName);
+macro_rules! define_tag_type {
+    (
+        $(#[$meta:meta])*
+        $display:literal
+        $type_name:ident, $anytag_variant:ident($category:ident/$category_ref:ident :: $category_variant:ident)
+        $(, $new:ident)?
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+        pub(crate) struct $type_name(FullName);
+
+        impl $type_name {
+            pub fn with_added_prefix(self, prefix: &str) -> Self {
+                Self(self.0.with_added_prefix(prefix))
+            }
+        }
+
+        impl From<$type_name> for $category {
+            fn from(source: $type_name) -> Self {
+                Self::$category_variant(source)
+            }
+        }
+
+        impl From<$type_name> for AnyTag {
+            fn from(source: $type_name) -> Self {
+                Self::$anytag_variant($category::from(source))
+            }
+        }
+
+        impl<'a> From<&'a $type_name> for $category_ref<'a> {
+            fn from(source: &'a $type_name) -> Self {
+                Self::$category_variant(source)
+            }
+        }
+
+        impl<'a> From<&'a $type_name> for AnyTagRef<'a> {
+            fn from(source: &'a $type_name) -> Self {
+                Self::$anytag_variant($category_ref::from(source))
+            }
+        }
+
+        impl Display for $type_name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+                write!(f, $display, self.0)
+            }
+        }
+
+        define_tag_type!(@maybe_new $type_name $(, $new)?);
+    };
+
+    (@maybe_new $type_name:ident, new) => {
+        impl $type_name {
+            pub fn new(name: &str) -> Self {
+                Self(FullName::new(name))
+            }
+        }
+    };
+
+    (@maybe_new $type_name:ident) => {};
+}
+
+define_tag_type!(
+    /// A locally computed value coming from an explicit computation/verification node
+    /// (not from serialization/deserialization).
+    /// The name of the tag will come from what the user provided when creating the node.
+    /// The contents are of some user type.
+    "{0}"
+    ComputedScalarTag, Scalar(ScalarTag/ScalarTagRef::Computed), new
+);
+
+define_tag_type!(
+    /// Two merged scalar values; can contain either one or both of them.
+    "merged({0})"
+    MergedScalarTag, Scalar(ScalarTag/ScalarTagRef::Merged), new
+);
+
+define_tag_type!(
+    /// Scalar argument to a protocol.
+    "arg({0})"
+    ScalarArgumentTag, Scalar(ScalarTag/ScalarTagRef::Argument), new
+);
+
+define_tag_type!(
+    /// A locally computed value coming from an explicit computation/verification node
+    /// (not from serialization/deserialization).
+    /// The name of the tag will come from what the user provided when creating the node.
+    /// The contents are of some user type.
+    "{0}"
+    ComputedMappingTag, Mapping(MappingTag/MappingTagRef::Computed), new
+);
+
+define_tag_type!(
+    /// A marker indicating that a value was broadcasted.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents of the value are `()`.
+    "sent-bc({0})"
+    SentBCTag, Scalar(ScalarTag/ScalarTagRef::Sent)
+);
+
+define_tag_type!(
+    /// A marker indicating that a value was sent out.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents of the value are `()`.
+    "sent-dm({0})"
+    SentDMTag, Mapping(MappingTag/MappingTagRef::Sent)
+);
+
+define_tag_type!(
+    /// A value deserialized from a message received from another node.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents are of some user type.
+    "received({0})"
+    ReceivedTag, Mapping(MappingTag/MappingTagRef::Received)
+);
+
+define_tag_type!(
+    /// A signed broadcast value + metadata originating from this node.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents are `SignedValue`.
+    "signed-bc-local({0})"
+    LocalSignedBCTag, Scalar(ScalarTag/ScalarTagRef::LocalSigned), new
+);
+
+define_tag_type!(
+    /// A signed direct message value + metadata originating from this node.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents are `SignedValue`.
+    "signed-dm-local({0})"
+    LocalSignedDMTag, Mapping(MappingTag/MappingTagRef::LocalSigned), new
+);
+
+define_tag_type!(
+    /// A signed value + metadata originating from another node.
+    /// The name of the tag will come from the protocol message name.
+    /// The contents are `SignedValue`.
+    "signed-remote({0})"
+    RemoteSignedTag, Mapping(MappingTag/MappingTagRef::RemoteSigned), new
+);
 
 impl ComputedScalarTag {
-    pub fn new(name: &str) -> Self {
-        Self(FullName::new(name))
+    #[cfg(feature = "dev")]
+    pub fn new_with_full_name(full_name: FullName) -> Self {
+        Self(full_name)
     }
+}
 
+impl ComputedMappingTag {
+    #[cfg(feature = "dev")]
+    pub fn new_with_full_name(full_name: FullName) -> Self {
+        Self(full_name)
+    }
+}
+
+impl SentDMTag {
+    pub fn to_collected(&self) -> CollectedTag {
+        CollectedTag::new(MappingTag::from(self.clone()), None)
+    }
+}
+
+impl LocalSignedBCTag {
     #[cfg(feature = "dev")]
     pub fn new_with_full_name(full_name: FullName) -> Self {
         Self(full_name)
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+    pub fn to_broadcast_message_sent(&self) -> SentBCTag {
+        SentBCTag(self.0.clone())
     }
 }
 
-/// Two merged scalar values; can contain either one or both of them.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("merged({0})")]
-pub(crate) struct MergedScalarTag(FullName);
-
-impl MergedScalarTag {
-    pub fn new(name: &str) -> Self {
-        Self(FullName::new(name))
+impl LocalSignedDMTag {
+    #[cfg(feature = "dev")]
+    pub fn new_with_full_name(full_name: FullName) -> Self {
+        Self(full_name)
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+    pub fn to_direct_message_sent(&self) -> SentDMTag {
+        SentDMTag(self.0.clone())
     }
 }
 
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("arg({0})")]
-pub(crate) struct ScalarArgumentTag(FullName);
-
-impl ScalarArgumentTag {
-    pub fn new(name: &str) -> Self {
-        Self(FullName::new(name))
+impl RemoteSignedTag {
+    pub fn new_with_full_name(full_name: &FullName) -> Self {
+        Self(full_name.clone())
     }
 
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+    pub fn to_received(&self) -> ReceivedTag {
+        ReceivedTag(self.0.clone())
     }
 }
 
@@ -145,150 +284,30 @@ impl CollectedTag {
     }
 }
 
-/// A locally computed value coming from an explicit computation/verification node
-/// (not from serialization/deserialization).
-/// The name of the tag will come from what the user provided when creating the node.
-/// The contents are of some user type.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("{0}")]
-pub(crate) struct ComputedMappingTag(FullName);
-
-impl ComputedMappingTag {
-    pub fn new(name: &str) -> Self {
-        Self(FullName::new(name))
-    }
-
-    #[cfg(feature = "dev")]
-    pub fn new_with_full_name(full_name: FullName) -> Self {
-        Self(full_name)
-    }
-
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+impl From<CollectedTag> for ScalarTag {
+    fn from(source: CollectedTag) -> Self {
+        Self::Collected(source)
     }
 }
 
-/// A marker indicating that a value was broadcasted.
-/// The name of the tag will come from the protocol message name.
-/// The contents of the value are `()`.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("sent-bc({0})")]
-pub(crate) struct SentBCTag(FullName);
-
-impl SentBCTag {
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+impl From<CollectedTag> for AnyTag {
+    fn from(source: CollectedTag) -> Self {
+        Self::Scalar(ScalarTag::from(source))
     }
 }
 
-/// A marker indicating that a value was sent out.
-/// The name of the tag will come from the protocol message name.
-/// The contents of the value are `()`.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("sent-dm({0})")]
-pub(crate) struct SentDMTag(FullName);
-
-impl SentDMTag {
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
-    }
-
-    pub fn to_collected(&self) -> CollectedTag {
-        CollectedTag::new(MappingTag::Sent(self.clone()), None)
+impl<'a> From<&'a CollectedTag> for ScalarTagRef<'a> {
+    fn from(source: &'a CollectedTag) -> Self {
+        Self::Collected(source)
     }
 }
 
-/// A value deserialized from a message received from another node.
-/// The name of the tag will come from the protocol message name.
-/// The contents are of some user type.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("received-bc({0})")]
-pub(crate) struct ReceivedTag(FullName);
-
-impl ReceivedTag {
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
+impl<'a> From<&'a CollectedTag> for AnyTagRef<'a> {
+    fn from(source: &'a CollectedTag) -> Self {
+        Self::Scalar(ScalarTagRef::from(source))
     }
 }
 
-/// A signed broadcast value + metadata originating from this node.
-/// The name of the tag will come from the protocol message name.
-/// The contents are `SignedValue`.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("signed-bc-local({0})")]
-pub(crate) struct LocalSignedBCTag(FullName);
-
-impl LocalSignedBCTag {
-    pub fn new(name: &str) -> Self {
-        Self(FullName::new(name))
-    }
-
-    #[cfg(feature = "dev")]
-    pub fn new_with_full_name(full_name: FullName) -> Self {
-        Self(full_name)
-    }
-
-    pub fn to_broadcast_message_sent(&self) -> SentBCTag {
-        SentBCTag(self.0.clone())
-    }
-
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
-    }
-}
-
-/// A signed direct message value + metadata originating from this node.
-/// The name of the tag will come from the protocol message name.
-/// The contents are `SignedValue`.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("signed-dm-local({0})")]
-pub(crate) struct LocalSignedDMTag(FullName);
-
-impl LocalSignedDMTag {
-    pub fn new(name: &str) -> Self {
-        Self(FullName::new(name))
-    }
-
-    #[cfg(feature = "dev")]
-    pub fn new_with_full_name(full_name: FullName) -> Self {
-        Self(full_name)
-    }
-
-    pub fn to_direct_message_sent(&self) -> SentDMTag {
-        SentDMTag(self.0.clone())
-    }
-
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
-    }
-}
-
-/// A signed value + metadata originating from another node.
-/// The name of the tag will come from the protocol message name.
-/// The contents are `SignedValue`.
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[displaydoc("signed-remote({0})")]
-pub(crate) struct RemoteSignedTag(FullName);
-
-impl RemoteSignedTag {
-    pub fn new(name: &str) -> Self {
-        Self(FullName::new(name))
-    }
-
-    pub fn new_with_full_name(full_name: &FullName) -> Self {
-        Self(full_name.clone())
-    }
-
-    pub fn to_received(&self) -> ReceivedTag {
-        ReceivedTag(self.0.clone())
-    }
-
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        Self(self.0.with_added_prefix(prefix))
-    }
-}
-
-// TODO: isn't it more of "scalar dependency tag"?
 #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) enum ScalarTag {
     #[displaydoc("{0}")]

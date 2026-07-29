@@ -106,15 +106,21 @@ impl<T> Node<T> {
     pub(crate) fn without_dependencies<SP>(self) -> Self
     where
         SP: SessionParameters,
-        T: HasDependencies<SP>,
+        T: ShallowClone + SpecificNode<SP>,
     {
-        self.mutated(sealed::HasDependenciesInner::without_dependencies)
+        self.mutated(SpecificNode::without_dependencies)
     }
 }
 
 pub(crate) type NodeId = usize;
 
 pub(crate) trait SpecificNode<SP: SessionParameters>: Sized {
+    fn dependencies(&self) -> &[Dependency<SP>];
+
+    fn without_dependencies(self) -> Self;
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>>;
+
     fn with_added_prefix(self, prefix: &str) -> Self;
 
     fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError>;
@@ -135,8 +141,6 @@ mod sealed {
 
     pub trait HasDependenciesInner<SP: SessionParameters>: ShallowClone {
         fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self;
-
-        fn without_dependencies(self) -> Self;
     }
 }
 
@@ -210,6 +214,20 @@ impl<SP: SessionParameters> ShallowClone for ComputeScalar<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for ComputeScalar<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        arg_map_to_any_iter(&self.args)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -236,12 +254,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for ComputeScalar<S
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -278,6 +290,20 @@ impl<SP: SessionParameters> ShallowClone for Collect<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for Collect<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.values)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -305,12 +331,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Collect<SP> {
         node.dependencies.push(dependency);
         node
     }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
-        node
-    }
 }
 
 /// A node that collects virtual values corresponding to sent direct messages into a scalar value.
@@ -335,6 +355,20 @@ impl<SP: SessionParameters> ShallowClone for SendAll<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SendAll<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.values)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -360,12 +394,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendAll<SP> {
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -447,6 +475,29 @@ impl<SP: SessionParameters> ShallowClone for ComputeMapping<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for ComputeMapping<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self.shallow_clone();
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        // TODO: can it be done without boxing?
+        let iter: Box<dyn Iterator<Item = AnyNode<SP>>> = match &self.kind {
+            ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
+                Box::new(arg_map_to_any_iter(&self.args))
+            }
+            ComputeMappingKind::WithReveal { verification_args, .. } => {
+                Box::new(arg_map_to_any_iter(&self.args).chain(arg_map_to_any_iter(verification_args)))
+            }
+        };
+        iter
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -473,12 +524,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for ComputeMapping<
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -519,6 +564,20 @@ impl<SP: SessionParameters> ShallowClone for SerializeAndSignBC<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignBC<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.data)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -545,12 +604,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSig
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -591,6 +644,20 @@ impl<SP: SessionParameters> ShallowClone for SerializeAndSignDM<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignDM<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.data)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -617,12 +684,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSig
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -663,6 +724,20 @@ impl<SP: SessionParameters> ShallowClone for DeserializeAndCheck<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for DeserializeAndCheck<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.data)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -689,12 +764,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for DeserializeAndC
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -729,6 +798,20 @@ impl<SP: SessionParameters> ShallowClone for SendDM<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SendDM<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self.shallow_clone();
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.data)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -754,12 +837,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendDM<SP> {
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -796,6 +873,20 @@ impl<SP: SessionParameters> ShallowClone for SendBC<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SendBC<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self.shallow_clone();
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.data)
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -821,12 +912,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendBC<SP> {
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self.shallow_clone();
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -861,6 +946,20 @@ impl<SP: SessionParameters> ShallowClone for Receive<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for Receive<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &self.dependencies
+    }
+
+    fn without_dependencies(self) -> Self {
+        let mut node = self;
+        node.dependencies = Vec::new();
+        node
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        core::iter::empty()
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -885,12 +984,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Receive<SP> {
         let mut node = self;
         let dependency = dependency.into();
         node.dependencies.push(dependency);
-        node
-    }
-
-    fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
         node
     }
 }
@@ -925,6 +1018,18 @@ impl<SP: SessionParameters> ShallowClone for ScalarArgument<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for ScalarArgument<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &[]
+    }
+
+    fn without_dependencies(self) -> Self {
+        self
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        core::iter::empty()
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -956,6 +1061,18 @@ impl<SP: SessionParameters> ShallowClone for MergeScalars<SP> {
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for MergeScalars<SP> {
+    fn dependencies(&self) -> &[Dependency<SP>] {
+        &[]
+    }
+
+    fn without_dependencies(self) -> Self {
+        self
+    }
+
+    fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
+        one_arg_to_any_iter(&self.left).chain(one_arg_to_any_iter(&self.right))
+    }
+
     fn with_added_prefix(self, prefix: &str) -> Self {
         let mut node = self;
         node.store_in = node.store_in.with_added_prefix(prefix);
@@ -1173,6 +1290,24 @@ impl<SP: SessionParameters> Display for MergeScalars<SP> {
             self.right.store_in()
         )
     }
+}
+
+fn one_arg_to_any_iter<SP, N>(arg: &N) -> impl Iterator<Item = AnyNode<SP>>
+where
+    SP: SessionParameters,
+    N: GeneralizedNode,
+    AnyNode<SP>: From<N>,
+{
+    core::iter::once(AnyNode::from(arg.get_strong_ref()))
+}
+
+fn arg_map_to_any_iter<SP, N>(args: &BTreeMap<String, N>) -> impl Iterator<Item = AnyNode<SP>>
+where
+    SP: SessionParameters,
+    N: GeneralizedNode,
+    AnyNode<SP>: From<N>,
+{
+    args.values().map(|node| AnyNode::from(node.get_strong_ref()))
 }
 
 pub(crate) fn args_to_owned<T>(args: &BTreeMap<String, T>) -> BTreeMap<String, T>

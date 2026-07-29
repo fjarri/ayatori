@@ -14,14 +14,14 @@ use super::{
     typed_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
         GeneralizedNode, MergeScalars, Node, NodeId, Receive, ScalarArgument, SendAll, SendBC, SendDM,
-        SerializeAndSignBC, SerializeAndSignDM, args_to_owned,
+        SerializeAndSignBC, SerializeAndSignDM, SpecificNode, args_to_owned,
     },
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MappingTagRef, MaybeAttributableError,
-        RuntimeError, ScalarTagRef, SimpleMappingFunction, SimpleScalarFunction, ThresholdGroup, UnattributableError,
+        AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MaybeAttributableError, RuntimeError,
+        ScalarTagRef, SimpleMappingFunction, SimpleScalarFunction, ThresholdGroup, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     traced_error::TraceableResult,
@@ -63,6 +63,30 @@ macro_rules! define_any_node {
                     $(Self::$variant(node) => Self::$variant(node.with_added_prefix(prefix)),)+
                 }
             }
+
+            pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
+                match self {
+                    $(Self::$variant(node) => (&node.as_ref().store_in).into(),)+
+                }
+            }
+
+            pub(crate) fn dependencies(&self) -> &[Dependency<SP>] {
+                match self {
+                    $(Self::$variant(node) => node.as_ref().dependencies(),)+
+                }
+            }
+
+            fn without_dependencies(self) -> Self {
+                match self {
+                    $(Self::$variant(node) => Self::$variant(node.without_dependencies()),)+
+                }
+            }
+
+            pub(crate) fn args(&self) -> Box<dyn Iterator<Item = Self> + '_> {
+                match self {
+                    $(Self::$variant(node) => Box::new(node.as_ref().args()),)+
+                }
+            }
         }
 
         impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
@@ -86,6 +110,14 @@ macro_rules! define_any_node {
                 }
             }
         )+
+
+        impl<SP: SessionParameters> Display for AnyNode<SP> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+                match self {
+                    $(Self::$variant(node) =>  write!(f, "{node}"),)+
+                }
+            }
+        }
     };
 }
 
@@ -117,31 +149,6 @@ define_any_node! {
 }
 
 impl<SP: SessionParameters> AnyNode<SP> {
-    pub(crate) fn args(&self) -> Box<dyn Iterator<Item = Self> + '_> {
-        match self {
-            Self::ComputeScalar(node) => Box::new(arg_map_to_any_iter(&node.as_ref().args)),
-            Self::Collect(node) => Box::new(one_arg_to_any_iter(&node.as_ref().values)),
-            Self::SendAll(node) => Box::new(one_arg_to_any_iter(&node.as_ref().values)),
-            Self::ComputeMapping(node) => match &node.as_ref().kind {
-                ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
-                    Box::new(arg_map_to_any_iter(&node.as_ref().args))
-                }
-                ComputeMappingKind::WithReveal { verification_args, .. } => {
-                    Box::new(arg_map_to_any_iter(&node.as_ref().args).chain(arg_map_to_any_iter(verification_args)))
-                }
-            },
-            Self::SerializeAndSignBC(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
-            Self::SerializeAndSignDM(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
-            Self::DeserializeAndCheck(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
-            Self::SendDM(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
-            Self::SendBC(node) => Box::new(one_arg_to_any_iter(&node.as_ref().data)),
-            Self::Receive(_) | Self::ScalarArgument(_) => Box::new(core::iter::empty()),
-            Self::MergeScalars(node) => {
-                Box::new(one_arg_to_any_iter(&node.as_ref().left).chain(one_arg_to_any_iter(&node.as_ref().right)))
-            }
-        }
-    }
-
     pub(crate) fn args_and_dependencies(&self) -> Box<dyn Iterator<Item = Self> + '_> {
         Box::new(
             self.args().chain(
@@ -151,57 +158,6 @@ impl<SP: SessionParameters> AnyNode<SP> {
                     .map(Self::from),
             ),
         )
-    }
-
-    pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
-        match self {
-            Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
-            Self::Collect(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
-            Self::SendAll(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
-            Self::ComputeMapping(node) => AnyTagRef::Mapping(MappingTagRef::Computed(&node.as_ref().store_in)),
-            Self::SerializeAndSignBC(node) => AnyTagRef::Scalar(ScalarTagRef::LocalSigned(&node.as_ref().store_in)),
-            Self::SerializeAndSignDM(node) => AnyTagRef::Mapping(MappingTagRef::LocalSigned(&node.as_ref().store_in)),
-            Self::DeserializeAndCheck(node) => AnyTagRef::Mapping(MappingTagRef::Received(&node.as_ref().store_in)),
-            Self::SendDM(node) => AnyTagRef::Mapping(MappingTagRef::Sent(&node.as_ref().store_in)),
-            Self::SendBC(node) => AnyTagRef::Scalar(ScalarTagRef::Sent(&node.as_ref().store_in)),
-            Self::Receive(node) => AnyTagRef::Mapping(MappingTagRef::RemoteSigned(&node.as_ref().store_in)),
-            Self::ScalarArgument(node) => AnyTagRef::Scalar(ScalarTagRef::Argument(&node.as_ref().store_in)),
-            Self::MergeScalars(node) => AnyTagRef::Scalar(ScalarTagRef::Merged(&node.as_ref().store_in)),
-        }
-    }
-
-    pub(crate) fn dependencies(&self) -> &[Dependency<SP>] {
-        match self {
-            Self::ComputeScalar(node) => &node.as_ref().dependencies,
-            Self::Collect(node) => &node.as_ref().dependencies,
-            Self::SendAll(node) => &node.as_ref().dependencies,
-            Self::ComputeMapping(node) => &node.as_ref().dependencies,
-            Self::SerializeAndSignBC(node) => &node.as_ref().dependencies,
-            Self::SerializeAndSignDM(node) => &node.as_ref().dependencies,
-            Self::DeserializeAndCheck(node) => &node.as_ref().dependencies,
-            Self::SendDM(node) => &node.as_ref().dependencies,
-            Self::SendBC(node) => &node.as_ref().dependencies,
-            Self::Receive(node) => &node.as_ref().dependencies,
-            Self::ScalarArgument(_node) => &[],
-            Self::MergeScalars(_node) => &[],
-        }
-    }
-
-    fn without_dependencies(self) -> Self {
-        match self {
-            Self::ComputeScalar(node) => Self::ComputeScalar(node.without_dependencies()),
-            Self::Collect(node) => Self::Collect(node.without_dependencies()),
-            Self::SendAll(node) => Self::SendAll(node.without_dependencies()),
-            Self::ComputeMapping(node) => Self::ComputeMapping(node.without_dependencies()),
-            Self::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node.without_dependencies()),
-            Self::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node.without_dependencies()),
-            Self::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node.without_dependencies()),
-            Self::SendDM(node) => Self::SendDM(node.without_dependencies()),
-            Self::SendBC(node) => Self::SendBC(node.without_dependencies()),
-            Self::Receive(node) => Self::Receive(node.without_dependencies()),
-            Self::ScalarArgument(node) => Self::ScalarArgument(node), // Does not have dependencies
-            Self::MergeScalars(node) => Self::MergeScalars(node),
-        }
     }
 
     /// Pretty prints the node tree.
@@ -562,24 +518,6 @@ impl<SP: SessionParameters> From<OutputNode<SP>> for AnyNode<SP> {
     }
 }
 
-fn arg_map_to_any_iter<SP, N>(args: &BTreeMap<String, N>) -> impl Iterator<Item = AnyNode<SP>>
-where
-    SP: SessionParameters,
-    N: GeneralizedNode,
-    AnyNode<SP>: From<N>,
-{
-    args.values().map(|node| AnyNode::from(node.get_strong_ref()))
-}
-
-fn one_arg_to_any_iter<SP, N>(arg: &N) -> impl Iterator<Item = AnyNode<SP>>
-where
-    SP: SessionParameters,
-    N: GeneralizedNode,
-    AnyNode<SP>: From<N>,
-{
-    core::iter::once(AnyNode::from(arg.get_strong_ref()))
-}
-
 /// Iterates over the node subtree in unspecified order.
 ///
 /// Guaranteed to only emit each node once.
@@ -682,24 +620,5 @@ impl<SP: SessionParameters> Iterator for LeavesFirstIterator<SP> {
             self.queue.extend(unprocessed_children);
         }
         None
-    }
-}
-
-impl<SP: SessionParameters> Display for AnyNode<SP> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        match self {
-            Self::ComputeScalar(node) => write!(f, "{node}"),
-            Self::Collect(node) => write!(f, "{node}"),
-            Self::SendAll(node) => write!(f, "{node}"),
-            Self::ComputeMapping(node) => write!(f, "{node}"),
-            Self::SerializeAndSignBC(node) => write!(f, "{node}"),
-            Self::SerializeAndSignDM(node) => write!(f, "{node}"),
-            Self::DeserializeAndCheck(node) => write!(f, "{node}"),
-            Self::SendDM(node) => write!(f, "{node}"),
-            Self::SendBC(node) => write!(f, "{node}"),
-            Self::Receive(node) => write!(f, "{node}"),
-            Self::ScalarArgument(node) => write!(f, "{node}"),
-            Self::MergeScalars(node) => write!(f, "{node}"),
-        }
     }
 }

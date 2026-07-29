@@ -45,10 +45,10 @@ pub enum ComputeScalarArg<SP: SessionParameters> {
 impl<SP: SessionParameters> ComputeScalarArg<SP> {
     pub(crate) fn store_in(&self) -> ScalarTagRef<'_> {
         match self {
-            Self::ComputeScalar(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
-            Self::ScalarArgument(node) => ScalarTagRef::Argument(&node.as_ref().store_in),
-            Self::MergeScalars(node) => ScalarTagRef::Merged(&node.as_ref().store_in),
-            Self::Collect(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
+            Self::ComputeScalar(node) => (&node.as_ref().store_in).into(),
+            Self::ScalarArgument(node) => (&node.as_ref().store_in).into(),
+            Self::MergeScalars(node) => (&node.as_ref().store_in).into(),
+            Self::Collect(node) => (&node.as_ref().store_in).into(),
         }
     }
 }
@@ -151,14 +151,14 @@ pub enum ComputeMappingArg<SP: SessionParameters> {
 impl<SP: SessionParameters> ComputeMappingArg<SP> {
     pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
         match self {
-            Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
-            Self::MergeScalars(node) => AnyTagRef::Scalar(ScalarTagRef::Merged(&node.as_ref().store_in)),
-            Self::ScalarArgument(node) => AnyTagRef::Scalar(ScalarTagRef::Argument(&node.as_ref().store_in)),
-            Self::Collect(node) => AnyTagRef::Scalar(ScalarTagRef::Collected(&node.as_ref().store_in)),
-            Self::ComputeMapping(node) => AnyTagRef::Mapping(MappingTagRef::Computed(&node.as_ref().store_in)),
-            Self::SerializeAndSignBC(node) => AnyTagRef::Scalar(ScalarTagRef::LocalSigned(&node.as_ref().store_in)),
-            Self::SerializeAndSignDM(node) => AnyTagRef::Mapping(MappingTagRef::LocalSigned(&node.as_ref().store_in)),
-            Self::DeserializeAndCheck(node) => AnyTagRef::Mapping(MappingTagRef::Received(&node.as_ref().store_in)),
+            Self::ComputeScalar(node) => (&node.as_ref().store_in).into(),
+            Self::MergeScalars(node) => (&node.as_ref().store_in).into(),
+            Self::ScalarArgument(node) => (&node.as_ref().store_in).into(),
+            Self::Collect(node) => (&node.as_ref().store_in).into(),
+            Self::ComputeMapping(node) => (&node.as_ref().store_in).into(),
+            Self::SerializeAndSignBC(node) => (&node.as_ref().store_in).into(),
+            Self::SerializeAndSignDM(node) => (&node.as_ref().store_in).into(),
+            Self::DeserializeAndCheck(node) => (&node.as_ref().store_in).into(),
         }
     }
 }
@@ -267,10 +267,10 @@ pub enum CollectArg<SP: SessionParameters> {
 impl<SP: SessionParameters> CollectArg<SP> {
     pub(crate) fn store_in(&self) -> MappingTagRef<'_> {
         match self {
-            Self::ComputeMapping(node) => MappingTagRef::Computed(&node.as_ref().store_in),
-            Self::SerializeAndSign(node) => MappingTagRef::LocalSigned(&node.as_ref().store_in),
-            Self::DeserializeAndCheck(node) => MappingTagRef::Received(&node.as_ref().store_in),
-            Self::Receive(node) => MappingTagRef::RemoteSigned(&node.as_ref().store_in),
+            Self::ComputeMapping(node) => (&node.as_ref().store_in).into(),
+            Self::SerializeAndSign(node) => (&node.as_ref().store_in).into(),
+            Self::DeserializeAndCheck(node) => (&node.as_ref().store_in).into(),
+            Self::Receive(node) => (&node.as_ref().store_in).into(),
         }
     }
 }
@@ -345,8 +345,8 @@ pub enum BroadcastArg<SP: SessionParameters> {
 impl<SP: SessionParameters> BroadcastArg<SP> {
     pub(crate) fn store_in(&self) -> ScalarTagRef<'_> {
         match self {
-            Self::ComputeScalar(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
-            Self::ScalarArgument(node) => ScalarTagRef::Argument(&node.as_ref().store_in),
+            Self::ComputeScalar(node) => (&node.as_ref().store_in).into(),
+            Self::ScalarArgument(node) => (&node.as_ref().store_in).into(),
         }
     }
 }
@@ -408,10 +408,10 @@ pub enum DirectMessageArg<SP: SessionParameters> {
 impl<SP: SessionParameters> DirectMessageArg<SP> {
     pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
         match self {
-            Self::ComputeScalar(node) => AnyTagRef::Scalar(ScalarTagRef::Computed(&node.as_ref().store_in)),
-            Self::ScalarArgument(node) => AnyTagRef::Scalar(ScalarTagRef::Argument(&node.as_ref().store_in)),
-            Self::ComputeMapping(node) => AnyTagRef::Mapping(MappingTagRef::Computed(&node.as_ref().store_in)),
-            Self::DeserializeAndCheck(node) => AnyTagRef::Mapping(MappingTagRef::Received(&node.as_ref().store_in)),
+            Self::ComputeScalar(node) => (&node.as_ref().store_in).into(),
+            Self::ScalarArgument(node) => (&node.as_ref().store_in).into(),
+            Self::ComputeMapping(node) => (&node.as_ref().store_in).into(),
+            Self::DeserializeAndCheck(node) => (&node.as_ref().store_in).into(),
         }
     }
 }
@@ -530,11 +530,11 @@ pub enum Dependency<SP: SessionParameters> {
 impl<SP: SessionParameters> Dependency<SP> {
     pub(crate) fn store_in(&self) -> ScalarTagRef<'_> {
         match self {
-            Self::ComputeScalar(node) => ScalarTagRef::Computed(&node.as_ref().store_in),
-            Self::Collect(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
-            Self::MergeScalars(node) => ScalarTagRef::Merged(&node.as_ref().store_in),
-            Self::SendBC(node) => ScalarTagRef::Sent(&node.as_ref().store_in),
-            Self::SendAll(node) => ScalarTagRef::Collected(&node.as_ref().store_in),
+            Self::ComputeScalar(node) => (&node.as_ref().store_in).into(),
+            Self::Collect(node) => (&node.as_ref().store_in).into(),
+            Self::MergeScalars(node) => (&node.as_ref().store_in).into(),
+            Self::SendBC(node) => (&node.as_ref().store_in).into(),
+            Self::SendAll(node) => (&node.as_ref().store_in).into(),
         }
     }
 }
