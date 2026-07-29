@@ -486,16 +486,11 @@ impl<SP: SessionParameters> SpecificNode<SP> for ComputeMapping<SP> {
     }
 
     fn args(&self) -> impl Iterator<Item = AnyNode<SP>> {
-        // TODO: can it be done without boxing?
-        let iter: Box<dyn Iterator<Item = AnyNode<SP>>> = match &self.kind {
-            ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => {
-                Box::new(arg_map_to_any_iter(&self.args))
-            }
-            ComputeMappingKind::WithReveal { verification_args, .. } => {
-                Box::new(arg_map_to_any_iter(&self.args).chain(arg_map_to_any_iter(verification_args)))
-            }
+        let more_args = match &self.kind {
+            ComputeMappingKind::Simple { .. } | ComputeMappingKind::ThirdPartyAttributable { .. } => None,
+            ComputeMappingKind::WithReveal { verification_args, .. } => Some(verification_args),
         };
-        iter
+        arg_map_to_any_iter(&self.args).chain(more_args.into_iter().flat_map(arg_map_to_any_iter))
     }
 
     fn with_added_prefix(self, prefix: &str) -> Self {
