@@ -20,8 +20,8 @@ use super::{
 };
 use crate::{
     entities::{
-        AnyTagRef, AssociatedData, EvidenceVerdict, FullName, MappingTag, MaybeAttributableError, RuntimeError,
-        ScalarTagRef, SimpleMappingFunction, SimpleScalarFunction, ThresholdGroup, UnattributableError,
+        AnyTagRef, AssociatedData, ComputedScalarTag, EvidenceVerdict, FullName, MappingTag, MaybeAttributableError,
+        RuntimeError, SimpleMappingFunction, SimpleScalarFunction, ThresholdGroup, UnattributableError,
         UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     traced_error::TraceableResult,
@@ -357,7 +357,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         // But we cannot just assign a random name to it since there will always be a possiblity of a clash.
         // So we take the original root name (which is guaranteed to not be present in the subtree,
         // because we cannot build a reproduction subtree for a scalar node), and use it for the new root.
-        let AnyTagRef::Scalar(ScalarTagRef::Computed(original_output_tag)) = self.store_in() else {
+        let Ok(original_output_tag) = ComputedScalarTag::try_from(self.store_in().to_owned()) else {
             return Err(RuntimeError::new(
                 "Expected the root node to have a `ComputedScalar` tag",
             ));
@@ -365,7 +365,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
         let arg_name = "value";
         let guilty_party = guilty_party.clone();
         let wrapped = OutputNode::ComputeScalar(Node::new(ComputeScalar {
-            store_in: original_output_tag.clone(),
+            store_in: original_output_tag,
             kind: ComputeScalarKind::Simple {
                 function: SimpleScalarFunction::Unattributable(UnattributableScalarFunction::new_with_name(
                     "<evidence_verification_output>",

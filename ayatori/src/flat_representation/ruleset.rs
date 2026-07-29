@@ -207,11 +207,15 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
         self.0.entry(tag.to_owned()).or_default().extend(ids);
     }
 
-    fn get(&self, tag: MappingTagRef<'_>) -> Result<&BTreeSet<SP::Verifier>, RuntimeError> {
+    fn get(&self, tag: &(impl Display + Clone + Into<MappingTag>)) -> Result<&BTreeSet<SP::Verifier>, RuntimeError> {
+        // Unfortunately `get()` requires something which the key can be `Borrow`ed as,
+        // and it's impossible to implement a custom reference type without `unsafe` transmutations.
+        // So we have to clone the tag here.
+        let mapping_tag = tag.clone().into();
         // This is an internal method which we only call in the places where by construction it cannot fail
         // (in `Self::new()`, because of the order in which we process nodes;
         // in `Ruleset::new()`, because we call it for the nodes of the tree that was used to create `Self`).
-        self.0.get(&tag.to_owned()).ok_or_else(|| {
+        self.0.get(&mapping_tag).ok_or_else(|| {
             RuntimeError::new(format!(
                 "Expected the node {tag} to be present in the propagated groups"
             ))
@@ -230,7 +234,7 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                 | AnyNode::SendBC(_)
                 | AnyNode::Receive(_) => {}
                 AnyNode::ComputeMapping(node) => {
-                    let ids = result.get(MappingTagRef::Computed(&node.as_ref().store_in))?.clone();
+                    let ids = result.get(&node.as_ref().store_in)?.clone();
                     for arg in node.as_ref().args.values() {
                         if let AnyTagRef::Mapping(tag) = arg.store_in() {
                             result.insert(tag, ids.clone());
@@ -249,17 +253,17 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
                     }
                 }
                 AnyNode::SerializeAndSignDM(node) => {
-                    let ids = result.get(MappingTagRef::LocalSigned(&node.as_ref().store_in))?.clone();
+                    let ids = result.get(&node.as_ref().store_in)?.clone();
                     if let AnyTagRef::Mapping(tag) = node.as_ref().data.store_in() {
                         result.insert(tag, ids);
                     }
                 }
                 AnyNode::DeserializeAndCheck(node) => {
-                    let ids = result.get(MappingTagRef::Received(&node.as_ref().store_in))?.clone();
+                    let ids = result.get(&node.as_ref().store_in)?.clone();
                     result.insert(MappingTagRef::RemoteSigned(&node.as_ref().data.as_ref().store_in), ids);
                 }
                 AnyNode::SendDM(node) => {
-                    let ids = result.get(MappingTagRef::Sent(&node.as_ref().store_in))?.clone();
+                    let ids = result.get(&node.as_ref().store_in)?.clone();
                     result.insert(MappingTagRef::LocalSigned(&node.as_ref().data.as_ref().store_in), ids);
                 }
                 AnyNode::Collect(node) => {
@@ -355,7 +359,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 AnyNode::ComputeMapping(node) => {
                     let on_error = get_on_error(&node, private_inputs);
                     let node = node.as_ref();
-                    let possible_ids = propagated_groups.get(MappingTagRef::Computed(&node.store_in))?;
+                    let possible_ids = propagated_groups.get(&node.store_in)?;
 
                     let scalar_condition = ScalarCondition::from_compute_mapping(node);
                     let element_condition = ElementCondition::from_compute_mapping(node);
@@ -410,7 +414,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 }
                 AnyNode::SerializeAndSignDM(node) => {
                     let node = node.as_ref();
-                    let possible_ids = propagated_groups.get(MappingTagRef::LocalSigned(&node.store_in))?;
+                    let possible_ids = propagated_groups.get(&node.store_in)?;
 
                     let scalar_condition = ScalarCondition::from_serialize_and_sign_dm(node);
                     let element_condition = ElementCondition::from_serialize_and_sign(node);
@@ -431,7 +435,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 AnyNode::DeserializeAndCheck(node) => {
                     let on_error = get_on_error(&node, private_inputs);
                     let node = node.as_ref();
-                    let possible_ids = propagated_groups.get(MappingTagRef::Received(&node.store_in))?;
+                    let possible_ids = propagated_groups.get(&node.store_in)?;
 
                     let element_condition = ElementCondition::from_deserialize_and_check(node);
 
@@ -470,7 +474,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 }
                 AnyNode::SendDM(node) => {
                     let node = node.as_ref();
-                    let possible_ids = propagated_groups.get(MappingTagRef::Sent(&node.store_in))?;
+                    let possible_ids = propagated_groups.get(&node.store_in)?;
 
                     let element_condition = ElementCondition::from_direct_message(node);
 
@@ -503,7 +507,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 }
                 AnyNode::Receive(node) => {
                     let node = node.as_ref();
-                    let possible_ids = propagated_groups.get(MappingTagRef::RemoteSigned(&node.store_in))?;
+                    let possible_ids = propagated_groups.get(&node.store_in)?;
                     expected_messages.insert(node.message_name.clone(), possible_ids.clone());
                 }
                 AnyNode::MergeScalars(node) => {
