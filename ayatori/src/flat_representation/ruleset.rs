@@ -311,7 +311,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 }
                 AnyNode::ComputeScalar(node) => {
                     let node = node.as_ref();
-                    let scalar_condition = ScalarCondition::from_compute_scalar(node);
+                    let scalar_condition = ScalarConditionWithState::new(ScalarCondition::from_compute_scalar(node));
 
                     let function = node.function();
 
@@ -326,7 +326,7 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        scalar_condition,
                         kind: ScalarRuleKind::Compute {
                             store_in: node.store_in.clone(),
                             function,
@@ -339,8 +339,9 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let node = node.as_ref();
                     let possible_ids = propagated_groups.get(&node.store_in)?;
 
-                    let scalar_condition = ScalarCondition::from_compute_mapping(node);
-                    let element_condition = ElementCondition::from_compute_mapping(node);
+                    let scalar_condition = ScalarConditionWithState::new(ScalarCondition::from_compute_mapping(node));
+                    let element_condition =
+                        ElementConditionWithState::new(ElementCondition::from_compute_mapping(node), possible_ids);
 
                     let function = node.function();
 
@@ -355,8 +356,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
-                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
+                        scalar_condition,
+                        element_condition,
                         kind: MappingRuleKind::Compute {
                             store_in: node.store_in.clone(),
                             function,
@@ -368,11 +369,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 AnyNode::SerializeAndSignBC(node) => {
                     let node = node.as_ref();
 
-                    let scalar_condition = ScalarCondition::from_serialize_and_sign_bc(node);
+                    let scalar_condition =
+                        ScalarConditionWithState::new(ScalarCondition::from_serialize_and_sign_bc(node));
 
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        scalar_condition,
                         kind: ScalarRuleKind::SerializeAndSign {
                             store_in: node.store_in.clone(),
                             function: node.function.clone(),
@@ -386,13 +388,15 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let node = node.as_ref();
                     let possible_ids = propagated_groups.get(&node.store_in)?;
 
-                    let scalar_condition = ScalarCondition::from_serialize_and_sign_dm(node);
-                    let element_condition = ElementCondition::from_serialize_and_sign(node);
+                    let scalar_condition =
+                        ScalarConditionWithState::new(ScalarCondition::from_serialize_and_sign_dm(node));
+                    let element_condition =
+                        ElementConditionWithState::new(ElementCondition::from_serialize_and_sign(node), possible_ids);
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
-                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
+                        scalar_condition,
+                        element_condition,
                         kind: MappingRuleKind::SerializeAndSign {
                             store_in: node.store_in.clone(),
                             function: node.function.clone(),
@@ -407,7 +411,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let node = node.as_ref();
                     let possible_ids = propagated_groups.get(&node.store_in)?;
 
-                    let element_condition = ElementCondition::from_deserialize_and_check(node);
+                    let scalar_condition = ScalarConditionWithState::new(ScalarCondition::empty());
+                    let element_condition = ElementConditionWithState::new(
+                        ElementCondition::from_deserialize_and_check(node),
+                        possible_ids,
+                    );
 
                     // We expect the expected senders to be present because they are added by the `Receive` node,
                     // which is an argument to this node, so it would have been processed previously.
@@ -417,8 +425,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
                     mapping_rules.push(MappingRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(ScalarCondition::empty()),
-                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
+                        scalar_condition,
+                        element_condition,
                         kind: MappingRuleKind::Deserialize {
                             store_in: node.store_in.clone(),
                             function: node.function.clone(),
@@ -432,11 +440,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 AnyNode::SendBC(node) => {
                     let node = node.as_ref();
 
-                    let scalar_condition = ScalarCondition::from_broadcast_message(node);
+                    let scalar_condition = ScalarConditionWithState::new(ScalarCondition::from_broadcast_message(node));
 
                     send_bc_rules.push(SendBCRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        scalar_condition,
                         store_in: node.store_in.clone(),
                         to_send: node.data.as_ref().store_in.clone(),
                         destinations: node.destinations.clone(),
@@ -446,31 +454,32 @@ impl<SP: SessionParameters> Ruleset<SP> {
                     let node = node.as_ref();
                     let possible_ids = propagated_groups.get(&node.store_in)?;
 
-                    let element_condition = ElementCondition::from_direct_message(node);
+                    let element_condition =
+                        ElementConditionWithState::new(ElementCondition::from_direct_message(node), possible_ids);
 
                     send_dm_rules.push(SendDMRule {
                         dependencies_condition,
-                        element_condition: ElementConditionWithState::new(element_condition, possible_ids),
+                        element_condition,
                         store_in: node.store_in.clone(),
                         to_send: node.data.as_ref().store_in.clone(),
                     });
                 }
                 AnyNode::Collect(node) => {
                     let node = node.as_ref();
-                    let quorum_condition = QuorumCondition::from_collect(node);
+                    let quorum_condition = QuorumConditionWithState::new(QuorumCondition::from_collect(node));
                     collect_rules.push(CollectRule {
                         dependencies_condition,
-                        quorum_condition: QuorumConditionWithState::new(quorum_condition),
+                        quorum_condition,
                         store_in: node.store_in.clone(),
                         values: node.values.store_in().to_owned(),
                     });
                 }
                 AnyNode::SendAll(node) => {
                     let node = node.as_ref();
-                    let quorum_condition = QuorumCondition::from_send_all(node);
+                    let quorum_condition = QuorumConditionWithState::new(QuorumCondition::from_send_all(node));
                     collect_rules.push(CollectRule {
                         dependencies_condition,
-                        quorum_condition: QuorumConditionWithState::new(quorum_condition),
+                        quorum_condition,
                         store_in: node.store_in.clone(),
                         values: MappingTag::Sent(node.values.as_ref().store_in.clone()),
                     });
@@ -482,10 +491,10 @@ impl<SP: SessionParameters> Ruleset<SP> {
                 }
                 AnyNode::MergeScalars(node) => {
                     let node = node.as_ref();
-                    let scalar_condition = ScalarCondition::from_merged_scalar(node);
+                    let scalar_condition = ScalarConditionWithState::new(ScalarCondition::from_merged_scalar(node));
                     scalar_rules.push(ScalarRule {
                         dependencies_condition,
-                        scalar_condition: ScalarConditionWithState::new(scalar_condition),
+                        scalar_condition,
                         kind: ScalarRuleKind::Merge {
                             store_in: node.store_in.clone(),
                             left: node.left.store_in().to_owned(),
