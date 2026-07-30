@@ -291,7 +291,7 @@ impl Display for CollectedTag {
 }
 
 impl CollectedTag {
-    pub(crate) fn new(collected_from: MappingTag, disambiguator: Option<&str>) -> Self {
+    pub fn new(collected_from: MappingTag, disambiguator: Option<&str>) -> Self {
         Self {
             collected_from,
             disambiguator: disambiguator.map(String::from),

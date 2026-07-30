@@ -8,127 +8,90 @@ use super::{
     },
 };
 
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum ScalarTag {
-    #[displaydoc("{0}")]
-    Computed(ComputedScalarTag),
-    #[displaydoc("{0}")]
-    LocalSigned(LocalSignedBCTag),
-    #[displaydoc("{0}")]
-    Sent(SentBCTag),
-    #[displaydoc("{0}")]
-    Merged(MergedScalarTag),
-    #[displaydoc("{0}")]
-    Argument(ScalarArgumentTag),
-    #[displaydoc("{0}")]
-    Collected(CollectedTag),
-}
-
-impl ScalarTag {
-    pub fn as_ref(&self) -> ScalarTagRef<'_> {
-        match self {
-            Self::Computed(tag) => ScalarTagRef::Computed(tag),
-            Self::LocalSigned(tag) => ScalarTagRef::LocalSigned(tag),
-            Self::Sent(tag) => ScalarTagRef::Sent(tag),
-            Self::Merged(tag) => ScalarTagRef::Merged(tag),
-            Self::Argument(tag) => ScalarTagRef::Argument(tag),
-            Self::Collected(tag) => ScalarTagRef::Collected(tag),
+macro_rules! define_tag_union {
+    (
+        $union_name:ident
+        $union_ref_name:ident
+        {
+            $($variant:ident($tag_type:ident)),+ $(,)?
         }
-    }
-}
-
-#[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) enum MappingTag {
-    #[displaydoc("{0}")]
-    Computed(ComputedMappingTag),
-    #[displaydoc("{0}")]
-    Sent(SentDMTag),
-    #[displaydoc("{0}")]
-    Received(ReceivedTag),
-    #[displaydoc("{0}")]
-    LocalSigned(LocalSignedDMTag),
-    #[displaydoc("{0}")]
-    RemoteSigned(RemoteSignedTag),
-}
-
-impl MappingTag {
-    pub fn as_ref(&self) -> MappingTagRef<'_> {
-        match self {
-            Self::Computed(tag) => MappingTagRef::Computed(tag),
-            Self::Sent(tag) => MappingTagRef::Sent(tag),
-            Self::Received(tag) => MappingTagRef::Received(tag),
-            Self::LocalSigned(tag) => MappingTagRef::LocalSigned(tag),
-            Self::RemoteSigned(tag) => MappingTagRef::RemoteSigned(tag),
+        $($with_added_prefix:ident)?
+    ) => {
+        #[derive(displaydoc::Display, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+        pub(crate) enum $union_name {
+            $(
+                #[displaydoc("{0}")]
+                $variant($tag_type),
+            )+
         }
-    }
-}
 
-impl MappingTag {
-    pub fn with_added_prefix(self, prefix: &str) -> Self {
-        match self {
-            Self::Computed(tag) => Self::Computed(tag.with_added_prefix(prefix)),
-            Self::Sent(tag) => Self::Sent(tag.with_added_prefix(prefix)),
-            Self::Received(tag) => Self::Received(tag.with_added_prefix(prefix)),
-            Self::LocalSigned(tag) => Self::LocalSigned(tag.with_added_prefix(prefix)),
-            Self::RemoteSigned(tag) => Self::RemoteSigned(tag.with_added_prefix(prefix)),
+        impl $union_name {
+            pub fn as_ref(&self) -> $union_ref_name<'_> {
+                match self {
+                    $(Self::$variant(tag) => $union_ref_name::$variant(tag),)+
+                }
+            }
         }
-    }
-}
 
-#[derive(displaydoc::Display, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ScalarTagRef<'a> {
-    #[displaydoc("{0}")]
-    Computed(&'a ComputedScalarTag),
-    #[displaydoc("{0}")]
-    LocalSigned(&'a LocalSignedBCTag),
-    #[displaydoc("{0}")]
-    Sent(&'a SentBCTag),
-    #[displaydoc("{0}")]
-    Merged(&'a MergedScalarTag),
-    #[displaydoc("{0}")]
-    Argument(&'a ScalarArgumentTag),
-    #[displaydoc("{0}")]
-    Collected(&'a CollectedTag),
-}
+        define_tag_union!(@maybe_with_added_prefix $union_name $($variant),+ $($with_added_prefix)?);
 
-impl ScalarTagRef<'_> {
-    pub fn to_owned(self) -> ScalarTag {
-        match self {
-            Self::Computed(tag) => ScalarTag::Computed((*tag).clone()),
-            Self::LocalSigned(tag) => ScalarTag::LocalSigned((*tag).clone()),
-            Self::Sent(tag) => ScalarTag::Sent((*tag).clone()),
-            Self::Merged(tag) => ScalarTag::Merged((*tag).clone()),
-            Self::Argument(tag) => ScalarTag::Argument((*tag).clone()),
-            Self::Collected(tag) => ScalarTag::Collected((*tag).clone()),
+        #[derive(displaydoc::Display, Debug, Clone, Copy, PartialEq, Eq)]
+        pub(crate) enum $union_ref_name<'a> {
+            $(
+                #[displaydoc("{0}")]
+                $variant(&'a $tag_type),
+            )+
         }
-    }
+
+        impl $union_ref_name<'_> {
+            pub fn to_owned(self) -> $union_name {
+                match self {
+                    $(Self::$variant(tag) => $union_name::$variant((*tag).clone()),)+
+                }
+            }
+        }
+    };
+
+    (@maybe_with_added_prefix $union_name:ident $($variant:ident),+ with_added_prefix) => {
+        impl $union_name {
+            pub fn with_added_prefix(self, prefix: &str) -> Self {
+                match self {
+                    $(Self::$variant(tag) => Self::$variant(tag.with_added_prefix(prefix)),)+
+                }
+            }
+        }
+    };
+
+    (@maybe_with_added_prefix $union_name:ident $($variant:ident),+) => {};
 }
 
-#[derive(displaydoc::Display, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MappingTagRef<'a> {
-    #[displaydoc("{0}")]
-    Computed(&'a ComputedMappingTag),
-    #[displaydoc("{0}")]
-    Sent(&'a SentDMTag),
-    #[displaydoc("{0}")]
-    Received(&'a ReceivedTag),
-    #[displaydoc("{0}")]
-    LocalSigned(&'a LocalSignedDMTag),
-    #[displaydoc("{0}")]
-    RemoteSigned(&'a RemoteSignedTag),
-}
+define_tag_union!(
+    ScalarTag
+    ScalarTagRef
+    {
+        Computed(ComputedScalarTag),
+        LocalSigned(LocalSignedBCTag),
+        Sent(SentBCTag),
+        Merged(MergedScalarTag),
+        Argument(ScalarArgumentTag),
+        Collected(CollectedTag),
+    }
+);
+
+define_tag_union!(
+    MappingTag
+    MappingTagRef
+    {
+        Computed(ComputedMappingTag),
+        Sent(SentDMTag),
+        Received(ReceivedTag),
+        LocalSigned(LocalSignedDMTag),
+        RemoteSigned(RemoteSignedTag),
+    }
+    with_added_prefix
+);
 
 impl MappingTagRef<'_> {
-    pub fn to_owned(self) -> MappingTag {
-        match self {
-            Self::Computed(tag) => MappingTag::Computed((*tag).clone()),
-            Self::Sent(tag) => MappingTag::Sent((*tag).clone()),
-            Self::Received(tag) => MappingTag::Received((*tag).clone()),
-            Self::LocalSigned(tag) => MappingTag::LocalSigned((*tag).clone()),
-            Self::RemoteSigned(tag) => MappingTag::RemoteSigned((*tag).clone()),
-        }
-    }
-
     pub fn to_collected(self, disambiguator: Option<&str>) -> CollectedTag {
         CollectedTag::new(self.to_owned(), disambiguator)
     }
