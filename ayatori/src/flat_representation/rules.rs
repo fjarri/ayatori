@@ -74,8 +74,7 @@ pub(crate) enum Action<SP: SessionParameters> {
     Collect {
         store_in: CollectedTag,
         values: MappingTag,
-        // TODO: "sources"
-        indices: BTreeSet<SP::Verifier>,
+        sources: BTreeSet<SP::Verifier>,
     },
     MergeScalar {
         store_in: MergedScalarTag,
@@ -272,7 +271,7 @@ impl<SP: SessionParameters> CollectRule<SP> {
         Action::Collect {
             store_in: self.store_in,
             values: self.values,
-            indices: self.quorum_condition.available_ids(),
+            sources: self.quorum_condition.available_ids(),
         }
     }
 }

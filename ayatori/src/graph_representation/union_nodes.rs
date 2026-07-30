@@ -188,7 +188,6 @@ define_node_union!(
 );
 
 define_node_union!(
-    // TODO: disallow scalar arguments to direct messages?
     /// Possible arguments for outcoming direct messages.
     DirectMessageArg
     AnyTagRef<'_>

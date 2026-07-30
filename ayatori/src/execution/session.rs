@@ -485,12 +485,12 @@ where
                 Action::Collect {
                     store_in,
                     values,
-                    indices,
+                    sources,
                 } => {
                     self.add_scalar(
                         &ScalarTag::from(store_in.clone()),
                         self.storage
-                            .get_mapping_as_value(&values, &indices)
+                            .get_mapping_as_value(&values, &sources)
                             .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
                     )?;
                 }
