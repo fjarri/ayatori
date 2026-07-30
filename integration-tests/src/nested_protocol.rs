@@ -145,7 +145,7 @@ mod tests {
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
         let shared_data = Protocol1SharedData {
             p1: 1,
-            party_group: ThresholdGroup::new(&ids),
+            party_group: ThresholdGroup::new(&ids.iter().cloned().collect()),
         };
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);

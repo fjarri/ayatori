@@ -2,7 +2,6 @@ use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
     string::ToString,
-    vec::Vec,
 };
 use core::fmt::{self, Display};
 
@@ -183,9 +182,7 @@ impl<Id: PartyId> QuorumCondition<Id> {
     pub fn from_send_all<SP: SessionParameters<Verifier = Id>>(node: &SendAll<SP>) -> Self {
         Self {
             tag: node.values.as_ref().store_in.clone().into(),
-            group: Box::new(ThresholdGroup::new(
-                &node.destinations.iter().cloned().collect::<Vec<_>>(),
-            )),
+            group: Box::new(ThresholdGroup::new(&node.destinations)),
         }
     }
 

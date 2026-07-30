@@ -31,21 +31,16 @@ pub struct ThresholdGroup<Id: PartyId> {
 
 impl<Id: PartyId> ThresholdGroup<Id> {
     /// Creates a new group from party IDs.
-    ///
-    /// Repeating IDs are ignored.
-    // TODO: take a BTreeSet instead?
-    pub fn new(ids: &[Id]) -> Self {
-        let ids = ids.iter().cloned().collect::<BTreeSet<_>>();
-        let threshold = ids.len();
-        Self { ids, threshold }
+    #[must_use]
+    pub fn new(ids: &BTreeSet<Id>) -> Self {
+        Self::new_threshold(ids, ids.len())
     }
 
     /// Creates a new group from party IDs with a custom quorum threshold.
-    ///
-    /// Repeating IDs are ignored.
-    pub fn new_threshold(ids: &[Id], threshold: usize) -> Self {
+    #[must_use]
+    pub fn new_threshold(ids: &BTreeSet<Id>, threshold: usize) -> Self {
         Self {
-            ids: ids.iter().cloned().collect(),
+            ids: ids.clone(),
             threshold,
         }
     }

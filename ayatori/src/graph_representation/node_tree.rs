@@ -227,7 +227,7 @@ impl<SP: SessionParameters> AnyNode<SP> {
 
         // The output must be a scalar node, and `node` is a mapping node.
         // So we wrap it in a collect.
-        let collected = collect(node, &ThresholdGroup::new(core::slice::from_ref(guilty_party)));
+        let collected = collect(node, &ThresholdGroup::new(&BTreeSet::from([guilty_party.clone()])));
 
         // This is a bit of a hack.
         // To make the node tree suitable for a ruleset generation, the root node must be a scalar computation node.

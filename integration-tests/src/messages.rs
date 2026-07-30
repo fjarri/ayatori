@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
@@ -109,7 +109,7 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
 
         let mut ids = all_parties.ids().clone();
         ids.remove(party_build_data.id());
-        let my_z_group = ThresholdGroup::new(&ids.into_iter().collect::<Vec<_>>());
+        let my_z_group = ThresholdGroup::new(&ids);
         let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[]);
         let z_sent = direct_message(&message_z, &my_z);
         let z = receive(&message_z);
@@ -141,7 +141,7 @@ mod tests {
     fn happy_path() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = ThresholdGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids.iter().cloned().collect());
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();
