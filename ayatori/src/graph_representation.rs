@@ -5,7 +5,7 @@ mod typed_nodes;
 mod unions;
 
 pub(crate) use any_node::Reproducibility;
-pub(crate) use typed_nodes::{ComputeMappingKind, GeneralizedNode, SpecificNode};
+pub(crate) use typed_nodes::{ComputeMappingKind, GeneralizedNode};
 
 #[cfg(feature = "dev")]
 pub(crate) use typed_nodes::{ComputeScalarKind, ShallowClone};

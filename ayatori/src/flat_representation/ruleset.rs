@@ -15,11 +15,11 @@ use super::conditions::{
 use crate::{
     entities::{
         AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName,
-        LocalSignedBCTag, LocalSignedDMTag, MappingFunction, MappingTag, MappingTagRef, MergedScalarTag, ReceivedTag,
-        RemoteSignedTag, RuntimeError, ScalarArgumentTag, ScalarFunction, ScalarTag, SentBCTag, SentDMTag,
-        SerdeAdapter, SerializeAndSignBCFunction, SerializeAndSignDMFunction,
+        LocalSignedBCTag, LocalSignedDMTag, MappingFunction, MappingTag, MergedScalarTag, ReceivedTag, RemoteSignedTag,
+        RuntimeError, ScalarArgumentTag, ScalarFunction, ScalarTag, SentBCTag, SentDMTag, SerdeAdapter,
+        SerializeAndSignBCFunction, SerializeAndSignDMFunction,
     },
-    graph_representation::{AnyNode, GeneralizedNode, OutputNode, Reproducibility, SpecificNode},
+    graph_representation::{AnyNode, GeneralizedNode, OutputNode, Reproducibility},
     traits::SessionParameters,
 };
 
@@ -201,8 +201,8 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
         Self(BTreeMap::new())
     }
 
-    fn insert(&mut self, tag: MappingTagRef<'_>, ids: BTreeSet<SP::Verifier>) {
-        self.0.entry(tag.to_owned()).or_default().extend(ids);
+    fn insert(&mut self, tag: impl Into<MappingTag>, ids: &BTreeSet<SP::Verifier>) {
+        self.0.entry(tag.into()).or_default().extend(ids.iter().cloned());
     }
 
     fn get(&self, tag: &(impl Display + Clone + Into<MappingTag>)) -> Result<&BTreeSet<SP::Verifier>, RuntimeError> {
@@ -224,43 +224,39 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
         let mut result = Self::empty();
 
         for node in root.flattened_roots_first() {
-            match node {
+            match &node {
+                // Driver node (Collect) - collected values need to be calculated for each ID from the group.
+                AnyNode::Collect(node) => {
+                    let ids = node.as_ref().group.ids();
+                    let tag = node.as_ref().values.store_in().to_owned();
+                    result.insert(tag, ids);
+                }
+                // Driver node (SendAll) - sent values need to be calculated for each ID from the destinations.
+                AnyNode::SendAll(node) => {
+                    let ids = &node.as_ref().destinations;
+                    let tag = MappingTag::from(node.as_ref().values.as_ref().store_in.clone());
+                    result.insert(tag, ids);
+                }
+                // Driven nodes: if it's a mapping node, take the set of IDs it needs to be calculated for,
+                // and propagate it to the arguments.
                 AnyNode::ScalarArgument(_)
                 | AnyNode::MergeScalars(_)
                 | AnyNode::ComputeScalar(_)
                 | AnyNode::SerializeAndSignBC(_)
                 | AnyNode::SendBC(_)
-                | AnyNode::Receive(_) => {}
-                AnyNode::ComputeMapping(node) => {
-                    let ids = result.get(&node.as_ref().store_in)?.clone();
-                    for arg in node.as_ref().all_args() {
-                        if let AnyTagRef::Mapping(tag) = arg.store_in() {
-                            result.insert(tag, ids.clone());
+                | AnyNode::Receive(_)
+                | AnyNode::ComputeMapping(_)
+                | AnyNode::SerializeAndSignDM(_)
+                | AnyNode::DeserializeAndCheck(_)
+                | AnyNode::SendDM(_) => {
+                    if let AnyTagRef::Mapping(tag) = node.store_in() {
+                        let ids = result.get(&tag.to_owned())?.clone();
+                        for arg in node.all_args() {
+                            if let AnyTagRef::Mapping(tag) = arg.store_in() {
+                                result.insert(tag.to_owned(), &ids);
+                            }
                         }
                     }
-                }
-                AnyNode::SerializeAndSignDM(node) => {
-                    let ids = result.get(&node.as_ref().store_in)?.clone();
-                    if let AnyTagRef::Mapping(tag) = node.as_ref().data.store_in() {
-                        result.insert(tag, ids);
-                    }
-                }
-                AnyNode::DeserializeAndCheck(node) => {
-                    let ids = result.get(&node.as_ref().store_in)?.clone();
-                    result.insert(MappingTagRef::RemoteSigned(&node.as_ref().data.as_ref().store_in), ids);
-                }
-                AnyNode::SendDM(node) => {
-                    let ids = result.get(&node.as_ref().store_in)?.clone();
-                    result.insert(MappingTagRef::LocalSigned(&node.as_ref().data.as_ref().store_in), ids);
-                }
-                AnyNode::Collect(node) => {
-                    result.insert(node.as_ref().values.store_in(), node.as_ref().group.ids().clone());
-                }
-                AnyNode::SendAll(node) => {
-                    result.insert(
-                        MappingTagRef::Sent(&node.as_ref().values.as_ref().store_in),
-                        node.as_ref().destinations.clone(),
-                    );
                 }
             }
         }
