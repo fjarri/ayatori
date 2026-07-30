@@ -6,7 +6,7 @@ use super::{
         Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, GeneralizedNode, MergeScalars, Node, NodeId,
         Receive, ScalarArgument, SendAll, SendBC, SendDM, SerializeAndSignBC, SerializeAndSignDM, SpecificNode,
     },
-    unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
+    unions::Dependency,
 };
 use crate::{
     entities::{AnyTagRef, RuntimeError, UnionCastError},
@@ -86,6 +86,12 @@ macro_rules! define_any_node {
                 }
             }
 
+            impl<SP: SessionParameters> From<&Node<$node_type<SP>>> for AnyNode<SP> {
+                fn from(source: &Node<$node_type<SP>>) -> Self {
+                    Self::$node_type(source.get_strong_ref())
+                }
+            }
+
             impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<$node_type<SP>> {
                 type Error = UnionCastError;
                 fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
@@ -144,88 +150,5 @@ impl<SP: SessionParameters> AnyNode<SP> {
                     .map(Self::from),
             ),
         )
-    }
-}
-
-impl<SP: SessionParameters> From<&Node<ComputeScalar<SP>>> for AnyNode<SP> {
-    fn from(source: &Node<ComputeScalar<SP>>) -> Self {
-        Self::ComputeScalar(source.get_strong_ref())
-    }
-}
-
-impl<SP: SessionParameters> From<ComputeScalarArg<SP>> for AnyNode<SP> {
-    fn from(source: ComputeScalarArg<SP>) -> Self {
-        match source {
-            ComputeScalarArg::ComputeScalar(node) => Self::ComputeScalar(node),
-            ComputeScalarArg::MergeScalars(node) => Self::MergeScalars(node),
-            ComputeScalarArg::ScalarArgument(node) => Self::ScalarArgument(node),
-            ComputeScalarArg::Collect(node) => Self::Collect(node),
-        }
-    }
-}
-
-impl<SP: SessionParameters> From<CollectArg<SP>> for AnyNode<SP> {
-    fn from(source: CollectArg<SP>) -> Self {
-        match source {
-            CollectArg::ComputeMapping(node) => Self::ComputeMapping(node),
-            CollectArg::SerializeAndSign(node) => Self::SerializeAndSignDM(node),
-            CollectArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
-            CollectArg::Receive(node) => Self::Receive(node),
-        }
-    }
-}
-
-impl<SP: SessionParameters> From<ComputeMappingArg<SP>> for AnyNode<SP> {
-    fn from(source: ComputeMappingArg<SP>) -> Self {
-        match source {
-            ComputeMappingArg::ComputeScalar(node) => Self::ComputeScalar(node),
-            ComputeMappingArg::MergeScalars(node) => Self::MergeScalars(node),
-            ComputeMappingArg::ScalarArgument(node) => Self::ScalarArgument(node),
-            ComputeMappingArg::Collect(node) => Self::Collect(node),
-            ComputeMappingArg::ComputeMapping(node) => Self::ComputeMapping(node),
-            ComputeMappingArg::SerializeAndSignBC(node) => Self::SerializeAndSignBC(node),
-            ComputeMappingArg::SerializeAndSignDM(node) => Self::SerializeAndSignDM(node),
-            ComputeMappingArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
-        }
-    }
-}
-
-impl<SP: SessionParameters> From<BroadcastArg<SP>> for AnyNode<SP> {
-    fn from(source: BroadcastArg<SP>) -> Self {
-        match source {
-            BroadcastArg::ComputeScalar(node) => Self::ComputeScalar(node),
-            BroadcastArg::ScalarArgument(node) => Self::ScalarArgument(node),
-        }
-    }
-}
-
-impl<SP: SessionParameters> From<DirectMessageArg<SP>> for AnyNode<SP> {
-    fn from(source: DirectMessageArg<SP>) -> Self {
-        match source {
-            DirectMessageArg::ComputeScalar(node) => Self::ComputeScalar(node),
-            DirectMessageArg::ScalarArgument(node) => Self::ScalarArgument(node),
-            DirectMessageArg::ComputeMapping(node) => Self::ComputeMapping(node),
-            DirectMessageArg::DeserializeAndCheck(node) => Self::DeserializeAndCheck(node),
-        }
-    }
-}
-
-impl<SP: SessionParameters> From<Dependency<SP>> for AnyNode<SP> {
-    fn from(source: Dependency<SP>) -> Self {
-        match source {
-            Dependency::ComputeScalar(node) => Self::ComputeScalar(node),
-            Dependency::Collect(node) => Self::Collect(node),
-            Dependency::MergeScalars(node) => Self::MergeScalars(node),
-            Dependency::SendBC(node) => Self::SendBC(node),
-            Dependency::SendAll(node) => Self::SendAll(node),
-        }
-    }
-}
-
-impl<SP: SessionParameters> From<OutputNode<SP>> for AnyNode<SP> {
-    fn from(source: OutputNode<SP>) -> Self {
-        match source {
-            OutputNode::ComputeScalar(node) => Self::ComputeScalar(node),
-        }
     }
 }
