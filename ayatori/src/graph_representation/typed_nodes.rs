@@ -15,9 +15,7 @@ use itertools::Itertools;
 
 use super::{
     any_node::AnyNode,
-    unions::{
-        BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, UnionCastError,
-    },
+    unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg},
 };
 use crate::{
     entities::{
@@ -26,7 +24,7 @@ use crate::{
         ScalarArgumentTag, ScalarFunction, SenderAttributableVerificationFunction,
         SenderAttributableWithRevealMappingFunction, SentBCTag, SentDMTag, SerdeAdapter, SerializeAndSignBCFunction,
         SerializeAndSignDMFunction, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction,
+        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction, UnionCastError,
     },
     traced_error::TraceableResult,
     traits::SessionParameters,

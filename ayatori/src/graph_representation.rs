@@ -26,5 +26,4 @@ pub use typed_nodes::{
 };
 pub use unions::{
     BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode,
-    UnionCastError,
 };

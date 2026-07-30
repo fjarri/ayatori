@@ -26,7 +26,7 @@ pub(crate) use value::Value;
 pub use args::{Args, DeserializeArgs, OneOrBoth, SerializeArgs};
 pub use errors::{
     AssociatedData, MaybeAttributableError, RuntimeError, SenderError, SenderErrorWithReveal, SpuriousError,
-    ThirdPartyError, UnattributableError,
+    ThirdPartyError, UnattributableError, UnionCastError,
 };
 pub use function::EvidenceVerdict;
 pub use message::{Message, MessageId, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedValue};

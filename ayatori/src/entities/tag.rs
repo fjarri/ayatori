@@ -6,6 +6,8 @@ use core::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
+use super::errors::UnionCastError;
+
 #[cfg(feature = "dev")]
 use super::errors::RuntimeError;
 
@@ -90,17 +92,17 @@ macro_rules! define_tag_type {
         }
 
         impl TryFrom<$category> for $type_name {
-            type Error = ();
+            type Error = UnionCastError;
             fn try_from(source: $category) -> Result<Self, Self::Error> {
                 match source {
                     $category::$category_variant(tag) => Ok(tag),
-                    _ => Err(())
+                    _ => Err(UnionCastError)
                 }
             }
         }
 
         impl TryFrom<AnyTag> for $type_name {
-            type Error = ();
+            type Error = UnionCastError;
             fn try_from(source: AnyTag) -> Result<Self, Self::Error> {
                 Self::try_from($category::try_from(source)?)
             }
@@ -486,20 +488,20 @@ impl AnyTag {
 }
 
 impl TryFrom<AnyTag> for ScalarTag {
-    type Error = ();
+    type Error = UnionCastError;
     fn try_from(source: AnyTag) -> Result<Self, Self::Error> {
         match source {
             AnyTag::Scalar(tag) => Ok(tag),
-            AnyTag::Mapping(_) => Err(()),
+            AnyTag::Mapping(_) => Err(UnionCastError),
         }
     }
 }
 
 impl TryFrom<AnyTag> for MappingTag {
-    type Error = ();
+    type Error = UnionCastError;
     fn try_from(source: AnyTag) -> Result<Self, Self::Error> {
         match source {
-            AnyTag::Scalar(_) => Err(()),
+            AnyTag::Scalar(_) => Err(UnionCastError),
             AnyTag::Mapping(tag) => Ok(tag),
         }
     }

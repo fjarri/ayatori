@@ -6,20 +6,12 @@ use super::{
     },
 };
 use crate::{
-    entities::{AnyTagRef, ComputedScalarTag, MappingTagRef, ScalarTagRef},
+    entities::{AnyTagRef, ComputedScalarTag, MappingTagRef, ScalarTagRef, UnionCastError},
     traits::SessionParameters,
 };
 
 #[cfg(doc)]
 use crate::protocol_author_api::Args;
-
-/// An error returned when attempting to downcast from a larger union type to a smaller one (or a single type),
-/// and the variant of the larger union is not present in the smalle one.
-#[derive(Debug, Clone, Copy, displaydoc::Display)]
-#[displaydoc("Failed to narrow down a union")]
-pub struct UnionCastError;
-
-impl core::error::Error for UnionCastError {}
 
 /// Possible arguments to a [`ComputeScalar`] node.
 #[derive_where::derive_where(Debug)]
