@@ -24,7 +24,7 @@ use crate::{
         ScalarArgumentTag, ScalarFunction, SenderAttributableVerificationFunction,
         SenderAttributableWithRevealMappingFunction, SentBCTag, SentDMTag, SerdeAdapter, SerializeAndSignBCFunction,
         SerializeAndSignDMFunction, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction, UnionCastError,
+        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction,
     },
     traced_error::TraceableResult,
     traits::SessionParameters,
@@ -266,17 +266,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for ComputeScalar<S
         let dependency = dependency.into();
         node.dependencies.push(dependency);
         node
-    }
-}
-
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeScalar<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::ComputeScalar(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
     }
 }
 
@@ -548,17 +537,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for ComputeMapping<
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<ComputeMapping<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::ComputeMapping(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
-    }
-}
-
 /// A subtype of mapping computation node that serializes and signs values before sending them to other parties.
 #[derive_where::derive_where(Debug)]
 pub struct SerializeAndSignBC<SP: SessionParameters> {
@@ -625,17 +603,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSig
         let dependency = dependency.into();
         node.dependencies.push(dependency);
         node
-    }
-}
-
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SerializeAndSignBC<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::SerializeAndSignBC(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
     }
 }
 
@@ -708,17 +675,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSig
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SerializeAndSignDM<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::SerializeAndSignDM(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
-    }
-}
-
 /// A subtype of mapping computation node that deserializes and checks values coming from other parties.
 #[derive_where::derive_where(Debug)]
 pub struct DeserializeAndCheck<SP: SessionParameters> {
@@ -788,17 +744,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for DeserializeAndC
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<DeserializeAndCheck<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::DeserializeAndCheck(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
-    }
-}
-
 /// A node that denotes sending a direct message to other parties.
 #[derive_where::derive_where(Debug)]
 pub struct SendDM<SP: SessionParameters> {
@@ -858,17 +803,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendDM<SP> {
         let dependency = dependency.into();
         node.dependencies.push(dependency);
         node
-    }
-}
-
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SendDM<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::SendDM(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
     }
 }
 
@@ -936,17 +870,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendBC<SP> {
     }
 }
 
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<SendBC<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::SendBC(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
-    }
-}
-
 /// A nodes that denotes an expected message from other parties.
 #[derive_where::derive_where(Debug)]
 pub struct Receive<SP: SessionParameters> {
@@ -1005,17 +928,6 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Receive<SP> {
         let dependency = dependency.into();
         node.dependencies.push(dependency);
         node
-    }
-}
-
-impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<Receive<SP>> {
-    type Error = UnionCastError;
-
-    fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
-        match source {
-            AnyNode::Receive(node) => Ok(node),
-            _ => Err(UnionCastError),
-        }
     }
 }
 

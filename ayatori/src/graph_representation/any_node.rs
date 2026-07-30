@@ -9,7 +9,7 @@ use super::{
     unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode},
 };
 use crate::{
-    entities::{AnyTagRef, RuntimeError},
+    entities::{AnyTagRef, RuntimeError, UnionCastError},
     traits::SessionParameters,
 };
 
@@ -83,6 +83,16 @@ macro_rules! define_any_node {
             impl<SP: SessionParameters> From<Node<$node_type<SP>>> for AnyNode<SP> {
                 fn from(source: Node<$node_type<SP>>) -> Self {
                     Self::$variant(source)
+                }
+            }
+
+            impl<SP: SessionParameters> TryFrom<AnyNode<SP>> for Node<$node_type<SP>> {
+                type Error = UnionCastError;
+                fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
+                    match source {
+                        AnyNode::$variant(node) => Ok(node),
+                        _ => Err(UnionCastError),
+                    }
                 }
             }
         )+
