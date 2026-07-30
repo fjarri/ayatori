@@ -17,50 +17,50 @@ use crate::{
 // limited to forwarding operations whose implementation is identical for every node type.
 // Operations with node-specific semantics remain explicit in `impl AnyNode`.
 macro_rules! define_any_node {
-    ($($(#[$meta:meta])* $variant:ident($node_type:ident)),+ $(,)?) => {
+    ($($(#[$meta:meta])* $node_type:ident),+ $(,)?) => {
         /// A union of all possible nodes.
         #[derive_where::derive_where(Debug)]
         pub enum AnyNode<SP: SessionParameters> {
             $(
                 $(#[$meta])*
-                $variant(Node<$node_type<SP>>),
+                $node_type(Node<$node_type<SP>>),
             )+
         }
 
         impl<SP: SessionParameters> AnyNode<SP> {
             pub(crate) fn with_replacements(self, replacements: &BTreeMap<NodeId, Self>) -> Result<Self, RuntimeError> {
                 Ok(match self {
-                    $(Self::$variant(node) => Self::$variant(node.with_replacements(replacements)?),)+
+                    $(Self::$node_type(node) => Self::$node_type(node.with_replacements(replacements)?),)+
                 })
             }
 
             pub(crate) fn with_added_prefix(self, prefix: &str) -> Self {
                 match self {
-                    $(Self::$variant(node) => Self::$variant(node.with_added_prefix(prefix)),)+
+                    $(Self::$node_type(node) => Self::$node_type(node.with_added_prefix(prefix)),)+
                 }
             }
 
             pub(crate) fn store_in(&self) -> AnyTagRef<'_> {
                 match self {
-                    $(Self::$variant(node) => (&node.as_ref().store_in).into(),)+
+                    $(Self::$node_type(node) => (&node.as_ref().store_in).into(),)+
                 }
             }
 
             pub(crate) fn dependencies(&self) -> &[Dependency<SP>] {
                 match self {
-                    $(Self::$variant(node) => node.as_ref().dependencies(),)+
+                    $(Self::$node_type(node) => node.as_ref().dependencies(),)+
                 }
             }
 
             pub(crate) fn without_dependencies(self) -> Self {
                 match self {
-                    $(Self::$variant(node) => Self::$variant(node.without_dependencies()),)+
+                    $(Self::$node_type(node) => Self::$node_type(node.without_dependencies()),)+
                 }
             }
 
             pub(crate) fn all_args(&self) -> Box<dyn Iterator<Item = Self> + '_> {
                 match self {
-                    $(Self::$variant(node) => Box::new(node.as_ref().all_args()),)+
+                    $(Self::$node_type(node) => Box::new(node.as_ref().all_args()),)+
                 }
             }
         }
@@ -68,13 +68,13 @@ macro_rules! define_any_node {
         impl<SP: SessionParameters> GeneralizedNode for AnyNode<SP> {
             fn get_strong_ref(&self) -> Self {
                 match self {
-                    $(Self::$variant(node) => Self::$variant(node.get_strong_ref()),)+
+                    $(Self::$node_type(node) => Self::$node_type(node.get_strong_ref()),)+
                 }
             }
 
             fn id(&self) -> NodeId {
                 match self {
-                    $(Self::$variant(node) => node.id(),)+
+                    $(Self::$node_type(node) => node.id(),)+
                 }
             }
         }
@@ -82,7 +82,7 @@ macro_rules! define_any_node {
         $(
             impl<SP: SessionParameters> From<Node<$node_type<SP>>> for AnyNode<SP> {
                 fn from(source: Node<$node_type<SP>>) -> Self {
-                    Self::$variant(source)
+                    Self::$node_type(source)
                 }
             }
 
@@ -90,7 +90,7 @@ macro_rules! define_any_node {
                 type Error = UnionCastError;
                 fn try_from(source: AnyNode<SP>) -> Result<Self, Self::Error> {
                     match source {
-                        AnyNode::$variant(node) => Ok(node),
+                        AnyNode::$node_type(node) => Ok(node),
                         _ => Err(UnionCastError),
                     }
                 }
@@ -100,7 +100,7 @@ macro_rules! define_any_node {
         impl<SP: SessionParameters> Display for AnyNode<SP> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
                 match self {
-                    $(Self::$variant(node) =>  write!(f, "{node}"),)+
+                    $(Self::$node_type(node) =>  write!(f, "{node}"),)+
                 }
             }
         }
@@ -109,29 +109,29 @@ macro_rules! define_any_node {
 
 define_any_node! {
     /// A scalar computation.
-    ComputeScalar(ComputeScalar),
+    ComputeScalar,
     /// A collection of mapping elements.
-    Collect(Collect),
+    Collect,
     /// A mapping computation.
-    ComputeMapping(ComputeMapping),
+    ComputeMapping,
     /// A serialization of a broadcast message.
-    SerializeAndSignBC(SerializeAndSignBC),
+    SerializeAndSignBC,
     /// A serialization of a direct message.
-    SerializeAndSignDM(SerializeAndSignDM),
+    SerializeAndSignDM,
     /// A deserialization of a broadcast message.
-    DeserializeAndCheck(DeserializeAndCheck),
+    DeserializeAndCheck,
     /// An outgoing broadcast message.
-    SendBC(SendBC),
+    SendBC,
     /// An outgoing direct message.
-    SendDM(SendDM),
+    SendDM,
     /// A set of outgoing direct messages.
-    SendAll(SendAll),
+    SendAll,
     /// An expected broadcast message.
-    Receive(Receive),
+    Receive,
     /// An argument to the protocol.
-    ScalarArgument(ScalarArgument),
+    ScalarArgument,
     /// One or both scalar node results merged into one.
-    MergeScalars(MergeScalars),
+    MergeScalars,
 }
 
 impl<SP: SessionParameters> AnyNode<SP> {
