@@ -441,7 +441,6 @@ pub fn broadcast<SP: SessionParameters>(
         data: scalar,
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
-        dependencies: Vec::new(),
     });
 
     Node::new(SendBC {
@@ -470,7 +469,6 @@ pub fn direct_message<SP: SessionParameters>(
         data: data.get_strong_ref(),
         message_name: FullName::new(message.name()),
         serde_adapter: message.serde_adapter().clone(),
-        dependencies: Vec::new(),
     });
 
     Node::new(SendDM {
@@ -510,7 +508,7 @@ pub fn receive_split<SP: SessionParameters>(
     let receive = Node::new(Receive {
         store_in: receive_store_in,
         message_name: message_name.clone(),
-        dependencies: Vec::new(),
+        phantom: PhantomData,
     });
 
     let deserialize = Node::new(DeserializeAndCheck {
@@ -519,7 +517,6 @@ pub fn receive_split<SP: SessionParameters>(
         data: receive.get_strong_ref(),
         message_name,
         serde_adapter: message.serde_adapter().clone(),
-        dependencies: Vec::new(),
     });
 
     (receive, deserialize)
@@ -558,7 +555,6 @@ pub fn send_all<SP: SessionParameters>(
         store_in,
         values: values.get_strong_ref(),
         destinations: destinations.clone(),
-        dependencies: Vec::new(),
     })
 }
 

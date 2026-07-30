@@ -146,8 +146,7 @@ impl<SP: SessionParameters> ScalarRule<SP> {
 
     pub fn new_serialize_and_sign(node: &SerializeAndSignBC<SP>) -> Self {
         let scalar_condition = ScalarConditionWithState::new(ScalarCondition::from_serialize_and_sign_bc(node));
-        let dependencies_condition =
-            ScalarConditionWithState::new(ScalarCondition::from_dependencies(&node.dependencies));
+        let dependencies_condition = ScalarConditionWithState::new(ScalarCondition::empty());
         Self {
             dependencies_condition,
             scalar_condition,
@@ -235,8 +234,7 @@ impl<SP: SessionParameters> CollectRule<SP> {
     }
 
     pub fn new_send_all(node: &SendAll<SP>) -> Self {
-        let dependencies_condition =
-            ScalarConditionWithState::new(ScalarCondition::from_dependencies(&node.dependencies));
+        let dependencies_condition = ScalarConditionWithState::new(ScalarCondition::empty());
         let quorum_condition = QuorumConditionWithState::new(QuorumCondition::from_send_all(node));
         Self {
             dependencies_condition,
@@ -343,8 +341,7 @@ impl<SP: SessionParameters> MappingRule<SP> {
     }
 
     pub fn new_serialize_and_sign(node: &SerializeAndSignDM<SP>, possible_ids: &BTreeSet<SP::Verifier>) -> Self {
-        let dependencies_condition =
-            ScalarConditionWithState::new(ScalarCondition::from_dependencies(&node.dependencies));
+        let dependencies_condition = ScalarConditionWithState::new(ScalarCondition::empty());
         let scalar_condition = ScalarConditionWithState::new(ScalarCondition::from_serialize_and_sign_dm(node));
         let element_condition =
             ElementConditionWithState::new(ElementCondition::from_serialize_and_sign(node), possible_ids);
@@ -368,8 +365,7 @@ impl<SP: SessionParameters> MappingRule<SP> {
         possible_ids: &BTreeSet<SP::Verifier>,
         on_error: OnError,
     ) -> Self {
-        let dependencies_condition =
-            ScalarConditionWithState::new(ScalarCondition::from_dependencies(&node.dependencies));
+        let dependencies_condition = ScalarConditionWithState::new(ScalarCondition::empty());
         let scalar_condition = ScalarConditionWithState::new(ScalarCondition::empty());
         let element_condition =
             ElementConditionWithState::new(ElementCondition::from_deserialize_and_check(node), possible_ids);

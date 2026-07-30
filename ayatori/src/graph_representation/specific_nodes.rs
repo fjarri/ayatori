@@ -340,7 +340,6 @@ pub struct SendAll<SP: SessionParameters> {
     pub(crate) store_in: CollectedTag,
     pub(crate) values: Node<SendDM<SP>>,
     pub(crate) destinations: BTreeSet<SP::Verifier>,
-    pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
 impl<SP: SessionParameters> ShallowClone for SendAll<SP> {
@@ -349,20 +348,17 @@ impl<SP: SessionParameters> ShallowClone for SendAll<SP> {
             store_in: self.store_in.clone(),
             values: self.values.get_strong_ref(),
             destinations: self.destinations.clone(),
-            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SendAll<SP> {
     fn dependencies(&self) -> &[Dependency<SP>] {
-        &self.dependencies
+        &[]
     }
 
     fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
-        node
+        self
     }
 
     fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
@@ -379,22 +375,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SendAll<SP> {
         let mut node = self;
         replace_in_node(&mut node.values, replacements)
             .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
-        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
-            format!(
-                "Failed to replace nodes in the dependencies of node `{}`",
-                node.store_in
-            )
-        })?;
         Ok(node)
-    }
-}
-
-impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendAll<SP> {
-    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let mut node = self;
-        let dependency = dependency.into();
-        node.dependencies.push(dependency);
-        node
     }
 }
 
@@ -545,7 +526,6 @@ pub struct SerializeAndSignBC<SP: SessionParameters> {
     pub(crate) data: BroadcastArg<SP>,
     pub(crate) serde_adapter: SerdeAdapter<SP::WireFormat>,
     pub(crate) message_name: FullName,
-    pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
 impl<SP: SessionParameters> ShallowClone for SerializeAndSignBC<SP> {
@@ -556,20 +536,17 @@ impl<SP: SessionParameters> ShallowClone for SerializeAndSignBC<SP> {
             data: self.data.get_strong_ref(),
             serde_adapter: self.serde_adapter.clone(),
             message_name: self.message_name.clone(),
-            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignBC<SP> {
     fn dependencies(&self) -> &[Dependency<SP>] {
-        &self.dependencies
+        &[]
     }
 
     fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
-        node
+        self
     }
 
     fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
@@ -587,22 +564,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignBC<SP> {
         let mut node = self;
         replace_in_node(&mut node.data, replacements)
             .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
-        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
-            format!(
-                "Failed to replace nodes in the dependencies of node `{}`",
-                node.store_in
-            )
-        })?;
         Ok(node)
-    }
-}
-
-impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSignBC<SP> {
-    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let mut node = self;
-        let dependency = dependency.into();
-        node.dependencies.push(dependency);
-        node
     }
 }
 
@@ -614,7 +576,6 @@ pub struct SerializeAndSignDM<SP: SessionParameters> {
     pub(crate) data: DirectMessageArg<SP>,
     pub(crate) serde_adapter: SerdeAdapter<SP::WireFormat>,
     pub(crate) message_name: FullName,
-    pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
 impl<SP: SessionParameters> ShallowClone for SerializeAndSignDM<SP> {
@@ -625,20 +586,17 @@ impl<SP: SessionParameters> ShallowClone for SerializeAndSignDM<SP> {
             data: self.data.get_strong_ref(),
             serde_adapter: self.serde_adapter.clone(),
             message_name: self.message_name.clone(),
-            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignDM<SP> {
     fn dependencies(&self) -> &[Dependency<SP>] {
-        &self.dependencies
+        &[]
     }
 
     fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
-        node
+        self
     }
 
     fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
@@ -656,22 +614,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for SerializeAndSignDM<SP> {
         let mut node = self;
         replace_in_node(&mut node.data, replacements)
             .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
-        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
-            format!(
-                "Failed to replace nodes in the dependencies of node `{}`",
-                node.store_in
-            )
-        })?;
         Ok(node)
-    }
-}
-
-impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SerializeAndSignDM<SP> {
-    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let mut node = self;
-        let dependency = dependency.into();
-        node.dependencies.push(dependency);
-        node
     }
 }
 
@@ -683,7 +626,6 @@ pub struct DeserializeAndCheck<SP: SessionParameters> {
     pub(crate) data: Node<Receive<SP>>,
     pub(crate) serde_adapter: SerdeAdapter<SP::WireFormat>,
     pub(crate) message_name: FullName,
-    pub(crate) dependencies: Vec<Dependency<SP>>,
 }
 
 impl<SP: SessionParameters> ShallowClone for DeserializeAndCheck<SP> {
@@ -694,20 +636,17 @@ impl<SP: SessionParameters> ShallowClone for DeserializeAndCheck<SP> {
             data: self.data.get_strong_ref(),
             serde_adapter: self.serde_adapter.clone(),
             message_name: self.message_name.clone(),
-            dependencies: node_slice_to_owned(&self.dependencies),
         }
     }
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for DeserializeAndCheck<SP> {
     fn dependencies(&self) -> &[Dependency<SP>] {
-        &self.dependencies
+        &[]
     }
 
     fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
-        node
+        self
     }
 
     fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
@@ -725,22 +664,7 @@ impl<SP: SessionParameters> SpecificNode<SP> for DeserializeAndCheck<SP> {
         let mut node = self;
         replace_in_node(&mut node.data, replacements)
             .or_with_context(|| format!("Failed to replace nodes in the argument of node `{}`", node.store_in))?;
-        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
-            format!(
-                "Failed to replace nodes in the dependencies of node `{}`",
-                node.store_in
-            )
-        })?;
         Ok(node)
-    }
-}
-
-impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for DeserializeAndCheck<SP> {
-    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let mut node = self;
-        let dependency = dependency.into();
-        node.dependencies.push(dependency);
-        node
     }
 }
 
@@ -875,7 +799,7 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for SendBC<SP> {
 pub struct Receive<SP: SessionParameters> {
     pub(crate) store_in: RemoteSignedTag,
     pub(crate) message_name: FullName,
-    pub(crate) dependencies: Vec<Dependency<SP>>,
+    pub(crate) phantom: PhantomData<fn() -> SP>,
 }
 
 impl<SP: SessionParameters> ShallowClone for Receive<SP> {
@@ -883,20 +807,18 @@ impl<SP: SessionParameters> ShallowClone for Receive<SP> {
         Self {
             store_in: self.store_in.clone(),
             message_name: self.message_name.clone(),
-            dependencies: node_slice_to_owned(&self.dependencies),
+            phantom: PhantomData,
         }
     }
 }
 
 impl<SP: SessionParameters> SpecificNode<SP> for Receive<SP> {
     fn dependencies(&self) -> &[Dependency<SP>] {
-        &self.dependencies
+        &[]
     }
 
     fn without_dependencies(self) -> Self {
-        let mut node = self;
-        node.dependencies = Vec::new();
-        node
+        self
     }
 
     fn all_args(&self) -> impl Iterator<Item = AnyNode<SP>> {
@@ -910,24 +832,8 @@ impl<SP: SessionParameters> SpecificNode<SP> for Receive<SP> {
         node
     }
 
-    fn with_replacements(self, replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
-        let mut node = self;
-        replace_in_slice(&mut node.dependencies, replacements).or_with_context(|| {
-            format!(
-                "Failed to replace nodes in the dependencies of node `{}`",
-                node.store_in
-            )
-        })?;
-        Ok(node)
-    }
-}
-
-impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Receive<SP> {
-    fn with_dependency(self, dependency: impl Into<Dependency<SP>>) -> Self {
-        let mut node = self;
-        let dependency = dependency.into();
-        node.dependencies.push(dependency);
-        node
+    fn with_replacements(self, _replacements: &BTreeMap<usize, AnyNode<SP>>) -> Result<Self, RuntimeError> {
+        Ok(self)
     }
 }
 
@@ -1124,13 +1030,7 @@ impl<SP: SessionParameters> Display for Collect<SP> {
 
 impl<SP: SessionParameters> Display for SendAll<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "{} = send_all({}){}",
-            self.store_in,
-            self.values.as_ref().store_in,
-            display_dependencies(&self.dependencies)
-        )
+        write!(f, "{} = send_all({})", self.store_in, self.values.as_ref().store_in)
     }
 }
 
@@ -1138,10 +1038,9 @@ impl<SP: SessionParameters> Display for SerializeAndSignBC<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "{}[*] = <serialize_and_sign_bc>(*, {}){}",
+            "{}[*] = <serialize_and_sign_bc>(*, {})",
             self.store_in,
             self.data.store_in(),
-            display_dependencies(&self.dependencies)
         )
     }
 }
@@ -1150,10 +1049,9 @@ impl<SP: SessionParameters> Display for SerializeAndSignDM<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "{}[*] = <serialize_and_sign_dm>(*, {}){}",
+            "{}[*] = <serialize_and_sign_dm>(*, {})",
             self.store_in,
             self.data.store_in(),
-            display_dependencies(&self.dependencies)
         )
     }
 }
@@ -1162,10 +1060,9 @@ impl<SP: SessionParameters> Display for DeserializeAndCheck<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
-            "{}[*] = <deserialize_and_check>(*, {}){}",
+            "{}[*] = <deserialize_and_check>(*, {})",
             self.store_in,
             self.data.as_ref().store_in,
-            display_dependencies(&self.dependencies)
         )
     }
 }
@@ -1196,13 +1093,7 @@ impl<SP: SessionParameters> Display for SendBC<SP> {
 
 impl<SP: SessionParameters> Display for Receive<SP> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "{}[*] = <receive {}>(*){}",
-            self.store_in,
-            self.message_name,
-            display_dependencies(&self.dependencies)
-        )
+        write!(f, "{}[*] = <receive {}>(*)", self.store_in, self.message_name)
     }
 }
 
