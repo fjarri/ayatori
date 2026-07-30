@@ -4,7 +4,8 @@ mod function;
 mod message;
 mod party;
 mod session_id;
-mod tag;
+mod specific_tags;
+mod union_tags;
 mod value;
 
 pub(crate) use errors::StoredThirdPartyError;
@@ -16,11 +17,11 @@ pub(crate) use function::{
     UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
     UnattributableScalarFunctionWithRng,
 };
-pub(crate) use tag::{
-    AnyTag, AnyTagRef, CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedBCTag, LocalSignedDMTag,
-    MappingTag, MappingTagRef, MergedScalarTag, ReceivedTag, RemoteSignedTag, ScalarArgumentTag, ScalarTag,
-    ScalarTagRef, SentBCTag, SentDMTag,
+pub(crate) use specific_tags::{
+    CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedBCTag, LocalSignedDMTag, MergedScalarTag,
+    ReceivedTag, RemoteSignedTag, ScalarArgumentTag, SentBCTag, SentDMTag,
 };
+pub(crate) use union_tags::{AnyTag, AnyTagRef, MappingTag, MappingTagRef, ScalarTag, ScalarTagRef};
 pub(crate) use value::Value;
 
 pub use args::{Args, DeserializeArgs, OneOrBoth, SerializeArgs};
@@ -32,5 +33,5 @@ pub use function::EvidenceVerdict;
 pub use message::{Message, MessageId, SignedHash, SignedValue, ValueMetadata, VerificationError, VerifiedValue};
 pub use party::{PartyGroup, ThresholdGroup};
 pub use session_id::SessionId;
-pub use tag::FullName;
+pub use specific_tags::FullName;
 pub use value::{Erasable, SerdeAdapter, SerializedValue};
