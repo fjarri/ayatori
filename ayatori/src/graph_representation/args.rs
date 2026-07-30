@@ -7,7 +7,7 @@ use alloc::{
 use super::{
     any_node::AnyNode,
     constructors::scalar_argument,
-    typed_nodes::{Node, ScalarArgument},
+    specific_nodes::{Node, ScalarArgument},
 };
 use crate::{
     entities::{Erasable, RuntimeError, Value},

@@ -1,6 +1,6 @@
 use super::{
     any_node::AnyNode,
-    typed_nodes::{
+    specific_nodes::{
         Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, GeneralizedNode, MergeScalars, Node, NodeId,
         Receive, ScalarArgument, SendAll, SendBC, SerializeAndSignBC, SerializeAndSignDM,
     },

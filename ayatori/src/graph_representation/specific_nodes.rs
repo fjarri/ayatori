@@ -15,7 +15,7 @@ use itertools::Itertools;
 
 use super::{
     any_node::AnyNode,
-    unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg},
+    union_nodes::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg},
 };
 use crate::{
     entities::{

@@ -11,11 +11,11 @@ use super::{
     any_node::AnyNode,
     args::BoundProtocolArgs,
     constructors::collect,
-    typed_nodes::{
+    specific_nodes::{
         ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, GeneralizedNode, Node, NodeId,
         args_to_owned,
     },
-    unions::{CollectArg, ComputeScalarArg, OutputNode},
+    union_nodes::{CollectArg, ComputeScalarArg, OutputNode},
 };
 use crate::{
     entities::{

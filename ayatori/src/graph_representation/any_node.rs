@@ -2,11 +2,11 @@ use alloc::{boxed::Box, collections::BTreeMap};
 use core::fmt::{self, Display};
 
 use super::{
-    typed_nodes::{
+    specific_nodes::{
         Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, GeneralizedNode, MergeScalars, Node, NodeId,
         Receive, ScalarArgument, SendAll, SendBC, SendDM, SerializeAndSignBC, SerializeAndSignDM, SpecificNode,
     },
-    unions::Dependency,
+    union_nodes::Dependency,
 };
 use crate::{
     entities::{AnyTagRef, RuntimeError, UnionCastError},

@@ -11,12 +11,12 @@ use serde::{Deserialize, Serialize};
 use super::{
     any_node::AnyNode,
     args::{ArgNodes, PartyBuildData, ProtocolArgs},
-    typed_nodes::{
+    specific_nodes::{
         Collect, ComputeMapping, ComputeMappingKind, ComputeScalar, ComputeScalarKind, DeserializeAndCheck,
         GeneralizedNode, MergeScalars, Node, Receive, ScalarArgument, SendAll, SendBC, SendDM, SerializeAndSignBC,
         SerializeAndSignDM,
     },
-    unions::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
+    union_nodes::{BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, DirectMessageArg},
 };
 use crate::{
     entities::{
