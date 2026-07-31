@@ -342,9 +342,9 @@ where
         let is_sender = &build_data.sender == party_build_data.id();
         let is_receiver = build_data.receivers.contains(party_build_data.id());
 
-        let message_value = ProtocolMessage::new::<ValueMessage<SP>>("value");
-        let message_echo = ProtocolMessage::new::<EchoMessage<SP>>("echo");
-        let message_ready = ProtocolMessage::new::<()>("ready");
+        let (message_value_out, message_value_in) = direct_message::<_, ValueMessage<SP>>("value");
+        let (message_echo_out, message_echo_in) = broadcast_message::<_, EchoMessage<SP>>("echo");
+        let (message_ready_out, message_ready_in) = broadcast_message::<_, ()>("ready");
 
         let to_broadcast = inputs.get("to_broadcast")?;
 
@@ -391,14 +391,14 @@ where
                 ],
             );
 
-            let shards_sent = direct_message(&message_value, &value_messages);
+            let shards_sent = message_value_out.send(&value_messages);
             Dependency::from(&send_all(&shards_sent, &build_data.receivers))
         } else {
             Dependency::from(&constant("empty_dependency", ()))
         };
 
         if is_receiver {
-            let (value_signed, value_deserialized) = receive_split(&message_value);
+            let (value_signed, value_deserialized) = message_value_in.receive_split();
 
             let sender = constant("sender", build_data.sender.clone());
 
@@ -427,8 +427,8 @@ where
             )
             .with_dependency(&value_deserialized_scalar);
 
-            let echo_sent = broadcast(&message_echo, &echo, &build_data.receivers);
-            let echo_received = receive(&message_echo);
+            let echo_sent = message_echo_out.send(&echo, &build_data.receivers);
+            let echo_received = message_echo_in.receive();
 
             let echo_checked = compute_mapping_sender_fallible(
                 "echo_checked",
@@ -466,7 +466,7 @@ where
                 verify_interpolate_and_check_root_error,
             );
 
-            let ready_received = receive(&message_ready);
+            let ready_received = message_ready_in.receive();
 
             let all_readies_to_send_ready = collect_into(
                 "to_send_ready",
@@ -476,8 +476,9 @@ where
 
             let send_ready_trigger = merge_scalars(&root_checked, &all_readies_to_send_ready);
             let ready = constant("ready", ());
-            let ready_sent =
-                broadcast(&message_ready, &ready, &build_data.receivers).with_dependency(&send_ready_trigger);
+            let ready_sent = message_ready_out
+                .send(&ready, &build_data.receivers)
+                .with_dependency(&send_ready_trigger);
 
             let all_echos_to_finalize = collect_into(
                 "echos_to_finalize",

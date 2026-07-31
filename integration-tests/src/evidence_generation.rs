@@ -63,12 +63,12 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
-        let message_x = ProtocolMessage::new::<u64>("x");
+        let (message_x_out, message_x_in) = broadcast_message::<_, u64>("x");
 
         let all_parties = build_data;
         let my_x = compute_scalar("my_x", gen_value, &[]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties.ids());
-        let x = receive(&message_x);
+        let x_broadcasted = message_x_out.send(&my_x, all_parties.ids());
+        let x = message_x_in.receive();
         // Note that this dependency ensures that the node will send out its messages
         // before checking correctness of incoming values.
         // This means that in the test where we make one node send out incorrect values,

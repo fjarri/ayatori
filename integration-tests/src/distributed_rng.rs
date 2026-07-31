@@ -73,21 +73,21 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
-        let message_b = ProtocolMessage::new::<u64>("b");
-        let message_r = ProtocolMessage::new::<u64>("r");
-        let message_c = ProtocolMessage::new::<u64>("c");
+        let (message_b_out, message_b_in) = broadcast_message::<_, u64>("b");
+        let (message_r_out, message_r_in) = broadcast_message::<_, u64>("r");
+        let (message_c_out, message_c_in) = broadcast_message::<_, u64>("c");
 
         let all_parties = build_data;
         let my_b = compute_scalar_with_rng("my_b", sample_value, &[]);
         let my_r = compute_scalar_with_rng("my_r", sample_nonce, &[]);
         let my_c = compute_scalar("my_c", commit_to_value, &[("b", (&my_b).into()), ("r", (&my_r).into())]);
-        let c_broadcasted = broadcast(&message_c, &my_c, build_data.ids());
-        let c = receive(&message_c);
+        let c_broadcasted = message_c_out.send(&my_c, build_data.ids());
+        let c = message_c_in.receive();
         let all_c = collect(&c, all_parties).with_dependency(&c_broadcasted);
-        let b_broadcasted = broadcast(&message_b, &my_b, build_data.ids()).with_dependency(&all_c);
-        let r_broadcasted = broadcast(&message_r, &my_r, build_data.ids()).with_dependency(&all_c);
-        let b = receive(&message_b);
-        let r = receive(&message_r);
+        let b_broadcasted = message_b_out.send(&my_b, build_data.ids()).with_dependency(&all_c);
+        let r_broadcasted = message_r_out.send(&my_r, build_data.ids()).with_dependency(&all_c);
+        let b = message_b_in.receive();
+        let r = message_r_in.receive();
         let hash_correct = compute_mapping_sender_fallible(
             "hash_correct",
             verify_commitment,

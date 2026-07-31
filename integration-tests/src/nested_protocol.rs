@@ -33,14 +33,14 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol2 {
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
-        let message_x = ProtocolMessage::new::<Protocol2Message>("x");
+        let (message_x_out, message_x_in) = broadcast_message::<_, Protocol2Message>("x");
 
         let all_parties = build_data;
         let p2 = inputs.get("p2")?;
 
         let my_x = compute_scalar("my_x", make_protocol2_value, &[("p2", p2.into())]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties.ids());
-        let x = receive(&message_x);
+        let x_broadcasted = message_x_out.send(&my_x, all_parties.ids());
+        let x = message_x_in.receive();
         let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
 
         Ok(compute_scalar(
@@ -108,14 +108,14 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for Protocol1 {
         build_data: &Self::BuildData,
         inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
-        let message_x = ProtocolMessage::new::<Protocol1Message>("x");
+        let (message_x_out, message_x_in) = broadcast_message::<_, Protocol1Message>("x");
 
         let all_parties = build_data;
         let p1 = inputs.get("p1")?;
 
         let my_x = compute_scalar("my_x", make_protocol1_value, &[("p1", p1.into())]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties.ids());
-        let x = receive(&message_x);
+        let x_broadcasted = message_x_out.send(&my_x, all_parties.ids());
+        let x = message_x_in.receive();
         let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
 
         let p1_sum = compute_scalar("p1_sum", make_protocol1_output, &[("x", (&all_x).into())]);

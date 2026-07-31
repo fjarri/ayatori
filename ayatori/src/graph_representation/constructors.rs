@@ -34,32 +34,6 @@ use crate::{
     traits::{ComposableProtocol, SessionParameters},
 };
 
-/// A typed message that can be sent to other parties.
-#[derive_where::derive_where(Debug, Clone)]
-pub struct ProtocolMessage<SP: SessionParameters> {
-    name: String,
-    serde_adapter: SerdeAdapter<SP::WireFormat>,
-}
-
-impl<SP: SessionParameters> ProtocolMessage<SP> {
-    /// Declares a new message.
-    #[must_use]
-    pub fn new<T: Erasable + Serialize + for<'de> Deserialize<'de>>(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            serde_adapter: SerdeAdapter::new::<T>(),
-        }
-    }
-
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub(crate) fn serde_adapter(&self) -> &SerdeAdapter<SP::WireFormat> {
-        &self.serde_adapter
-    }
-}
-
 pub(crate) fn scalar_argument<SP: SessionParameters>(name: &str) -> Node<ScalarArgument<SP>> {
     Node::new(ScalarArgument {
         store_in: ScalarArgumentTag::new(name),
@@ -402,6 +376,194 @@ pub fn compute_mapping_sender_fallible_with_reveal<SP: SessionParameters, Ret: E
     })
 }
 
+/// Creates send/receive channels for a broadcast message with a given name.
+///
+/// The names must not repeat within a single [`ComposableProtocol::build`].
+#[must_use]
+pub fn broadcast_message<SP, T>(name: &str) -> (BroadcastMessageOut<SP>, BroadcastMessageIn<SP>)
+where
+    SP: SessionParameters,
+    T: Erasable + Serialize + for<'de> Deserialize<'de>,
+{
+    let serde_adapter = SerdeAdapter::new::<T>();
+    (
+        BroadcastMessageOut {
+            name: name.into(),
+            serde_adapter: serde_adapter.clone(),
+        },
+        BroadcastMessageIn {
+            name: name.into(),
+            serde_adapter,
+        },
+    )
+}
+
+/// An output channel for a broadcast message.
+#[derive_where::derive_where(Debug)]
+pub struct BroadcastMessageOut<SP: SessionParameters> {
+    name: String,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+}
+
+impl<SP: SessionParameters> BroadcastMessageOut<SP> {
+    /// Broadcasts the scalar data with the type and name defined by this message.
+    ///
+    /// The target nodes are determined by the group this mapping is collected into.
+    pub fn send(self, scalar: impl Into<BroadcastArg<SP>>, destinations: &BTreeSet<SP::Verifier>) -> Node<SendBC<SP>> {
+        let scalar: BroadcastArg<SP> = scalar.into();
+        let signed_tag = LocalSignedBCTag::new(&self.name);
+        let sent_tag = signed_tag.to_broadcast_message_sent();
+
+        let serialize_and_sign = Node::new(SerializeAndSignBC {
+            store_in: signed_tag,
+            function: SerializeAndSignBCFunction::new(|rng, args| default_serialize_and_sign(rng, None, args)),
+            data: scalar,
+            message_name: FullName::new(&self.name),
+            serde_adapter: self.serde_adapter,
+        });
+
+        Node::new(SendBC {
+            store_in: sent_tag,
+            data: serialize_and_sign,
+            destinations: destinations.clone(),
+            dependencies: Vec::new(),
+        })
+    }
+}
+
+/// An input channel for a broadcast message.
+#[derive_where::derive_where(Debug)]
+pub struct BroadcastMessageIn<SP: SessionParameters> {
+    name: String,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+}
+
+impl<SP: SessionParameters> BroadcastMessageIn<SP> {
+    /// Returns the result of [`Self::receive`], along with the node containing the original signed value.
+    pub fn receive_split(self) -> (Node<Receive<SP>>, Node<DeserializeAndCheck<SP>>) {
+        let receive_store_in = RemoteSignedTag::new(&self.name);
+        let deserialize_store_in = receive_store_in.to_received();
+        let message_name = FullName::new(&self.name);
+
+        let receive = Node::new(Receive {
+            store_in: receive_store_in,
+            message_name: message_name.clone(),
+            phantom: PhantomData,
+        });
+
+        let deserialize = Node::new(DeserializeAndCheck {
+            store_in: deserialize_store_in,
+            function: DeserializeFunction::new(default_deserialize),
+            data: receive.get_strong_ref(),
+            message_name,
+            serde_adapter: self.serde_adapter,
+        });
+
+        (receive, deserialize)
+    }
+
+    /// Returns the node for deserialized and checked message stripped of metadata.
+    #[must_use]
+    pub fn receive(self) -> Node<DeserializeAndCheck<SP>> {
+        let (_receive, deserialize) = self.receive_split();
+        deserialize
+    }
+}
+
+/// Creates send/receive channels for a direct message with a given name.
+///
+/// The names must not repeat within a single [`ComposableProtocol::build`].
+#[must_use]
+pub fn direct_message<SP, T>(name: &str) -> (DirectMessageOut<SP>, DirectMessageIn<SP>)
+where
+    SP: SessionParameters,
+    T: Erasable + Serialize + for<'de> Deserialize<'de>,
+{
+    let serde_adapter = SerdeAdapter::new::<T>();
+    (
+        DirectMessageOut {
+            name: name.into(),
+            serde_adapter: serde_adapter.clone(),
+        },
+        DirectMessageIn {
+            name: name.into(),
+            serde_adapter,
+        },
+    )
+}
+
+/// An output channel for a direct message.
+#[derive_where::derive_where(Debug)]
+pub struct DirectMessageOut<SP: SessionParameters> {
+    name: String,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+}
+
+impl<SP: SessionParameters> DirectMessageOut<SP> {
+    /// Sends a direct message with the corresponding element from the given mapping,
+    /// and with the type and name defined by this message.
+    ///
+    /// The target nodes are determined by the group this mapping is collected into.
+    pub fn send(self, data: impl Into<DirectMessageArg<SP>>) -> Node<SendDM<SP>> {
+        let data: DirectMessageArg<SP> = data.into();
+        let signed_tag = LocalSignedDMTag::new(&self.name);
+        let sent_tag = signed_tag.to_direct_message_sent();
+
+        let serialize_and_sign = Node::new(SerializeAndSignDM {
+            store_in: signed_tag,
+            function: SerializeAndSignDMFunction::new(|rng, id, args| default_serialize_and_sign(rng, Some(id), args)),
+            data: data.get_strong_ref(),
+            message_name: FullName::new(&self.name),
+            serde_adapter: self.serde_adapter,
+        });
+
+        Node::new(SendDM {
+            store_in: sent_tag,
+            data: serialize_and_sign,
+            dependencies: Vec::new(),
+        })
+    }
+}
+
+/// An input channel for a broadcast message.
+#[derive_where::derive_where(Debug)]
+pub struct DirectMessageIn<SP: SessionParameters> {
+    name: String,
+    serde_adapter: SerdeAdapter<SP::WireFormat>,
+}
+
+impl<SP: SessionParameters> DirectMessageIn<SP> {
+    /// Returns the result of [`Self::receive`], along with the node containing the original signed value.
+    pub fn receive_split(self) -> (Node<Receive<SP>>, Node<DeserializeAndCheck<SP>>) {
+        let receive_store_in = RemoteSignedTag::new(&self.name);
+        let deserialize_store_in = receive_store_in.to_received();
+        let message_name = FullName::new(&self.name);
+
+        let receive = Node::new(Receive {
+            store_in: receive_store_in,
+            message_name: message_name.clone(),
+            phantom: PhantomData,
+        });
+
+        let deserialize = Node::new(DeserializeAndCheck {
+            store_in: deserialize_store_in,
+            function: DeserializeFunction::new(default_deserialize),
+            data: receive.get_strong_ref(),
+            message_name,
+            serde_adapter: self.serde_adapter,
+        });
+
+        (receive, deserialize)
+    }
+
+    /// Returns the node for deserialized and checked message stripped of metadata.
+    #[must_use]
+    pub fn receive(self) -> Node<DeserializeAndCheck<SP>> {
+        let (_receive, deserialize) = self.receive_split();
+        deserialize
+    }
+}
+
 fn default_serialize_and_sign<SP: SessionParameters>(
     rng: &mut SP::Rng,
     destination: Option<&SP::Verifier>,
@@ -423,61 +585,6 @@ fn default_serialize_and_sign<SP: SessionParameters>(
     Ok(Value::new(signed_value))
 }
 
-/// Broadcasts the scalar data with the type and name defined by `message`.
-///
-/// The target nodes are determined by the group this mapping is collected into.
-pub fn broadcast<SP: SessionParameters>(
-    message: &ProtocolMessage<SP>,
-    scalar: impl Into<BroadcastArg<SP>>,
-    destinations: &BTreeSet<SP::Verifier>,
-) -> Node<SendBC<SP>> {
-    let scalar: BroadcastArg<SP> = scalar.into();
-    let signed_tag = LocalSignedBCTag::new(message.name());
-    let sent_tag = signed_tag.to_broadcast_message_sent();
-
-    let serialize_and_sign = Node::new(SerializeAndSignBC {
-        store_in: signed_tag,
-        function: SerializeAndSignBCFunction::new(|rng, args| default_serialize_and_sign(rng, None, args)),
-        data: scalar,
-        message_name: FullName::new(message.name()),
-        serde_adapter: message.serde_adapter().clone(),
-    });
-
-    Node::new(SendBC {
-        store_in: sent_tag,
-        data: serialize_and_sign,
-        destinations: destinations.clone(),
-        dependencies: Vec::new(),
-    })
-}
-
-/// Sends a direct message with the corresponding element from the given mapping,
-/// and with the type and name defined by `message`.
-///
-/// The target nodes are determined by the group this mapping is collected into.
-pub fn direct_message<SP: SessionParameters>(
-    message: &ProtocolMessage<SP>,
-    data: impl Into<DirectMessageArg<SP>>,
-) -> Node<SendDM<SP>> {
-    let data: DirectMessageArg<SP> = data.into();
-    let signed_tag = LocalSignedDMTag::new(message.name());
-    let sent_tag = signed_tag.to_direct_message_sent();
-
-    let serialize_and_sign = Node::new(SerializeAndSignDM {
-        store_in: signed_tag,
-        function: SerializeAndSignDMFunction::new(|rng, id, args| default_serialize_and_sign(rng, Some(id), args)),
-        data: data.get_strong_ref(),
-        message_name: FullName::new(message.name()),
-        serde_adapter: message.serde_adapter().clone(),
-    });
-
-    Node::new(SendDM {
-        store_in: sent_tag,
-        data: serialize_and_sign,
-        dependencies: Vec::new(),
-    })
-}
-
 fn default_deserialize<SP: SessionParameters>(
     args: &DeserializeArgs<SP>,
 ) -> Result<Value, MaybeAttributableError<SenderError>> {
@@ -495,38 +602,6 @@ fn default_deserialize<SP: SessionParameters>(
         .map_err(|error| SenderError::new(format!("Failed to deserialize the value: {error}")))?;
 
     Ok(value)
-}
-
-/// Returns the result of [`receive`], along with the node containing the original signed value.
-pub fn receive_split<SP: SessionParameters>(
-    message: &ProtocolMessage<SP>,
-) -> (Node<Receive<SP>>, Node<DeserializeAndCheck<SP>>) {
-    let receive_store_in = RemoteSignedTag::new(message.name());
-    let deserialize_store_in = receive_store_in.to_received();
-    let message_name = FullName::new(message.name());
-
-    let receive = Node::new(Receive {
-        store_in: receive_store_in,
-        message_name: message_name.clone(),
-        phantom: PhantomData,
-    });
-
-    let deserialize = Node::new(DeserializeAndCheck {
-        store_in: deserialize_store_in,
-        function: DeserializeFunction::new(default_deserialize),
-        data: receive.get_strong_ref(),
-        message_name,
-        serde_adapter: message.serde_adapter().clone(),
-    });
-
-    (receive, deserialize)
-}
-
-/// Returns the node for deserialized and checked message stripped of metadata.
-#[must_use]
-pub fn receive<SP: SessionParameters>(message: &ProtocolMessage<SP>) -> Node<DeserializeAndCheck<SP>> {
-    let (_receive, deserialize) = receive_split(message);
-    deserialize
 }
 
 /// Collects the elements of a mapping node into a scalar node.

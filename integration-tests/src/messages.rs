@@ -91,28 +91,28 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
-        let message_x = ProtocolMessage::new::<Message1<SP::Verifier>>("x");
-        let message_y = ProtocolMessage::new::<Message2<SP::Verifier>>("y");
-        let message_z = ProtocolMessage::new::<Message3<SP::Verifier>>("z");
+        let (message_x_out, message_x_in) = broadcast_message::<_, Message1<SP::Verifier>>("x");
+        let (message_y_out, message_y_in) = direct_message::<_, Message2<SP::Verifier>>("y");
+        let (message_z_out, message_z_in) = direct_message::<_, Message3<SP::Verifier>>("z");
 
         let all_parties = build_data;
 
         let my_x = compute_scalar("my_x", make_scalar_value, &[]);
-        let x_broadcasted = broadcast(&message_x, &my_x, all_parties.ids());
-        let x = receive(&message_x);
+        let x_broadcasted = message_x_out.send(&my_x, all_parties.ids());
+        let x = message_x_in.receive();
         let all_x = collect(&x, all_parties).with_dependency(&x_broadcasted);
 
         let my_y = compute_mapping("my_y", make_mapping_elem, &[]);
-        let y_sent = direct_message(&message_y, &my_y);
-        let y = receive(&message_y);
+        let y_sent = message_y_out.send(&my_y);
+        let y = message_y_in.receive();
         let all_y = collect(&y, all_parties).with_dependency(send_all(&y_sent, all_parties.ids()));
 
         let mut ids = all_parties.ids().clone();
         ids.remove(party_build_data.id());
         let my_z_group = ThresholdGroup::new(&ids);
         let my_z = compute_mapping("my_z", make_mapping_elem_sans_me, &[]);
-        let z_sent = direct_message(&message_z, &my_z);
-        let z = receive(&message_z);
+        let z_sent = message_z_out.send(&my_z);
+        let z = message_z_in.receive();
         let all_z = collect(&z, &my_z_group).with_dependency(send_all(&z_sent, my_z_group.ids()));
 
         Ok(compute_scalar(
