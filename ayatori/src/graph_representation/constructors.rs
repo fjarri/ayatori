@@ -440,6 +440,7 @@ pub struct BroadcastMessageIn<SP: SessionParameters> {
 
 impl<SP: SessionParameters> BroadcastMessageIn<SP> {
     /// Returns the result of [`Self::receive`], along with the node containing the original signed value.
+    #[must_use]
     pub fn receive_split(self) -> (Node<Receive<SP>>, Node<DeserializeAndCheck<SP>>) {
         let receive_store_in = RemoteSignedTag::new(&self.name);
         let deserialize_store_in = receive_store_in.to_received();
@@ -534,6 +535,7 @@ pub struct DirectMessageIn<SP: SessionParameters> {
 
 impl<SP: SessionParameters> DirectMessageIn<SP> {
     /// Returns the result of [`Self::receive`], along with the node containing the original signed value.
+    #[must_use]
     pub fn receive_split(self) -> (Node<Receive<SP>>, Node<DeserializeAndCheck<SP>>) {
         let receive_store_in = RemoteSignedTag::new(&self.name);
         let deserialize_store_in = receive_store_in.to_received();

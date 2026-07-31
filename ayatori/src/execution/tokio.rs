@@ -56,7 +56,7 @@ where
                     Task::Deterministic(task) => task.execute(),
                     Task::Randomized(task) => task.execute(rng),
                     Task::Send(task) => {
-                        for (destination, message) in task.into_direct_messages() {
+                        for (destination, message) in task.into_dms() {
                             tx.send(MessageOut::Message { destination, message })
                                 .await
                                 .map_err(|err| {
@@ -179,7 +179,7 @@ where
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
                 Task::Send(task) => {
-                    for (destination, message) in task.into_direct_messages() {
+                    for (destination, message) in task.into_dms() {
                         tx.send(MessageOut::Message { destination, message })
                             .await
                             .map_err(|err| {

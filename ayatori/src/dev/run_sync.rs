@@ -101,7 +101,7 @@ impl<SP: SessionParameters> RunSyncConfig<SP> {
                         Task::Deterministic(task) => updates.push(task.execute()),
                         Task::Randomized(task) => updates.push(task.execute(rng)),
                         Task::Send(task) => {
-                            for (destination, message) in task.into_direct_messages() {
+                            for (destination, message) in task.into_dms() {
                                 let queue = messages.get_mut(&destination).ok_or_else(|| {
                                     RuntimeError::new(format!("{id:?} not found in the map of message queues"))
                                 })?;

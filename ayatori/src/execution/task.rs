@@ -552,6 +552,9 @@ impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
     }
 }
 
+/// An object enapsulating a task of sending message(s).
+///
+/// Can be converted into different types of messages, depending on what transport capabilities are available.
 #[derive_where::derive_where(Debug)]
 pub struct SendTask<SP: SessionParameters> {
     direct_messages: BTreeMap<SP::Verifier, SignedValue<SP>>,
@@ -573,12 +576,36 @@ impl<SP: SessionParameters> SendTask<SP> {
         }
     }
 
-    pub fn into_direct_messages(self) -> impl Iterator<Item = (SP::Verifier, Message<SP>)> {
-        let mut result: BTreeMap<SP::Verifier, Vec<SignedValue<SP>>> = BTreeMap::new();
+    /// Converts the task into separated broadcasts and direct messages.
+    #[expect(clippy::type_complexity)]
+    #[must_use]
+    pub fn into_bcs_and_dms(
+        self,
+    ) -> (
+        Vec<(BTreeSet<SP::Verifier>, Message<SP>)>,
+        BTreeMap<SP::Verifier, Message<SP>>,
+    ) {
+        let dms = self
+            .direct_messages
+            .into_iter()
+            .map(|(destination, value)| (destination, Message::new(vec![value])))
+            .collect::<BTreeMap<_, _>>();
+        let bcs = self
+            .broadcast_messages
+            .into_iter()
+            .map(|(destinations, value)| (destinations, Message::new(vec![value])))
+            .collect::<Vec<_>>();
+        (bcs, dms)
+    }
 
-        for (destination, value) in self.direct_messages {
-            result.entry(destination).or_default().push(value);
-        }
+    /// Converts the task into purely direct messages for each destination.
+    #[must_use]
+    pub fn into_dms(self) -> BTreeMap<SP::Verifier, Message<SP>> {
+        let mut result = self
+            .direct_messages
+            .into_iter()
+            .map(|(destination, value)| (destination, vec![value]))
+            .collect::<BTreeMap<_, _>>();
 
         for (destinations, value) in self.broadcast_messages {
             for destination in destinations {
@@ -589,6 +616,7 @@ impl<SP: SessionParameters> SendTask<SP> {
         result
             .into_iter()
             .map(|(destination, values)| (destination, Message::new(values)))
+            .collect()
     }
 }
 
