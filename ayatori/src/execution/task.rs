@@ -633,7 +633,10 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
             });
         }
 
-        // TODO: check the logic here - if it secure to ignore the destination if it is None?
+        // This is just a pre-check for the errors that are not attributable to the sender.
+        // We will check that Some/None variant of the destination matches
+        // whether we expected a broadcast or a direct message during deserealization,
+        // because then the failure will be attributable and provable.
         if let Some(destination) = self.signed_value.metadata().destination() {
             // Check that the message is addressed to a correct destination (one that this node manages).
             // If it is not, it may be a replay attack.

@@ -453,7 +453,7 @@ impl<SP: SessionParameters> BroadcastMessageIn<SP> {
 
         let deserialize = Node::new(DeserializeAndCheck {
             store_in: deserialize_store_in,
-            function: DeserializeFunction::new(default_deserialize),
+            function: DeserializeFunction::new(|args| default_deserialize(args, false)),
             data: receive.get_strong_ref(),
             message_name,
             serde_adapter: self.serde_adapter,
@@ -547,7 +547,7 @@ impl<SP: SessionParameters> DirectMessageIn<SP> {
 
         let deserialize = Node::new(DeserializeAndCheck {
             store_in: deserialize_store_in,
-            function: DeserializeFunction::new(default_deserialize),
+            function: DeserializeFunction::new(|args| default_deserialize(args, true)),
             data: receive.get_strong_ref(),
             message_name,
             serde_adapter: self.serde_adapter,
@@ -587,8 +587,17 @@ fn default_serialize_and_sign<SP: SessionParameters>(
 
 fn default_deserialize<SP: SessionParameters>(
     args: &DeserializeArgs<SP>,
+    expect_some_destination: bool,
 ) -> Result<Value, MaybeAttributableError<SenderError>> {
     let verified_value = args.verified_value()?;
+
+    if expect_some_destination && verified_value.metadata().destination().is_none() {
+        return Err(SenderError::new("Expected a direct message, but got a broadcast message").into());
+    }
+
+    if !expect_some_destination && verified_value.metadata().destination().is_some() {
+        return Err(SenderError::new("Expected a broadcast message, but got a direct message").into());
+    }
 
     let expected_senders = args.expected_senders();
 
