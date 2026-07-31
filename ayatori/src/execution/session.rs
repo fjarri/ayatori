@@ -31,9 +31,9 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, MappingFunction,
+        MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SerializeArgs,
+        SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
@@ -152,14 +152,14 @@ where
 
         for (name, value) in public_values {
             if let Some(store_in) = arguments.get(&name) {
-                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)
+                self.add_scalar(&ScalarTag::from(store_in.clone()), value)
                     .or_with_context(|| format!("Failed to add the private input `{store_in}` to the storage"))?;
             }
         }
 
         for (name, value) in private_values {
             if let Some(store_in) = arguments.get(&name) {
-                self.add_scalar(&ScalarTag::Argument(store_in.clone()), value)
+                self.add_scalar(&ScalarTag::from(store_in.clone()), value)
                     .or_with_context(|| format!("Failed to add the public input `{store_in}` to the storage"))?;
             }
         }
@@ -265,7 +265,7 @@ where
     }
 
     pub(crate) fn get_output<T: Erasable + Clone>(&self, output_tag: &ComputedScalarTag) -> Result<T, RuntimeError> {
-        let tag = ScalarTag::Computed(output_tag.clone());
+        let tag = ScalarTag::from(output_tag.clone());
         let value = self
             .storage
             .get_scalar(&tag)
@@ -317,7 +317,7 @@ where
                 } => {
                     let value = self
                         .storage
-                        .get_scalar(&ScalarTag::LocalSigned(to_send))
+                        .get_scalar(&ScalarTag::from(to_send))
                         .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
                     let signed_value = value
                         .downcast::<SignedValue<SP>>()
@@ -327,7 +327,7 @@ where
                     // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
                     // and we can get away with it because it does not change the state.
                     // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_scalar(&ScalarTag::Sent(store_in), Value::new(()))?;
+                    self.add_scalar(&ScalarTag::from(store_in), Value::new(()))?;
                     return Ok(Some(SendTask::new_broadcast(destinations, signed_value).into()));
                 }
                 Action::SendDM {
@@ -337,7 +337,7 @@ where
                 } => {
                     let value = self
                         .storage
-                        .get_elem(&MappingTag::LocalSigned(to_send), &destination)
+                        .get_elem(&MappingTag::from(to_send), &destination)
                         .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
                     let signed_value = value
                         .downcast::<SignedValue<SP>>()
@@ -347,7 +347,7 @@ where
                     // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
                     // and we can get away with it because it does not change the state.
                     // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_element(&MappingTag::Sent(store_in), &destination, Value::new(()))?;
+                    self.add_element(&MappingTag::from(store_in), &destination, Value::new(()))?;
                     return Ok(Some(SendTask::new_direct(destination, signed_value).into()));
                 }
                 Action::ComputeScalar {
@@ -467,7 +467,7 @@ where
                 } => {
                     let value = self
                         .storage
-                        .get_elem(&MappingTag::RemoteSigned(data), &index)
+                        .get_elem(&MappingTag::from(data), &index)
                         .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
                     let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
                     return Ok(Some(
@@ -476,7 +476,7 @@ where
                 }
                 Action::MergeScalar { store_in, left, right } => {
                     self.add_scalar(
-                        &ScalarTag::Merged(store_in.clone()),
+                        &ScalarTag::from(store_in.clone()),
                         self.storage
                             .get_one_or_both_as_value(&left, &right)
                             .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
@@ -485,12 +485,12 @@ where
                 Action::Collect {
                     store_in,
                     values,
-                    indices,
+                    sources,
                 } => {
                     self.add_scalar(
-                        &ScalarTag::Collected(store_in.clone()),
+                        &store_in,
                         self.storage
-                            .get_mapping_as_value(&values, &indices)
+                            .get_mapping_as_value(&values, &sources)
                             .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
                     )?;
                 }
@@ -566,7 +566,7 @@ where
                         let value = self
                             .storage
                             .get_elem(
-                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &MappingTag::from(RemoteSignedTag::new_with_full_name(&name)),
                                 &guilty_party,
                             )
                             .or_with_context(|| {
@@ -619,7 +619,7 @@ where
                         let value = self
                             .storage
                             .get_elem(
-                                &MappingTag::RemoteSigned(RemoteSignedTag::new_with_full_name(&name)),
+                                &MappingTag::from(RemoteSignedTag::new_with_full_name(&name)),
                                 &guilty_party,
                             )
                             .or_with_context(|| {
@@ -893,7 +893,7 @@ enum AddSessionUpdate<SP: SessionParameters> {
 
 /// Contains the specifics about why the session was impossible to finalize.
 #[derive(Debug, Clone)]
-pub struct UnfinishableOutcome(Vec<CollectedTag>);
+pub struct UnfinishableOutcome(Vec<ScalarTag>);
 
 impl Display for UnfinishableOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {

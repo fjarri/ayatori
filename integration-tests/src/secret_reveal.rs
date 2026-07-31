@@ -218,17 +218,17 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
                 ("Y", (&y_echo).into()), // S_j(Y_i,j) (echoed back to us)
             ],
         )
-        .with_dependency(&send_all(&x_cap_sent, all_parties.ids()))
-        .with_dependency(&send_all(&y_cap_sent, all_parties.ids()))
-        .with_dependency(&send_all(&y_echo_sent, all_parties.ids()))
-        .with_dependency(&send_all(&c_cap_sent, all_parties.ids()));
+        .with_dependency(send_all(&x_cap_sent, all_parties.ids()))
+        .with_dependency(send_all(&y_cap_sent, all_parties.ids()))
+        .with_dependency(send_all(&y_echo_sent, all_parties.ids()))
+        .with_dependency(send_all(&c_cap_sent, all_parties.ids()));
 
         Ok(compute_scalar(
             "output",
             gen_output,
             &[("x", (&collect(&x_decrypted, all_parties)).into())],
         )
-        .with_dependency(&collect(&x_verified, all_parties)))
+        .with_dependency(collect(&x_verified, all_parties)))
     }
 }
 
@@ -254,7 +254,7 @@ mod tests {
     fn happy_path() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = ThresholdGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids.iter().cloned().collect());
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();
@@ -278,7 +278,7 @@ mod tests {
     fn provable_error() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = ThresholdGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids.iter().cloned().collect());
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

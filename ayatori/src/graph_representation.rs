@@ -1,14 +1,15 @@
 mod any_node;
 mod args;
 mod constructors;
-mod typed_nodes;
-mod unions;
+mod node_tree;
+mod specific_nodes;
+mod union_nodes;
 
-pub(crate) use any_node::Reproducibility;
-pub(crate) use typed_nodes::{ComputeMappingKind, ComputeScalarKind, GeneralizedNode};
+pub(crate) use node_tree::Reproducibility;
+pub(crate) use specific_nodes::{ComputeMappingKind, GeneralizedNode};
 
 #[cfg(feature = "dev")]
-pub(crate) use typed_nodes::ShallowClone;
+pub(crate) use specific_nodes::{ComputeScalarKind, ShallowClone};
 
 pub use any_node::AnyNode;
 pub use args::{ArgNodes, PartyBuildData, PrivateInputs, ProtocolArgs, ProtocolSignature, PublicInputs};
@@ -19,11 +20,10 @@ pub use constructors::{
     compute_scalar, compute_scalar_third_party_attributable, compute_scalar_with_rng, constant, direct_message,
     mapping_alias, merge_scalars, receive, receive_split, scalar_alias, send_all,
 };
-pub use typed_nodes::{
+pub use specific_nodes::{
     Collect, ComputeMapping, ComputeScalar, DeserializeAndCheck, MergeScalars, Node, Receive, ScalarArgument, SendAll,
     SendBC, SendDM, SerializeAndSignBC, SerializeAndSignDM,
 };
-pub use unions::{
+pub use union_nodes::{
     BroadcastArg, CollectArg, ComputeMappingArg, ComputeScalarArg, Dependency, DirectMessageArg, OutputNode,
-    UnionCastError,
 };

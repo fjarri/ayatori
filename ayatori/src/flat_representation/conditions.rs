@@ -2,7 +2,6 @@ use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
     string::ToString,
-    vec::Vec,
 };
 use core::fmt::{self, Display};
 
@@ -155,13 +154,13 @@ impl ElementCondition {
 
     pub fn from_deserialize_and_check<SP: SessionParameters>(node: &DeserializeAndCheck<SP>) -> Self {
         Self {
-            all_of: BTreeSet::from([MappingTag::RemoteSigned(node.data.as_ref().store_in.clone())]),
+            all_of: BTreeSet::from([node.data.as_ref().store_in.clone().into()]),
         }
     }
 
     pub fn from_direct_message<SP: SessionParameters>(node: &SendDM<SP>) -> Self {
         Self {
-            all_of: BTreeSet::from([MappingTag::LocalSigned(node.data.as_ref().store_in.clone())]),
+            all_of: BTreeSet::from([node.data.as_ref().store_in.clone().into()]),
         }
     }
 }
@@ -182,10 +181,8 @@ impl<Id: PartyId> QuorumCondition<Id> {
 
     pub fn from_send_all<SP: SessionParameters<Verifier = Id>>(node: &SendAll<SP>) -> Self {
         Self {
-            tag: MappingTag::Sent(node.values.as_ref().store_in.clone()),
-            group: Box::new(ThresholdGroup::new(
-                &node.destinations.iter().cloned().collect::<Vec<_>>(),
-            )),
+            tag: node.values.as_ref().store_in.clone().into(),
+            group: Box::new(ThresholdGroup::new(&node.destinations)),
         }
     }
 

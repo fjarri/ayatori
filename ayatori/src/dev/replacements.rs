@@ -4,10 +4,9 @@ use core::fmt::{self, Debug};
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, Erasable, FullName, LocalSignedBCTag, LocalSignedDMTag,
-        MappingTag, MaybeAttributableError, RuntimeError, ScalarTag, SerializeAndSignBCFunction,
-        SerializeAndSignDMFunction, SerializeArgs, SignedValue, SimpleMappingFunction, SimpleScalarFunction,
-        ThirdPartyAttributableMappingFunction, ThirdPartyError, UnattributableError, UnattributableMappingFunction,
-        UnattributableScalarFunction, Value,
+        MaybeAttributableError, RuntimeError, SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs,
+        SignedValue, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
+        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableScalarFunction, Value,
     },
     graph_representation::{AnyNode, ComputeMappingKind, ComputeScalarKind, GeneralizedNode, OutputNode, ShallowClone},
     traced_error::TraceableResult,
@@ -79,7 +78,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
         );
         Ok(Self {
-            tag: AnyTag::Scalar(ScalarTag::Computed(tag.clone())),
+            tag: tag.clone().into(),
             kind: ReplacementEnum::ComputeScalar {
                 function: Arc::new(move |value, args| {
                     let typed_value = value
@@ -103,7 +102,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
         );
         Ok(Self {
-            tag: AnyTag::Mapping(MappingTag::Computed(tag.clone())),
+            tag: tag.clone().into(),
             kind: ReplacementEnum::ComputeMapping {
                 function: Arc::new(move |value, id, args| {
                     let typed_value = value
@@ -134,7 +133,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
         );
         Ok(Self {
-            tag: AnyTag::Mapping(MappingTag::Computed(tag)),
+            tag: tag.into(),
             kind: ReplacementEnum::ComputeMappingThirdPartyAttributable {
                 function: Arc::new(move |maybe_value, id, args| {
                     let typed_value = maybe_value
@@ -161,7 +160,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
         );
         Ok(Self {
-            tag: AnyTag::Scalar(ScalarTag::LocalSigned(tag.clone())),
+            tag: tag.clone().into(),
             kind: ReplacementEnum::SerializeAndSignBC {
                 function: Arc::new(move |rng, orig_value, args| {
                     let typed_value = orig_value
@@ -192,7 +191,7 @@ impl<SP: SessionParameters> Replacement<SP> {
                 .or_with_context(|| format!("Failed to create a tag from the name `{name:?}`"))?,
         );
         Ok(Self {
-            tag: AnyTag::Mapping(MappingTag::LocalSigned(tag.clone())),
+            tag: tag.clone().into(),
             kind: ReplacementEnum::SerializeAndSignDM {
                 function: Arc::new(move |rng, orig_value, destination, args| {
                     let typed_value = orig_value

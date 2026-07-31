@@ -119,7 +119,7 @@ mod tests {
     fn happy_path() {
         let signers = (1..4).map(TestSigner::new).collect::<Vec<_>>();
         let ids = signers.iter().map(Keypair::verifying_key).collect::<Vec<_>>();
-        let party_group = ThresholdGroup::new(&ids);
+        let party_group = ThresholdGroup::new(&ids.iter().cloned().collect());
 
         let mut rng = ChaCha8Rng::seed_from_u64(123);
         let session_id = SessionId::random(&mut rng).unwrap();

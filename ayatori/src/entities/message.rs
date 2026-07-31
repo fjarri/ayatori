@@ -8,7 +8,7 @@ use signature::{
     rand_core::TryRng,
 };
 
-use super::{errors::RuntimeError, session_id::SessionId, tag::FullName, value::SerializedValue};
+use super::{errors::RuntimeError, session_id::SessionId, specific_tags::FullName, value::SerializedValue};
 use crate::{
     traced_error::Traceable,
     traits::{SessionParameters, WireFormat},

@@ -12,6 +12,14 @@ use crate::{
     traits::{SessionParameters, WireFormat},
 };
 
+/// An error returned when attempting to downcast from a larger union type to a smaller one (or a single type),
+/// and the variant of the larger union is not present in the smalle one.
+#[derive(Debug, Clone, Copy, displaydoc::Display)]
+#[displaydoc("Failed to narrow down a union")]
+pub struct UnionCastError;
+
+impl core::error::Error for UnionCastError {}
+
 /// A randomly occuring error that is not a result of a misuse of the API, or malicious actions of other parties.
 ///
 /// Getting this error during a protocol execution means that the protocol can just be restarted

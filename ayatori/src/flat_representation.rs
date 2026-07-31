@@ -1,4 +1,6 @@
 mod conditions;
+mod rules;
 mod ruleset;
 
-pub(crate) use ruleset::{Action, OnError, Ruleset, RulesetState};
+pub(crate) use rules::{Action, OnError};
+pub(crate) use ruleset::{Ruleset, RulesetState};

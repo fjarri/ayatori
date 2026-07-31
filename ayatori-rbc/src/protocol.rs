@@ -29,8 +29,8 @@ fn make_shards<SP: SessionParameters, T: Erasable + Serialize>(
 ) -> Result<(Scheme, FullShardSet), UnattributableError> {
     let value = args.get::<T>("value")?;
     let threshold = args.get::<usize>("threshold")?;
-    let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
-    let (scheme, shards) = sharding::new_set::<SP::WireFormat, _>(value, ids.len(), *threshold)?;
+    let receivers = args.get::<BTreeSet<SP::Verifier>>("receivers")?;
+    let (scheme, shards) = sharding::new_set::<SP::WireFormat, _>(value, receivers.len(), *threshold)?;
     Ok((scheme, shards))
 }
 
@@ -46,9 +46,9 @@ fn make_value_message<SP: SessionParameters>(
 ) -> Result<ValueMessage<SP>, UnattributableError> {
     let (scheme, shards) = args.get::<(Scheme, FullShardSet)>("scheme_and_shards")?;
     let merkle_tree = args.get::<MerkleTree<SP::Digest>>("merkle_tree")?;
-    let ids_to_indices = args.get::<BTreeMap<SP::Verifier, usize>>("ids_to_indices")?;
+    let receivers_to_indices = args.get::<BTreeMap<SP::Verifier, usize>>("receivers_to_indices")?;
 
-    let idx = ids_to_indices
+    let idx = receivers_to_indices
         .get(id)
         .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the list of all party IDs")))?;
 
@@ -77,16 +77,16 @@ fn make_echo<SP: SessionParameters>(args: &Args<SP>) -> Result<EchoMessage<SP>, 
     Ok(echo)
 }
 
-fn make_ids_to_indices<SP: SessionParameters>(
+fn make_receivers_to_indices<SP: SessionParameters>(
     args: &Args<SP>,
 ) -> Result<BTreeMap<SP::Verifier, usize>, UnattributableError> {
-    let ids = args.get::<BTreeSet<SP::Verifier>>("ids")?;
-    let ids_to_indices = ids
+    let receivers = args.get::<BTreeSet<SP::Verifier>>("receivers")?;
+    let receivers_to_indices = receivers
         .iter()
         .enumerate()
         .map(|(idx, id)| (id.clone(), idx))
         .collect::<BTreeMap<_, _>>();
-    Ok(ids_to_indices)
+    Ok(receivers_to_indices)
 }
 
 #[derive_where::derive_where(Debug)]
@@ -164,7 +164,7 @@ fn process_echo<SP: SessionParameters>(
     let sender = args.get::<SP::Verifier>("sender")?;
     let original_message = args.get::<OriginalMessage<SP>>("original_message")?;
     let echo = args.get::<CheckedEchoMessage<SP>>("echo")?;
-    let ids_to_indices = args.get::<BTreeMap<SP::Verifier, usize>>("ids_to_indices")?;
+    let receivers_to_indices = args.get::<BTreeMap<SP::Verifier, usize>>("receivers_to_indices")?;
 
     let error_package = (original_message.signed_value.clone(), echo.signed_value.clone());
 
@@ -188,7 +188,7 @@ fn process_echo<SP: SessionParameters>(
         )?
         .into());
     };
-    let idx = ids_to_indices
+    let idx = receivers_to_indices
         .get(id)
         .ok_or_else(|| RuntimeError::new(format!("{id:?} not found in the list of all party IDs")))?;
     if !value_message.branch.verify(*idx, &value_message.shard) {
@@ -357,10 +357,12 @@ where
         let readies_to_send_ready = f.checked_add(1).expect(no_overflow);
         let readies_to_finalize = f.checked_mul(2).expect(no_overflow).checked_add(1).expect(no_overflow);
 
-        let ids = build_data.receivers.iter().cloned().collect::<Vec<_>>();
-        let ids_set = constant("ids", ids.iter().cloned().collect::<BTreeSet<SP::Verifier>>());
-
-        let ids_to_indices = compute_scalar("ids_to_indices", make_ids_to_indices, &[("ids", (&ids_set).into())]);
+        let receivers = constant("receivers", build_data.receivers.clone());
+        let receivers_to_indices = compute_scalar(
+            "receivers_to_indices",
+            make_receivers_to_indices,
+            &[("receivers", (&receivers).into())],
+        );
 
         let all_shards_sent = if is_sender {
             let threshold = constant("threshold", echos_to_finalize);
@@ -370,7 +372,7 @@ where
                 &[
                     ("value", (to_broadcast).into()),
                     ("threshold", (&threshold).into()),
-                    ("ids", (&ids_set).into()),
+                    ("receivers", (&receivers).into()),
                 ],
             );
             let merkle_tree = compute_scalar(
@@ -385,7 +387,7 @@ where
                 &[
                     ("scheme_and_shards", (&scheme_and_shards).into()),
                     ("merkle_tree", (&merkle_tree).into()),
-                    ("ids_to_indices", (&ids_to_indices).into()),
+                    ("receivers_to_indices", (&receivers_to_indices).into()),
                 ],
             );
 
@@ -400,7 +402,7 @@ where
 
             let sender = constant("sender", build_data.sender.clone());
 
-            let sender_party = ThresholdGroup::new(core::slice::from_ref(&build_data.sender));
+            let sender_party = ThresholdGroup::new(&BTreeSet::from([build_data.sender.clone()]));
             let value_signed_scalar = collect(&value_signed, &sender_party).with_dependency(all_shards_sent);
             let value_deserialized_scalar = collect(&value_deserialized, &sender_party);
 
@@ -420,7 +422,7 @@ where
                 &[
                     ("sender", (&sender).into()),
                     ("value_signed", (&value_signed_scalar).into()),
-                    ("ids", (&ids_set).into()),
+                    ("receivers", (&receivers).into()),
                 ],
             )
             .with_dependency(&value_deserialized_scalar);
@@ -441,7 +443,7 @@ where
                     ("sender", (&sender).into()),
                     ("original_message", (&original_message).into()),
                     ("echo", (&echo_checked).into()),
-                    ("ids_to_indices", (&ids_to_indices).into()),
+                    ("receivers_to_indices", (&receivers_to_indices).into()),
                 ],
                 verify_process_echo,
             );
@@ -449,7 +451,7 @@ where
             let all_echos_to_check_root = collect_into(
                 "to_check_root",
                 &echo_processed,
-                &ThresholdGroup::new_threshold(&ids, echos_to_check_root),
+                &ThresholdGroup::new_threshold(&build_data.receivers, echos_to_check_root),
             )
             .with_dependency(&echo_sent);
 
@@ -469,7 +471,7 @@ where
             let all_readies_to_send_ready = collect_into(
                 "to_send_ready",
                 &ready_received,
-                &ThresholdGroup::new_threshold(&ids, readies_to_send_ready),
+                &ThresholdGroup::new_threshold(&build_data.receivers, readies_to_send_ready),
             );
 
             let send_ready_trigger = merge_scalars(&root_checked, &all_readies_to_send_ready);
@@ -480,14 +482,14 @@ where
             let all_echos_to_finalize = collect_into(
                 "echos_to_finalize",
                 &echo_processed,
-                &ThresholdGroup::new_threshold(&ids, echos_to_finalize),
+                &ThresholdGroup::new_threshold(&build_data.receivers, echos_to_finalize),
             )
             .with_dependency(&echo_sent);
 
             let all_readies_to_finalize = collect_into(
                 "readies_to_finalize",
                 &ready_received,
-                &ThresholdGroup::new_threshold(&ids, readies_to_finalize),
+                &ThresholdGroup::new_threshold(&build_data.receivers, readies_to_finalize),
             );
 
             let finalize_trigger = merge_scalars(&all_echos_to_finalize, &all_readies_to_finalize);

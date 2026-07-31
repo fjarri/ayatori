@@ -11,7 +11,7 @@ use super::{
     errors::RuntimeError,
     message::VerifiedValue,
     session_id::SessionId,
-    tag::FullName,
+    specific_tags::FullName,
     value::{Erasable, SerdeAdapter, Value},
 };
 use crate::{traced_error::TraceableResult, traits::SessionParameters};
