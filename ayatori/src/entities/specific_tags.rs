@@ -198,6 +198,13 @@ define_tag_type!(
 );
 
 define_tag_type!(
+    /// A value collected from results of sent messages.
+    /// The contents are not supposed to be actually used.
+    "sent-all({0})"
+    SentAllTag, Scalar(ScalarTag/ScalarTagRef::SentAll)
+);
+
+define_tag_type!(
     /// A signed broadcast value + metadata originating from this node.
     /// The name of the tag will come from the protocol message name.
     /// The contents are `SignedValue`.
@@ -236,8 +243,8 @@ impl ComputedMappingTag {
 }
 
 impl SentDMTag {
-    pub fn to_collected(&self) -> CollectedTag {
-        CollectedTag::new(MappingTag::from(self.clone()), None)
+    pub fn to_sent_all(&self) -> SentAllTag {
+        SentAllTag(self.0.clone())
     }
 }
 

@@ -31,9 +31,9 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, CollectedTag, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, MappingFunction,
+        MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SerializeArgs,
+        SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
@@ -488,7 +488,7 @@ where
                     sources,
                 } => {
                     self.add_scalar(
-                        &ScalarTag::from(store_in.clone()),
+                        &store_in,
                         self.storage
                             .get_mapping_as_value(&values, &sources)
                             .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
@@ -893,7 +893,7 @@ enum AddSessionUpdate<SP: SessionParameters> {
 
 /// Contains the specifics about why the session was impossible to finalize.
 #[derive(Debug, Clone)]
-pub struct UnfinishableOutcome(Vec<CollectedTag>);
+pub struct UnfinishableOutcome(Vec<ScalarTag>);
 
 impl Display for UnfinishableOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {

@@ -12,7 +12,7 @@ use super::conditions::{
 };
 use crate::{
     entities::{
-        AnyTag, CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedBCTag,
+        AnyTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedBCTag,
         LocalSignedDMTag, MappingFunction, MappingTag, MergedScalarTag, ReceivedTag, RemoteSignedTag, ScalarFunction,
         ScalarTag, SentBCTag, SentDMTag, SerdeAdapter, SerializeAndSignBCFunction, SerializeAndSignDMFunction,
     },
@@ -72,7 +72,7 @@ pub(crate) enum Action<SP: SessionParameters> {
         destination: SP::Verifier,
     },
     Collect {
-        store_in: CollectedTag,
+        store_in: ScalarTag,
         values: MappingTag,
         sources: BTreeSet<SP::Verifier>,
     },
@@ -215,7 +215,7 @@ impl<SP: SessionParameters> ScalarRule<SP> {
 pub(super) struct CollectRule<SP: SessionParameters> {
     dependencies_condition: ScalarConditionWithState,
     quorum_condition: QuorumConditionWithState<SP::Verifier>,
-    store_in: CollectedTag,
+    store_in: ScalarTag,
     values: MappingTag,
 }
 
@@ -227,7 +227,7 @@ impl<SP: SessionParameters> CollectRule<SP> {
         Self {
             dependencies_condition,
             quorum_condition,
-            store_in: node.store_in.clone(),
+            store_in: node.store_in.clone().into(),
             values: node.values.store_in().to_owned(),
         }
     }
@@ -238,12 +238,12 @@ impl<SP: SessionParameters> CollectRule<SP> {
         Self {
             dependencies_condition,
             quorum_condition,
-            store_in: node.store_in.clone(),
+            store_in: node.store_in.clone().into(),
             values: node.values.as_ref().store_in.clone().into(),
         }
     }
 
-    pub fn store_in(&self) -> &CollectedTag {
+    pub fn store_in(&self) -> &ScalarTag {
         &self.store_in
     }
 

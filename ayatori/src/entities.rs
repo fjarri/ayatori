@@ -19,7 +19,7 @@ pub(crate) use function::{
 };
 pub(crate) use specific_tags::{
     CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedBCTag, LocalSignedDMTag, MergedScalarTag,
-    ReceivedTag, RemoteSignedTag, ScalarArgumentTag, SentBCTag, SentDMTag,
+    ReceivedTag, RemoteSignedTag, ScalarArgumentTag, SentAllTag, SentBCTag, SentDMTag,
 };
 pub(crate) use union_tags::{AnyTag, AnyTagRef, MappingTag, MappingTagRef, ScalarTag, ScalarTagRef};
 pub(crate) use value::Value;

@@ -8,7 +8,7 @@ use core::fmt::{self, Display};
 
 use super::rules::{Action, CollectRule, MappingRule, OnError, ScalarRule, SendBCRule, SendDMRule};
 use crate::{
-    entities::{AnyTagRef, CollectedTag, ComputedScalarTag, MappingTag, RuntimeError, ScalarArgumentTag, ScalarTag},
+    entities::{AnyTagRef, ComputedScalarTag, MappingTag, RuntimeError, ScalarArgumentTag, ScalarTag},
     graph_representation::{AnyNode, GeneralizedNode, OutputNode, Reproducibility},
     traits::SessionParameters,
 };
@@ -106,7 +106,7 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
 pub(crate) enum RulesetState {
     InProgress,
     ReachedOutput,
-    ImpossibleToCollect(Vec<CollectedTag>),
+    ImpossibleToCollect(Vec<ScalarTag>),
 }
 
 #[derive_where::derive_where(Debug)]

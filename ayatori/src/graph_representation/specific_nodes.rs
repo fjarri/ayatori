@@ -22,9 +22,10 @@ use crate::{
         CollectedTag, ComputedMappingTag, ComputedScalarTag, DeserializeFunction, FullName, LocalSignedBCTag,
         LocalSignedDMTag, MappingFunction, MergedScalarTag, PartyGroup, ReceivedTag, RemoteSignedTag, RuntimeError,
         ScalarArgumentTag, ScalarFunction, SenderAttributableVerificationFunction,
-        SenderAttributableWithRevealMappingFunction, SentBCTag, SentDMTag, SerdeAdapter, SerializeAndSignBCFunction,
-        SerializeAndSignDMFunction, SimpleMappingFunction, SimpleScalarFunction, ThirdPartyAttributableMappingFunction,
-        ThirdPartyAttributableScalarFunction, ThirdPartyAttributableVerificationFunction,
+        SenderAttributableWithRevealMappingFunction, SentAllTag, SentBCTag, SentDMTag, SerdeAdapter,
+        SerializeAndSignBCFunction, SerializeAndSignDMFunction, SimpleMappingFunction, SimpleScalarFunction,
+        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction,
+        ThirdPartyAttributableVerificationFunction,
     },
     traced_error::TraceableResult,
     traits::SessionParameters,
@@ -336,8 +337,7 @@ impl<SP: SessionParameters> sealed::HasDependenciesInner<SP> for Collect<SP> {
 /// A node that collects virtual values corresponding to sent direct messages into a scalar value.
 #[derive_where::derive_where(Debug)]
 pub struct SendAll<SP: SessionParameters> {
-    // TODO: a separate tag?
-    pub(crate) store_in: CollectedTag,
+    pub(crate) store_in: SentAllTag,
     pub(crate) values: Node<SendDM<SP>>,
     pub(crate) destinations: BTreeSet<SP::Verifier>,
 }

@@ -550,7 +550,7 @@ pub fn send_all<SP: SessionParameters>(
     values: &Node<SendDM<SP>>,
     destinations: &BTreeSet<SP::Verifier>,
 ) -> Node<SendAll<SP>> {
-    let store_in = values.as_ref().store_in.to_collected();
+    let store_in = values.as_ref().store_in.to_sent_all();
     Node::new(SendAll {
         store_in,
         values: values.get_strong_ref(),

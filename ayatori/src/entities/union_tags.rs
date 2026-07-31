@@ -4,7 +4,7 @@ use super::{
     errors::UnionCastError,
     specific_tags::{
         CollectedTag, ComputedMappingTag, ComputedScalarTag, LocalSignedBCTag, LocalSignedDMTag, MergedScalarTag,
-        ReceivedTag, RemoteSignedTag, ScalarArgumentTag, SentBCTag, SentDMTag,
+        ReceivedTag, RemoteSignedTag, ScalarArgumentTag, SentAllTag, SentBCTag, SentDMTag,
     },
 };
 
@@ -75,6 +75,7 @@ define_tag_union!(
         Merged(MergedScalarTag),
         Argument(ScalarArgumentTag),
         Collected(CollectedTag),
+        SentAll(SentAllTag),
     }
 );
 
