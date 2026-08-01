@@ -60,11 +60,12 @@ We extract these tasks to their own variant because offloading such tasks to ano
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_send}}
 ```
-This tasks requests that the user sends the message contained in the task to a remote party.
-After the message is sent successfully, or failed to be sent (because the remote party is unavailable), the resulting update must be sent to the incoming channel as [`SessionUpdate`](protocol_user_api::SessionUpdate) variant.
+This tasks requests that the user sends the messages contained in the task to a remote party or parties.
+If a message failed to be sent (because the remote party is unavailable), the user may choose to ban the party by sending a corresponding [`SessionUpdate`](protocol_user_api::SessionUpdate) variant to the incoming channel.
 
 Note that the message destination will be the party's public key; matching it to the address for the transport layer (e.g., an IP address) is the user's responsibility.
-We are also pushing to the channel not a [`Message`](protocol_user_api::Message) itself, but a [`MessageOut`](protocol_user_api::tokio::MessageOut) wrapper, because we use the same channel to report non-fatal errors (e.g. malformed messages), as will be illustrated below.
+We are also pushing to the channel not a [`Message`](protocol_user_api::Message) itself, but a [`MessageOut`](protocol_user_api::SessionRunnerConfiguration::MessageOut) wrapper.
+The exact type depends on the selected configuration, but it may include direct messages, broadcast messages, and non-fatal errors (e.g. malformed messages), as will be illustrated below.
 
 ```rust,ignore
 {{#include ../../book-examples/src/session_runner.rs:task_loop_end}}

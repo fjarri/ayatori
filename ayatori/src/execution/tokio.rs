@@ -8,34 +8,21 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    session::{MessageAttributableError, Session, SessionReport, SessionState},
+    config::SessionRunnerConfiguration,
+    session::{Session, SessionReport, SessionState},
     task::{SessionUpdate, Task},
 };
 use crate::{
-    entities::{Message, RuntimeError},
+    entities::RuntimeError,
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-/// A container for outgoing information from a session runner.
-#[derive_where::derive_where(Debug)]
-pub enum MessageOut<SP: SessionParameters> {
-    /// A message that needs to be sent out.
-    Message {
-        /// Message destination.
-        destination: SP::Verifier,
-        /// The message to be sent.
-        message: Message<SP>,
-    },
-    /// A non-fatal problem attributable to message(s) but not to a specific party.
-    Error(MessageAttributableError<SP>),
-}
-
 /// Executes the session waiting for the messages from the `rx` channel
 /// and pushing outgoing messages into the `tx` channel.
-pub async fn run_session<SP, P>(
+pub async fn run_session<SP, P, C>(
     rng: &mut SP::Rng,
-    tx: &mpsc::Sender<MessageOut<SP>>,
+    tx: &mpsc::Sender<C::MessageOut>,
     rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
@@ -45,6 +32,7 @@ where
     SP::Signer: Sync,
     SP::Rng: Send,
     P: ExecutableProtocol<SP>,
+    C: SessionRunnerConfiguration<SP>,
 {
     let mut cached_update = None;
     loop {
@@ -56,12 +44,10 @@ where
                     Task::Deterministic(task) => task.execute(),
                     Task::Randomized(task) => task.execute(rng),
                     Task::Send(task) => {
-                        for (destination, message) in task.into_dms() {
-                            tx.send(MessageOut::Message { destination, message })
-                                .await
-                                .map_err(|err| {
-                                    RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
-                                })?;
+                        for message_out in C::send_task_into_messages_out(task) {
+                            tx.send(message_out).await.map_err(|err| {
+                                RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
+                            })?;
                         }
                         continue;
                     }
@@ -73,7 +59,7 @@ where
             session = match session.with_update(update)? {
                 SessionState::InProgress(session) => session,
                 SessionState::InProgressWithMessageError { error, session } => {
-                    tx.send(MessageOut::Error(error)).await.map_err(|err| {
+                    tx.send(C::MessageOut::from(error)).await.map_err(|err| {
                         RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
                     })?;
                     session
@@ -151,10 +137,10 @@ impl<SP: SessionParameters> TaskScope<SP> {
 // - we want to avoid having dangling tasks when we return
 // - we have multiple exit points from the function
 // we wrap all the logic here so that we could clean all the tasks in one place (in the caller).
-async fn par_run_session_inner<SP, P>(
+async fn par_run_session_inner<SP, P, C>(
     tasks: &mut TaskScope<SP>,
     rng: &mut SP::Rng,
-    tx: &mpsc::Sender<MessageOut<SP>>,
+    tx: &mpsc::Sender<C::MessageOut>,
     rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
@@ -164,6 +150,7 @@ where
     SP::Signer: Send + Sync,
     SP::Rng: SeedableRng + Send,
     P: ExecutableProtocol<SP>,
+    C: SessionRunnerConfiguration<SP>,
 {
     loop {
         while let Some(task) = session.make_task().or_with_context(|| "Failed to make a task".into())? {
@@ -179,12 +166,10 @@ where
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
                 Task::Send(task) => {
-                    for (destination, message) in task.into_dms() {
-                        tx.send(MessageOut::Message { destination, message })
-                            .await
-                            .map_err(|err| {
-                                RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
-                            })?;
+                    for message_out in C::send_task_into_messages_out(task) {
+                        tx.send(message_out).await.map_err(|err| {
+                            RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
+                        })?;
                     }
                 }
             }
@@ -210,7 +195,7 @@ where
             session = match session.with_update(update)? {
                 SessionState::InProgress(session) => session,
                 SessionState::InProgressWithMessageError { error, session } => {
-                    tx.send(MessageOut::Error(error)).await.map_err(|err| {
+                    tx.send(C::MessageOut::from(error)).await.map_err(|err| {
                         RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
                     })?;
                     session
@@ -233,9 +218,9 @@ where
 /// This function should be used if message creation and verification takes a significant amount of time,
 /// to offset the parallelizing overhead.
 /// Use [`tokio::run_sessions_async`](`crate::dev::tokio::run_sessions_async`) to benchmark your specific protocol.
-pub async fn par_run_session<SP, P>(
+pub async fn par_run_session<SP, P, C>(
     rng: &mut SP::Rng,
-    tx: &mpsc::Sender<MessageOut<SP>>,
+    tx: &mpsc::Sender<C::MessageOut>,
     rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     session: Session<SP, P>,
@@ -245,9 +230,10 @@ where
     SP::Signer: Send + Sync,
     SP::Rng: SeedableRng + Send,
     P: ExecutableProtocol<SP>,
+    C: SessionRunnerConfiguration<SP>,
 {
     let mut tasks = TaskScope::new();
-    let result = par_run_session_inner(&mut tasks, rng, tx, rx, cancellation, session).await;
+    let result = par_run_session_inner::<SP, P, C>(&mut tasks, rng, tx, rx, cancellation, session).await;
     tasks.shutdown().await?;
     result
 }

@@ -3,9 +3,10 @@
 pub use crate::{
     entities::{Message, MessageId, PartyGroup, RuntimeError, SessionId, SpuriousError, ThresholdGroup},
     execution::{
-        DeterministicTask, DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError,
-        RandomizedTask, ReachedOutputSession, SendTask, Session, SessionOutcome, SessionReport, SessionState,
-        SessionUpdate, Task, UnfinishableOutcome,
+        BCsSupportedMessageOut, BroadcastsSupported, DMsOnlyMessageOut, DeterministicTask, DirectMessagesOnly,
+        DuplicateMessagesError, Evidence, InvalidMessageError, MessageAttributableError, RandomizedTask,
+        ReachedOutputSession, SendTask, Session, SessionOutcome, SessionReport, SessionRunnerConfiguration,
+        SessionState, SessionUpdate, Task, UnfinishableOutcome,
     },
     traits::{ExecutableProtocol, SessionParameters},
 };
