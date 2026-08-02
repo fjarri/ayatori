@@ -307,15 +307,13 @@ where
 
         while let Some(action) = self.ruleset.pop_action() {
             match action {
-                Action::SendBC {
-                    store_in,
-                    to_send,
-                    destinations,
-                } => {
+                Action::SendBC(action) => {
                     let value = self
                         .storage
-                        .get_scalar(&ScalarTag::from(to_send))
-                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+                        .get_scalar(&ScalarTag::from(action.to_send))
+                        .or_with_context(|| {
+                            format!("Failed to get the argument for `{}` from storage", action.store_in)
+                        })?;
                     let signed_value = value
                         .downcast::<SignedValue<SP>>()
                         .or_with_context(|| "Failed to downcast the value to be sent".into())?;
@@ -324,18 +322,16 @@ where
                     // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
                     // and we can get away with it because it does not change the state.
                     // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_scalar(&ScalarTag::from(store_in), Value::new(()))?;
-                    return Ok(Some(SendTask::new_broadcast(destinations, signed_value).into()));
+                    self.add_scalar(&ScalarTag::from(action.store_in), Value::new(()))?;
+                    return Ok(Some(SendTask::new_broadcast(action.destinations, signed_value).into()));
                 }
-                Action::SendDM {
-                    store_in,
-                    to_send,
-                    destination,
-                } => {
+                Action::SendDM(action) => {
                     let value = self
                         .storage
-                        .get_elem(&MappingTag::from(to_send), &destination)
-                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+                        .get_elem(&MappingTag::from(action.to_send), &action.destination)
+                        .or_with_context(|| {
+                            format!("Failed to get the argument for `{}` from storage", action.store_in)
+                        })?;
                     let signed_value = value
                         .downcast::<SignedValue<SP>>()
                         .or_with_context(|| "Failed to downcast the value to be sent".into())?;
@@ -344,44 +340,33 @@ where
                     // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
                     // and we can get away with it because it does not change the state.
                     // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_element(&MappingTag::from(store_in), &destination, Value::new(()))?;
-                    return Ok(Some(SendTask::new_direct(destination, signed_value).into()));
+                    self.add_element(&MappingTag::from(action.store_in), &action.destination, Value::new(()))?;
+                    return Ok(Some(SendTask::new_direct(action.destination, signed_value).into()));
                 }
-                Action::ComputeScalar {
-                    store_in,
-                    function,
-                    args,
-                } => {
-                    let arg_values = self
-                        .storage
-                        .get_scalar_args(args)
-                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
+                Action::ComputeScalar(action) => {
+                    let arg_values = self.storage.get_scalar_args(action.args).or_with_context(|| {
+                        format!("Failed to get the arguments for `{}` from storage", action.store_in)
+                    })?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
-                    return Ok(Some(Task::from_scalar_function(store_in, function, args)));
+                    return Ok(Some(Task::from_scalar_function(action.store_in, action.function, args)));
                 }
-                Action::ComputeMappingElement {
-                    store_in,
-                    function,
-                    index,
-                    args,
-                    on_error,
-                } => {
+                Action::ComputeMappingElement(action) => {
                     let arg_values = self
                         .storage
-                        .get_scalar_or_mapping_args(&index, args)
-                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
+                        .get_scalar_or_mapping_args(&action.index, action.args)
+                        .or_with_context(|| {
+                            format!("Failed to get the arguments for `{}` from storage", action.store_in)
+                        })?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
                     return Ok(Some(Task::from_mapping_function(
-                        store_in, function, index, args, on_error,
+                        action.store_in,
+                        action.function,
+                        action.index,
+                        args,
+                        action.on_error,
                     )));
                 }
-                Action::ComputeSerializeAndSignScalar {
-                    store_in,
-                    function,
-                    data,
-                    message_name,
-                    serde_adapter,
-                } => {
+                Action::ComputeSerializeAndSignScalar(action) => {
                     let signer = self.signer.as_ref().ok_or_else(|| {
                         // This can happen if a serialization node somehow remains
                         // in an evidence verification subtree.
@@ -392,20 +377,16 @@ where
 
                     let value = self
                         .storage
-                        .get_scalar(&data)
-                        .or_with_context(|| format!("Failed to get the argument for `{data}` from storage"))?;
+                        .get_scalar(&action.data)
+                        .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.data))?;
 
-                    let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
-                    return Ok(Some(SerializeAndSignScalarTask::new(store_in, function, args).into()));
+                    let args =
+                        SerializeArgs::new(signer, &self.data.id, action.message_name, action.serde_adapter, value);
+                    return Ok(Some(
+                        SerializeAndSignScalarTask::new(action.store_in, action.function, args).into(),
+                    ));
                 }
-                Action::ComputeSerializeAndSignElement {
-                    store_in,
-                    function,
-                    index,
-                    data,
-                    message_name,
-                    serde_adapter,
-                } => {
+                Action::ComputeSerializeAndSignElement(action) => {
                     let signer = self.signer.as_ref().ok_or_else(|| {
                         // This can happen if a serialization node somehow remains
                         // in an evidence verification subtree.
@@ -414,53 +395,55 @@ where
                         )
                     })?;
 
-                    let value = match data {
+                    let value = match action.data {
                         AnyTag::Scalar(tag) => self.storage.get_scalar(&tag),
-                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index),
+                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &action.index),
                     }
-                    .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
+                    .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
 
-                    let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
+                    let args =
+                        SerializeArgs::new(signer, &self.data.id, action.message_name, action.serde_adapter, value);
                     return Ok(Some(
-                        SerializeAndSignElementTask::new(store_in, function, index, args).into(),
+                        SerializeAndSignElementTask::new(action.store_in, action.function, action.index, args).into(),
                     ));
                 }
-                Action::ComputeDeserializeElement {
-                    store_in,
-                    function,
-                    index,
-                    data,
-                    serde_adapter,
-                    expected_senders,
-                    on_error,
-                } => {
+                Action::ComputeDeserializeElement(action) => {
                     let value = self
                         .storage
-                        .get_elem(&MappingTag::from(data), &index)
-                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-                    let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
+                        .get_elem(&MappingTag::from(action.data), &action.index)
+                        .or_with_context(|| {
+                            format!("Failed to get the argument for `{}` from storage", action.store_in)
+                        })?;
+                    let args = DeserializeArgs::new(&action.expected_senders, action.serde_adapter, value);
                     return Ok(Some(
-                        DeserializeElementTask::new(store_in, function, index, args, on_error).into(),
+                        DeserializeElementTask::new(
+                            action.store_in,
+                            action.function,
+                            action.index,
+                            args,
+                            action.on_error,
+                        )
+                        .into(),
                     ));
                 }
-                Action::MergeScalar { store_in, left, right } => {
+                Action::MergeScalar(action) => {
                     self.add_scalar(
-                        &ScalarTag::from(store_in.clone()),
+                        &ScalarTag::from(action.store_in.clone()),
                         self.storage
-                            .get_one_or_both_as_value(&left, &right)
-                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
+                            .get_one_or_both_as_value(&action.left, &action.right)
+                            .or_with_context(|| {
+                                format!("Failed to get the argument for `{}` from storage", action.store_in)
+                            })?,
                     )?;
                 }
-                Action::Collect {
-                    store_in,
-                    values,
-                    sources,
-                } => {
+                Action::Collect(action) => {
                     self.add_scalar(
-                        &store_in,
+                        &action.store_in,
                         self.storage
-                            .get_mapping_as_value(&values, &sources)
-                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
+                            .get_mapping_as_value(&action.values, &action.sources)
+                            .or_with_context(|| {
+                                format!("Failed to get the argument for `{}` from storage", action.store_in)
+                            })?,
                     )?;
                 }
             }

@@ -6,7 +6,10 @@ use alloc::{
 };
 use core::fmt::{self, Display};
 
-use super::rules::{Action, CollectRule, MappingRule, OnError, ScalarRule, SendBCRule, SendDMRule};
+use super::{
+    actions::Action,
+    rules::{CollectRule, MappingRule, OnError, ScalarRule, SendBCRule, SendDMRule},
+};
 use crate::{
     entities::{AnyTagRef, ComputedScalarTag, MappingTag, RuntimeError, ScalarArgumentTag, ScalarTag},
     graph_representation::{AnyNode, GeneralizedNode, OutputNode, Reproducibility},
