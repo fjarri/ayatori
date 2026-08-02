@@ -1,7 +1,10 @@
 use alloc::{collections::BTreeSet, vec::Vec};
 
 use super::{session::MessageAttributableError, task::SendTask};
-use crate::{entities::Message, traits::SessionParameters};
+use crate::{
+    entities::{Message, RuntimeError},
+    traits::SessionParameters,
+};
 
 /// A static configuration of a session runner.
 pub trait SessionRunnerConfiguration<SP: SessionParameters>: 'static {
@@ -9,7 +12,7 @@ pub trait SessionRunnerConfiguration<SP: SessionParameters>: 'static {
     type MessageOut: 'static + Send + Sync + From<MessageAttributableError<SP>>;
 
     /// Converts [`SendTask`] into outgoing messages.
-    fn send_task_into_messages_out(task: SendTask<SP>) -> impl Iterator<Item = Self::MessageOut>;
+    fn send_task_into_messages_out(task: SendTask<SP>) -> Result<impl Iterator<Item = Self::MessageOut>, RuntimeError>;
 
     /// Converts the outgoing messages into direct messages.
     #[expect(clippy::type_complexity)]
@@ -26,10 +29,11 @@ pub struct DirectMessagesOnly;
 impl<SP: SessionParameters> SessionRunnerConfiguration<SP> for DirectMessagesOnly {
     type MessageOut = DMsOnlyMessageOut<SP>;
 
-    fn send_task_into_messages_out(task: SendTask<SP>) -> impl Iterator<Item = Self::MessageOut> {
-        task.into_dms()
+    fn send_task_into_messages_out(task: SendTask<SP>) -> Result<impl Iterator<Item = Self::MessageOut>, RuntimeError> {
+        Ok(task
+            .into_dms()?
             .into_iter()
-            .map(|(destination, message)| DMsOnlyMessageOut::DirectMessage { destination, message })
+            .map(|(destination, message)| DMsOnlyMessageOut::DirectMessage { destination, message }))
     }
 
     #[cfg(feature = "dev")]
@@ -50,14 +54,15 @@ pub struct BroadcastsSupported;
 impl<SP: SessionParameters> SessionRunnerConfiguration<SP> for BroadcastsSupported {
     type MessageOut = BCsSupportedMessageOut<SP>;
 
-    fn send_task_into_messages_out(task: SendTask<SP>) -> impl Iterator<Item = Self::MessageOut> {
-        let (bcs, dms) = task.into_bcs_and_dms();
-        bcs.into_iter()
+    fn send_task_into_messages_out(task: SendTask<SP>) -> Result<impl Iterator<Item = Self::MessageOut>, RuntimeError> {
+        let (bcs, dms) = task.into_bcs_and_dms()?;
+        Ok(bcs
+            .into_iter()
             .map(|(destinations, message)| BCsSupportedMessageOut::BroadcastMessage { destinations, message })
             .chain(
                 dms.into_iter()
                     .map(|(destination, message)| BCsSupportedMessageOut::DirectMessage { destination, message }),
-            )
+            ))
     }
 
     #[cfg(feature = "dev")]

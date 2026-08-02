@@ -40,7 +40,7 @@ where
                     // ANCHOR_END: task_randomized
                     // ANCHOR: task_send
                     Task::Send(task) => {
-                        for message_out in C::send_task_into_messages_out(task) {
+                        for message_out in C::send_task_into_messages_out(task)? {
                             tx.send(message_out).await.unwrap();
                         }
                         continue;

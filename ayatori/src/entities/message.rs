@@ -1,6 +1,7 @@
 use alloc::{boxed::Box, format, vec::Vec};
 use core::fmt::{self, Debug};
 
+use itertools::Itertools;
 use serde_encoded_bytes::{Hex, SliceLike};
 use signature::{
     DigestVerifier, Keypair, RandomizedDigestSigner,
@@ -305,14 +306,48 @@ impl<SP: SessionParameters> Debug for MessageId<SP> {
 
 /// A message to be sent to another party, containing multiple signed values.
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
-pub struct Message<SP: SessionParameters>(Vec<SignedValue<SP>>);
+#[serde(into = "WireMessage<SP>")]
+#[serde(try_from = "WireMessage<SP>")]
+pub struct Message<SP: SessionParameters> {
+    session_id: SessionId<SP>,
+    values: Vec<SignedValue<SP>>,
+}
 
 impl<SP: SessionParameters> Message<SP> {
-    pub(crate) fn new(values: Vec<SignedValue<SP>>) -> Self {
-        Self(values)
+    pub(crate) fn new(values: Vec<SignedValue<SP>>) -> Result<Self, RuntimeError> {
+        let session_id = values
+            .iter()
+            .map(|value| value.metadata().session_id())
+            .all_equal_value()
+            .map_err(|_err| RuntimeError::new("The provided values don't all have the same session ID"))?;
+        Ok(Self {
+            session_id: session_id.clone(),
+            values,
+        })
+    }
+
+    /// Returns the session ID values in this message belong to.
+    pub fn session_id(&self) -> &SessionId<SP> {
+        &self.session_id
     }
 
     pub(crate) fn into_values(self) -> Vec<SignedValue<SP>> {
-        self.0
+        self.values
+    }
+}
+
+#[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
+struct WireMessage<SP: SessionParameters>(Vec<SignedValue<SP>>);
+
+impl<SP: SessionParameters> From<Message<SP>> for WireMessage<SP> {
+    fn from(source: Message<SP>) -> Self {
+        Self(source.values)
+    }
+}
+
+impl<SP: SessionParameters> TryFrom<WireMessage<SP>> for Message<SP> {
+    type Error = RuntimeError;
+    fn try_from(source: WireMessage<SP>) -> Result<Self, Self::Error> {
+        Self::new(source.0)
     }
 }

@@ -297,7 +297,7 @@ fn run_evidence_verification_session<SP: SessionParameters, P: ExecutableProtoco
             }
         }
 
-        let message = Message::new(signed_values.to_vec());
+        let message = Message::new(signed_values.to_vec())?;
 
         let update = SessionUpdate::add_message(message_id, message);
         session = match session.with_update(update)? {

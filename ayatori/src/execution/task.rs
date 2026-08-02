@@ -578,29 +578,30 @@ impl<SP: SessionParameters> SendTask<SP> {
 
     /// Converts the task into separated broadcasts and direct messages.
     #[expect(clippy::type_complexity)]
-    #[must_use]
     pub fn into_bcs_and_dms(
         self,
-    ) -> (
-        Vec<(BTreeSet<SP::Verifier>, Message<SP>)>,
-        BTreeMap<SP::Verifier, Message<SP>>,
-    ) {
+    ) -> Result<
+        (
+            Vec<(BTreeSet<SP::Verifier>, Message<SP>)>,
+            BTreeMap<SP::Verifier, Message<SP>>,
+        ),
+        RuntimeError,
+    > {
         let dms = self
             .direct_messages
             .into_iter()
-            .map(|(destination, value)| (destination, Message::new(vec![value])))
-            .collect::<BTreeMap<_, _>>();
+            .map(|(destination, value)| Message::new(vec![value]).map(|message| (destination, message)))
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
         let bcs = self
             .broadcast_messages
             .into_iter()
-            .map(|(destinations, value)| (destinations, Message::new(vec![value])))
-            .collect::<Vec<_>>();
-        (bcs, dms)
+            .map(|(destinations, value)| Message::new(vec![value]).map(|message| (destinations, message)))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((bcs, dms))
     }
 
     /// Converts the task into purely direct messages for each destination.
-    #[must_use]
-    pub fn into_dms(self) -> BTreeMap<SP::Verifier, Message<SP>> {
+    pub fn into_dms(self) -> Result<BTreeMap<SP::Verifier, Message<SP>>, RuntimeError> {
         let mut result = self
             .direct_messages
             .into_iter()
@@ -615,8 +616,8 @@ impl<SP: SessionParameters> SendTask<SP> {
 
         result
             .into_iter()
-            .map(|(destination, values)| (destination, Message::new(values)))
-            .collect()
+            .map(|(destination, values)| Message::new(values).map(|message| (destination, message)))
+            .collect::<Result<BTreeMap<_, _>, _>>()
     }
 }
 
