@@ -13,8 +13,8 @@ use crate::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedBCTag,
         LocalSignedDMTag, MappingFunction, MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag,
         RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
-        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SerializeAndSignBCFunction,
-        SerializeAndSignDMFunction, SerializeArgs, SessionId, SignedValue, SpuriousError,
+        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SentBCTag, SentDMTag,
+        SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs, SessionId, SignedValue, SpuriousError,
         ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction, ThirdPartyError,
         UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
@@ -562,8 +562,29 @@ impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
 /// Can be converted into different types of messages, depending on what transport capabilities are available.
 #[derive_where::derive_where(Debug)]
 pub struct SendTask<SP: SessionParameters> {
+    kind: SendTaskKind<SP>,
     direct_messages: BTreeMap<SP::Verifier, SignedValue<SP>>,
     broadcast_messages: Vec<(BTreeSet<SP::Verifier>, SignedValue<SP>)>,
+}
+
+#[derive_where::derive_where(Debug)]
+enum SendTaskKind<SP: SessionParameters> {
+    BroadcastMessage {
+        store_in: SentBCTag,
+    },
+    DirectMessage {
+        store_in: SentDMTag,
+        destination: SP::Verifier,
+    },
+}
+
+impl<SP: SessionParameters> SendTaskKind<SP> {
+    fn into_update(self) -> SessionUpdate<SP> {
+        SessionUpdate(match self {
+            Self::BroadcastMessage { store_in } => SessionUpdateEnum::SentBC { store_in },
+            Self::DirectMessage { store_in, destination } => SessionUpdateEnum::SentDM { store_in, destination },
+        })
+    }
 }
 
 impl<SP: SessionParameters> SendTask<SP> {
@@ -578,6 +599,9 @@ impl<SP: SessionParameters> SendTask<SP> {
             .downcast::<SignedValue<SP>>()
             .or_with_context(|| "Failed to downcast the value to be sent".into())?;
         Ok(Self {
+            kind: SendTaskKind::BroadcastMessage {
+                store_in: action.store_in,
+            },
             direct_messages: BTreeMap::new(),
             broadcast_messages: vec![(action.destinations, signed_value)],
         })
@@ -594,6 +618,10 @@ impl<SP: SessionParameters> SendTask<SP> {
             .downcast::<SignedValue<SP>>()
             .or_with_context(|| "Failed to downcast the value to be sent".into())?;
         Ok(Self {
+            kind: SendTaskKind::DirectMessage {
+                store_in: action.store_in,
+                destination: action.destination.clone(),
+            },
             direct_messages: [(action.destination, signed_value)].into(),
             broadcast_messages: Vec::new(),
         })
@@ -605,11 +633,13 @@ impl<SP: SessionParameters> SendTask<SP> {
         self,
     ) -> Result<
         (
+            SessionUpdate<SP>,
             Vec<(BTreeSet<SP::Verifier>, Message<SP>)>,
             BTreeMap<SP::Verifier, Message<SP>>,
         ),
         RuntimeError,
     > {
+        let update = self.kind.into_update();
         let dms = self
             .direct_messages
             .into_iter()
@@ -620,11 +650,13 @@ impl<SP: SessionParameters> SendTask<SP> {
             .into_iter()
             .map(|(destinations, value)| Message::new(vec![value]).map(|message| (destinations, message)))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((bcs, dms))
+        Ok((update, bcs, dms))
     }
 
     /// Converts the task into purely direct messages for each destination.
-    pub fn into_dms(self) -> Result<BTreeMap<SP::Verifier, Message<SP>>, RuntimeError> {
+    #[expect(clippy::type_complexity)]
+    pub fn into_dms(self) -> Result<(SessionUpdate<SP>, BTreeMap<SP::Verifier, Message<SP>>), RuntimeError> {
+        let update = self.kind.into_update();
         let mut result = self
             .direct_messages
             .into_iter()
@@ -637,10 +669,12 @@ impl<SP: SessionParameters> SendTask<SP> {
             }
         }
 
-        result
+        let dms = result
             .into_iter()
             .map(|(destination, values)| Message::new(values).map(|message| (destination, message)))
-            .collect::<Result<BTreeMap<_, _>, _>>()
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        Ok((update, dms))
     }
 }
 
@@ -960,6 +994,13 @@ impl<SP: SessionParameters> SessionUpdate<SP> {
 #[derive_where::derive_where(Debug)]
 pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     NoActionNeeded,
+    SentBC {
+        store_in: SentBCTag,
+    },
+    SentDM {
+        store_in: SentDMTag,
+        destination: SP::Verifier,
+    },
     Received {
         id: MessageId<SP>,
         message: Message<SP>,

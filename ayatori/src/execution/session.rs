@@ -304,31 +304,10 @@ where
         while let Some(action) = self.ruleset.pop_action() {
             match action {
                 Action::SendBC(action) => {
-                    let store_in = ScalarTag::from(action.store_in.clone());
-                    let task = Task::from_send_bc_action(&self.storage, action)?;
-
-                    // Note that we record the fact that the message was *sent*, not *delivered*.
-                    //
-                    // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
-                    // and we can get away with it because it does not change the state.
-                    // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_scalar(&store_in, Value::new(()))?;
-
-                    return Ok(Some(task));
+                    return Ok(Some(Task::from_send_bc_action(&self.storage, action)?));
                 }
                 Action::SendDM(action) => {
-                    let store_in = MappingTag::from(action.store_in.clone());
-                    let destination = action.destination.clone();
-                    let task = Task::from_send_dm_action(&self.storage, action)?;
-
-                    // Note that we record the fact that the message was *sent*, not *delivered*.
-                    //
-                    // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
-                    // and we can get away with it because it does not change the state.
-                    // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_element(&store_in, &destination, Value::new(()))?;
-
-                    return Ok(Some(task));
+                    return Ok(Some(Task::from_send_dm_action(&self.storage, action)?));
                 }
                 Action::ComputeScalar(action) => {
                     return Ok(Some(Task::from_compute_scalar_action(
@@ -438,6 +417,14 @@ where
     fn with_update_inner(&mut self, result: SessionUpdate<SP>) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         match result.into_inner() {
             SessionUpdateEnum::NoActionNeeded => Ok(AddSessionUpdate::StateDidNotChange),
+            SessionUpdateEnum::SentBC { store_in } => {
+                self.add_scalar(&ScalarTag::from(store_in), Value::new(()))?;
+                Ok(AddSessionUpdate::StateDidNotChange)
+            }
+            SessionUpdateEnum::SentDM { store_in, destination } => {
+                self.add_element(&MappingTag::from(store_in), &destination, Value::new(()))?;
+                Ok(AddSessionUpdate::StateDidNotChange)
+            }
             SessionUpdateEnum::Received { id, message } => {
                 self.add_message(&id, message);
                 Ok(AddSessionUpdate::StateDidNotChange)
