@@ -20,10 +20,7 @@ use super::{
     },
     storage::Storage,
     task::{
-        DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
-        ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
-        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarThirdPartyAttributableTask,
-        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SendTask, SerializeAndSignElementTask,
+        DeserializeElementTask, PreprocessMessageTask, SendTask, SerializeAndSignElementTask,
         SerializeAndSignScalarTask, SessionUpdate, SessionUpdateEnum, Task,
     },
 };
@@ -32,8 +29,8 @@ use crate::dev::Replacement;
 use crate::{
     entities::{
         AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
-        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
-        SerializeArgs, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
+        MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarTag, SerializeArgs, SessionId,
+        SignedValue, SpuriousError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
@@ -360,20 +357,7 @@ where
                         .get_scalar_args(args)
                         .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
-                    return Ok(Some(match function {
-                        ScalarFunction::Unattributable(function) => {
-                            ScalarUnattributableTask::new(store_in, function, args).into()
-                        }
-                        ScalarFunction::UnattributableOptional(function) => {
-                            ScalarUnattributableOptionalTask::new(store_in, function, args).into()
-                        }
-                        ScalarFunction::UnattributableWithRng(function) => {
-                            RngScalarUnattributableTask::new(store_in, function, args).into()
-                        }
-                        ScalarFunction::ThirdPartyAttributable(function) => {
-                            ScalarThirdPartyAttributableTask::new(store_in, function, args).into()
-                        }
-                    }));
+                    return Ok(Some(Task::from_scalar_function(store_in, function, args)));
                 }
                 Action::ComputeMappingElement {
                     store_in,
@@ -387,24 +371,9 @@ where
                         .get_scalar_or_mapping_args(&index, args)
                         .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
                     let args = Args::new(&self.data.id, self.verifier(), arg_values);
-                    return Ok(Some(match function {
-                        MappingFunction::Unattributable(function) => {
-                            ElementUnattributableTask::new(store_in, function, index, args).into()
-                        }
-                        MappingFunction::UnattributableWithRng(function) => {
-                            RngElementUnattributableTask::new(store_in, function, index, args).into()
-                        }
-                        MappingFunction::SenderAttributable(function) => {
-                            ElementSenderAttributableTask::new(store_in, function, index, args, on_error).into()
-                        }
-                        MappingFunction::SenderAttributableWithReveal(function) => {
-                            ElementSenderAttributableWithRevealTask::new(store_in, function, index, args, on_error)
-                                .into()
-                        }
-                        MappingFunction::ThirdPartyAttributable(function) => {
-                            ElementThirdPartyAttributableTask::new(store_in, function, index, args).into()
-                        }
-                    }));
+                    return Ok(Some(Task::from_mapping_function(
+                        store_in, function, index, args, on_error,
+                    )));
                 }
                 Action::ComputeSerializeAndSignScalar {
                     store_in,

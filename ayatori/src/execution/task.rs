@@ -11,13 +11,13 @@ use super::session::SessionData;
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedBCTag,
-        LocalSignedDMTag, MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag,
-        RuntimeError, ScalarTag, SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction,
-        SenderError, SenderErrorWithReveal, SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs,
-        SignedValue, SpuriousError, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction,
-        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
-        UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
-        VerificationError,
+        LocalSignedDMTag, MappingFunction, MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag,
+        RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
+        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SerializeAndSignBCFunction,
+        SerializeAndSignDMFunction, SerializeArgs, SignedValue, SpuriousError, ThirdPartyAttributableMappingFunction,
+        ThirdPartyAttributableScalarFunction, ThirdPartyError, UnattributableError, UnattributableMappingFunction,
+        UnattributableMappingFunctionWithRng, UnattributableOptionalScalarFunction, UnattributableScalarFunction,
+        UnattributableScalarFunctionWithRng, Value, VerificationError,
     },
     flat_representation::OnError,
     traits::SessionParameters,
@@ -785,6 +785,53 @@ pub enum Task<SP: SessionParameters> {
     Deterministic(DeterministicTask<SP>),
     /// Perform a computation that needs access to an RNG.
     Randomized(RandomizedTask<SP>),
+}
+
+impl<SP: SessionParameters> Task<SP> {
+    pub(crate) fn from_scalar_function(
+        store_in: ComputedScalarTag,
+        function: ScalarFunction<SP>,
+        args: Args<SP>,
+    ) -> Self {
+        match function {
+            ScalarFunction::Unattributable(function) => ScalarUnattributableTask::new(store_in, function, args).into(),
+            ScalarFunction::UnattributableOptional(function) => {
+                ScalarUnattributableOptionalTask::new(store_in, function, args).into()
+            }
+            ScalarFunction::UnattributableWithRng(function) => {
+                RngScalarUnattributableTask::new(store_in, function, args).into()
+            }
+            ScalarFunction::ThirdPartyAttributable(function) => {
+                ScalarThirdPartyAttributableTask::new(store_in, function, args).into()
+            }
+        }
+    }
+
+    pub(crate) fn from_mapping_function(
+        store_in: ComputedMappingTag,
+        function: MappingFunction<SP>,
+        index: SP::Verifier,
+        args: Args<SP>,
+        on_error: OnError,
+    ) -> Self {
+        match function {
+            MappingFunction::Unattributable(function) => {
+                ElementUnattributableTask::new(store_in, function, index, args).into()
+            }
+            MappingFunction::UnattributableWithRng(function) => {
+                RngElementUnattributableTask::new(store_in, function, index, args).into()
+            }
+            MappingFunction::SenderAttributable(function) => {
+                ElementSenderAttributableTask::new(store_in, function, index, args, on_error).into()
+            }
+            MappingFunction::SenderAttributableWithReveal(function) => {
+                ElementSenderAttributableWithRevealTask::new(store_in, function, index, args, on_error).into()
+            }
+            MappingFunction::ThirdPartyAttributable(function) => {
+                ElementThirdPartyAttributableTask::new(store_in, function, index, args).into()
+            }
+        }
+    }
 }
 
 /// The result of executing a task, to be passed to [`Session::with_update`].
