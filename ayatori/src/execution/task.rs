@@ -11,8 +11,8 @@ use super::{session::SessionData, storage::Storage};
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedBCTag,
-        LocalSignedDMTag, MappingFunction, MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag,
-        RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
+        LocalSignedDMTag, MappingFunction, MappingTag, MaybeAttributableError, MergedScalarTag, Message, MessageId,
+        ReceivedTag, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
         SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SentBCTag, SentDMTag,
         SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs, SessionId, SignedValue, SpuriousError,
         ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction, ThirdPartyError,
@@ -21,8 +21,9 @@ use crate::{
         VerificationError,
     },
     flat_representation::{
-        ComputeDeserializeElementAction, ComputeMappingElementAction, ComputeScalarAction,
-        ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, OnError, SendBCAction, SendDMAction,
+        CollectAction, ComputeDeserializeElementAction, ComputeMappingElementAction, ComputeScalarAction,
+        ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, MergeScalarsAction, OnError,
+        SendBCAction, SendDMAction,
     },
     traced_error::TraceableResult,
     traits::SessionParameters,
@@ -775,6 +776,74 @@ impl<SP: SessionParameters> From<PreprocessMessageTask<SP>> for Task<SP> {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct MergeScalarsTask {
+    store_in: MergedScalarTag,
+    result: Value,
+}
+
+impl MergeScalarsTask {
+    fn new<SP: SessionParameters>(
+        storage: &Storage<SP::Verifier>,
+        action: MergeScalarsAction,
+    ) -> Result<Self, RuntimeError> {
+        let result = storage
+            .get_one_or_both_as_value(&action.left, &action.right)
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+        Ok(Self {
+            store_in: action.store_in,
+            result,
+        })
+    }
+
+    fn execute<SP: SessionParameters>(self) -> SessionUpdate<SP> {
+        SessionUpdate(SessionUpdateEnum::MergedScalars {
+            store_in: self.store_in,
+            result: self.result,
+        })
+    }
+}
+
+impl<SP: SessionParameters> From<MergeScalarsTask> for Task<SP> {
+    fn from(source: MergeScalarsTask) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::MergeScalars(source)))
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CollectTask {
+    store_in: ScalarTag,
+    result: Value,
+}
+
+impl CollectTask {
+    fn new<SP: SessionParameters>(
+        storage: &Storage<SP::Verifier>,
+        action: CollectAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let result = storage
+            .get_mapping_as_value(&action.values, &action.sources)
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+        Ok(Self {
+            store_in: action.store_in,
+            result,
+        })
+    }
+
+    fn execute<SP: SessionParameters>(self) -> SessionUpdate<SP> {
+        SessionUpdate(SessionUpdateEnum::Collected {
+            store_in: self.store_in,
+            result: self.result,
+        })
+    }
+}
+
+impl<SP: SessionParameters> From<CollectTask> for Task<SP> {
+    fn from(source: CollectTask) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::Collect(source)))
+    }
+}
+
 #[derive_where::derive_where(Debug)]
 enum DeterministicTaskEnum<SP: SessionParameters> {
     ScalarUnattributable(ScalarUnattributableTask<SP>),
@@ -786,6 +855,8 @@ enum DeterministicTaskEnum<SP: SessionParameters> {
     ElementThirdPartyAttributable(ElementThirdPartyAttributableTask<SP>),
     DeserializeElement(DeserializeElementTask<SP>),
     PreprocessMessage(PreprocessMessageTask<SP>),
+    MergeScalars(MergeScalarsTask),
+    Collect(CollectTask),
 }
 
 /// An object encapsulating a deterministic task (one that does not require an RNG).
@@ -805,6 +876,8 @@ impl<SP: SessionParameters> DeterministicTask<SP> {
             DeterministicTaskEnum::ElementThirdPartyAttributable(task) => task.execute(),
             DeterministicTaskEnum::DeserializeElement(task) => task.execute(),
             DeterministicTaskEnum::PreprocessMessage(task) => task.execute(),
+            DeterministicTaskEnum::MergeScalars(task) => task.execute(),
+            DeterministicTaskEnum::Collect(task) => task.execute(),
         }
     }
 }
@@ -961,6 +1034,19 @@ impl<SP: SessionParameters> Task<SP> {
     ) -> Result<Self, RuntimeError> {
         Ok(SendTask::from_send_dm_action(storage, action)?.into())
     }
+
+    pub(crate) fn from_merge_scalars_action(
+        storage: &Storage<SP::Verifier>,
+        action: MergeScalarsAction,
+    ) -> Result<Self, RuntimeError> {
+        Ok(MergeScalarsTask::new::<SP>(storage, action)?.into())
+    }
+    pub(crate) fn from_collect_action(
+        storage: &Storage<SP::Verifier>,
+        action: CollectAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        Ok(CollectTask::new(storage, action)?.into())
+    }
 }
 
 /// The result of executing a task, to be passed to [`Session::with_update`].
@@ -1047,5 +1133,13 @@ pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     ExternalBan {
         party_id: SP::Verifier,
         reason: String,
+    },
+    MergedScalars {
+        store_in: MergedScalarTag,
+        result: Value,
+    },
+    Collected {
+        store_in: ScalarTag,
+        result: Value,
     },
 }

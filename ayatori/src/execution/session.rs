@@ -301,29 +301,15 @@ where
             return Ok(Some(task.into()));
         }
 
-        while let Some(action) = self.ruleset.pop_action() {
-            match action {
-                Action::SendBC(action) => {
-                    return Ok(Some(Task::from_send_bc_action(&self.storage, action)?));
-                }
-                Action::SendDM(action) => {
-                    return Ok(Some(Task::from_send_dm_action(&self.storage, action)?));
-                }
+        if let Some(action) = self.ruleset.pop_action() {
+            return Ok(Some(match action {
+                Action::SendBC(action) => Task::from_send_bc_action(&self.storage, action)?,
+                Action::SendDM(action) => Task::from_send_dm_action(&self.storage, action)?,
                 Action::ComputeScalar(action) => {
-                    return Ok(Some(Task::from_compute_scalar_action(
-                        &self.data.id,
-                        self.verifier(),
-                        &self.storage,
-                        action,
-                    )?));
+                    Task::from_compute_scalar_action(&self.data.id, self.verifier(), &self.storage, action)?
                 }
                 Action::ComputeMappingElement(action) => {
-                    return Ok(Some(Task::from_compute_mapping_element_action(
-                        &self.data.id,
-                        self.verifier(),
-                        &self.storage,
-                        action,
-                    )?));
+                    Task::from_compute_mapping_element_action(&self.data.id, self.verifier(), &self.storage, action)?
                 }
                 Action::ComputeSerializeAndSignScalar(action) => {
                     let signer = self.signer.as_ref().ok_or_else(|| {
@@ -333,12 +319,7 @@ where
                             "Attempted to execute a serialize-and-sign node in a session without a signer",
                         )
                     })?;
-                    return Ok(Some(Task::from_compute_serialize_and_sign_scalar_action(
-                        signer,
-                        &self.data.id,
-                        &self.storage,
-                        action,
-                    )?));
+                    Task::from_compute_serialize_and_sign_scalar_action(signer, &self.data.id, &self.storage, action)?
                 }
                 Action::ComputeSerializeAndSignElement(action) => {
                     let signer = self.signer.as_ref().ok_or_else(|| {
@@ -348,40 +329,14 @@ where
                             "Attempted to execute a serialize-and-sign node in a session without a signer",
                         )
                     })?;
-                    return Ok(Some(Task::from_compute_serialize_and_sign_element_action(
-                        signer,
-                        &self.data.id,
-                        &self.storage,
-                        action,
-                    )?));
+                    Task::from_compute_serialize_and_sign_element_action(signer, &self.data.id, &self.storage, action)?
                 }
                 Action::ComputeDeserializeElement(action) => {
-                    return Ok(Some(Task::from_compute_deserialize_element_action(
-                        &self.storage,
-                        action,
-                    )?));
+                    Task::from_compute_deserialize_element_action(&self.storage, action)?
                 }
-                Action::MergeScalar(action) => {
-                    self.add_scalar(
-                        &ScalarTag::from(action.store_in.clone()),
-                        self.storage
-                            .get_one_or_both_as_value(&action.left, &action.right)
-                            .or_with_context(|| {
-                                format!("Failed to get the argument for `{}` from storage", action.store_in)
-                            })?,
-                    )?;
-                }
-                Action::Collect(action) => {
-                    self.add_scalar(
-                        &action.store_in,
-                        self.storage
-                            .get_mapping_as_value(&action.values, &action.sources)
-                            .or_with_context(|| {
-                                format!("Failed to get the argument for `{}` from storage", action.store_in)
-                            })?,
-                    )?;
-                }
-            }
+                Action::MergeScalar(action) => Task::from_merge_scalars_action(&self.storage, action)?,
+                Action::Collect(action) => Task::from_collect_action(&self.storage, action)?,
+            }));
         }
 
         Ok(None)
@@ -554,6 +509,14 @@ where
             SessionUpdateEnum::ExternalBan { party_id, reason } => {
                 self.register_banned_party(party_id, reason);
                 Ok(AddSessionUpdate::StateChanged)
+            }
+            SessionUpdateEnum::MergedScalars { store_in, result } => {
+                self.add_scalar(&ScalarTag::from(store_in), result)?;
+                Ok(AddSessionUpdate::StateDidNotChange)
+            }
+            SessionUpdateEnum::Collected { store_in, result } => {
+                self.add_scalar(&store_in, result)?;
+                Ok(AddSessionUpdate::StateDidNotChange)
             }
         }
     }

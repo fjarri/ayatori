@@ -9,7 +9,7 @@ use itertools::Itertools;
 use super::{
     actions::{
         Action, CollectAction, ComputeDeserializeElementAction, ComputeMappingElementAction, ComputeScalarAction,
-        ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, MergeScalarAction, SendBCAction,
+        ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, MergeScalarsAction, SendBCAction,
         SendDMAction,
     },
     conditions::{
@@ -154,7 +154,7 @@ impl<SP: SessionParameters> ScalarRule<SP> {
                 serde_adapter,
             }),
             ScalarRuleKind::Merge { store_in, left, right } => {
-                Action::MergeScalar(MergeScalarAction { store_in, left, right })
+                Action::MergeScalar(MergeScalarsAction { store_in, left, right })
             }
         }
     }

@@ -81,7 +81,7 @@ pub(crate) struct CollectAction<SP: SessionParameters> {
 }
 
 #[derive(Debug)]
-pub(crate) struct MergeScalarAction {
+pub(crate) struct MergeScalarsAction {
     pub(crate) store_in: MergedScalarTag,
     pub(crate) left: ScalarTag,
     pub(crate) right: ScalarTag,
@@ -97,5 +97,5 @@ pub(crate) enum Action<SP: SessionParameters> {
     SendBC(SendBCAction<SP>),
     SendDM(SendDMAction<SP>),
     Collect(CollectAction<SP>),
-    MergeScalar(MergeScalarAction),
+    MergeScalar(MergeScalarsAction),
 }

@@ -4,8 +4,9 @@ mod rules;
 mod ruleset;
 
 pub(crate) use actions::{
-    Action, ComputeDeserializeElementAction, ComputeMappingElementAction, ComputeScalarAction,
-    ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, SendBCAction, SendDMAction,
+    Action, CollectAction, ComputeDeserializeElementAction, ComputeMappingElementAction, ComputeScalarAction,
+    ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, MergeScalarsAction, SendBCAction,
+    SendDMAction,
 };
 pub(crate) use rules::OnError;
 pub(crate) use ruleset::{Ruleset, RulesetState};
