@@ -31,9 +31,9 @@ use super::{
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, MappingFunction,
-        MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SerializeArgs,
-        SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
+        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, FullName,
+        MappingFunction, MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag,
+        SerializeArgs, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
     flat_representation::{Action, OnError, Ruleset, RulesetState},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
@@ -561,38 +561,8 @@ where
                     Ok(AddSessionUpdate::StateChanged)
                 }
                 OnError::CollectEvidence(message_names) => {
-                    let mut signed_values = Vec::new();
-                    for name in message_names {
-                        let value = self
-                            .storage
-                            .get_elem(
-                                &MappingTag::from(RemoteSignedTag::new_with_full_name(&name)),
-                                &guilty_party,
-                            )
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to get the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?;
-                        let signed_value = value
-                            .downcast_ref::<VerifiedValue<SP>>()
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to downcast the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?
-                            .clone()
-                            .unverify();
-                        signed_values.push(signed_value);
-                    }
+                    let signed_values = collect_evidence(&self.storage, &guilty_party, &message_names)
+                        .or_with_context(|| format!("Failed to collect evidence for {store_in} failure"))?;
                     let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
                         &self.verifier,
                         &store_in,
@@ -614,38 +584,8 @@ where
                     Ok(AddSessionUpdate::StateChanged)
                 }
                 OnError::CollectEvidence(message_names) => {
-                    let mut signed_values = Vec::new();
-                    for name in message_names {
-                        let value = self
-                            .storage
-                            .get_elem(
-                                &MappingTag::from(RemoteSignedTag::new_with_full_name(&name)),
-                                &guilty_party,
-                            )
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to get the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?;
-                        let signed_value = value
-                            .downcast_ref::<VerifiedValue<SP>>()
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to downcast the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?
-                            .clone()
-                            .unverify();
-                        signed_values.push(signed_value);
-                    }
+                    let signed_values = collect_evidence(&self.storage, &guilty_party, &message_names)
+                        .or_with_context(|| format!("Failed to collect evidence for {store_in} failure"))?;
                     let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
                         &self.verifier,
                         &store_in,
@@ -722,6 +662,29 @@ where
             }
         }
     }
+}
+
+fn collect_evidence<SP: SessionParameters>(
+    storage: &Storage<SP::Verifier>,
+    guilty_party: &SP::Verifier,
+    message_names: &BTreeSet<FullName>,
+) -> Result<Vec<SignedValue<SP>>, RuntimeError> {
+    let mut signed_values = Vec::new();
+    for name in message_names {
+        let value = storage
+            .get_elem(
+                &MappingTag::from(RemoteSignedTag::new_with_full_name(name)),
+                guilty_party,
+            )
+            .or_with_context(|| format!("Failed to get the signed message `{name}`"))?;
+        let signed_value = value
+            .downcast_ref::<VerifiedValue<SP>>()
+            .or_with_context(|| format!("Failed to downcast the signed message `{name}`"))?
+            .clone()
+            .unverify();
+        signed_values.push(signed_value);
+    }
+    Ok(signed_values)
 }
 
 /// A wrapper for a session that has reached the output.
