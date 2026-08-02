@@ -552,6 +552,9 @@ impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
     }
 }
 
+/// An object enapsulating a task of sending message(s).
+///
+/// Can be converted into different types of messages, depending on what transport capabilities are available.
 #[derive_where::derive_where(Debug)]
 pub struct SendTask<SP: SessionParameters> {
     direct_messages: BTreeMap<SP::Verifier, SignedValue<SP>>,
@@ -573,12 +576,37 @@ impl<SP: SessionParameters> SendTask<SP> {
         }
     }
 
-    pub fn into_direct_messages(self) -> impl Iterator<Item = (SP::Verifier, Message<SP>)> {
-        let mut result: BTreeMap<SP::Verifier, Vec<SignedValue<SP>>> = BTreeMap::new();
+    /// Converts the task into separated broadcasts and direct messages.
+    #[expect(clippy::type_complexity)]
+    pub fn into_bcs_and_dms(
+        self,
+    ) -> Result<
+        (
+            Vec<(BTreeSet<SP::Verifier>, Message<SP>)>,
+            BTreeMap<SP::Verifier, Message<SP>>,
+        ),
+        RuntimeError,
+    > {
+        let dms = self
+            .direct_messages
+            .into_iter()
+            .map(|(destination, value)| Message::new(vec![value]).map(|message| (destination, message)))
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let bcs = self
+            .broadcast_messages
+            .into_iter()
+            .map(|(destinations, value)| Message::new(vec![value]).map(|message| (destinations, message)))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((bcs, dms))
+    }
 
-        for (destination, value) in self.direct_messages {
-            result.entry(destination).or_default().push(value);
-        }
+    /// Converts the task into purely direct messages for each destination.
+    pub fn into_dms(self) -> Result<BTreeMap<SP::Verifier, Message<SP>>, RuntimeError> {
+        let mut result = self
+            .direct_messages
+            .into_iter()
+            .map(|(destination, value)| (destination, vec![value]))
+            .collect::<BTreeMap<_, _>>();
 
         for (destinations, value) in self.broadcast_messages {
             for destination in destinations {
@@ -588,7 +616,8 @@ impl<SP: SessionParameters> SendTask<SP> {
 
         result
             .into_iter()
-            .map(|(destination, values)| (destination, Message::new(values)))
+            .map(|(destination, values)| Message::new(values).map(|message| (destination, message)))
+            .collect::<Result<BTreeMap<_, _>, _>>()
     }
 }
 
@@ -633,7 +662,10 @@ impl<SP: SessionParameters> PreprocessMessageTask<SP> {
             });
         }
 
-        // TODO: check the logic here - if it secure to ignore the destination if it is None?
+        // This is just a pre-check for the errors that are not attributable to the sender.
+        // We will check that Some/None variant of the destination matches
+        // whether we expected a broadcast or a direct message during deserealization,
+        // because then the failure will be attributable and provable.
         if let Some(destination) = self.signed_value.metadata().destination() {
             // Check that the message is addressed to a correct destination (one that this node manages).
             // If it is not, it may be a replay attack.

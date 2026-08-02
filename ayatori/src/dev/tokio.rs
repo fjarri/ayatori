@@ -10,24 +10,25 @@ use tokio_util::sync::CancellationToken;
 use super::run_sync::ExecutionResult;
 use crate::{
     entities::{Message, MessageId, RuntimeError},
-    execution::{Session, SessionReport, SessionUpdate, tokio::MessageOut},
+    execution::{Session, SessionReport, SessionRunnerConfiguration, SessionUpdate},
     traced_error::TraceableResult,
     traits::{ExecutableProtocol, SessionParameters},
 };
 
-async fn message_dispatcher<SP>(
+async fn message_dispatcher<SP, C>(
     mut rng: SP::Rng,
     txs: BTreeMap<SP::Verifier, mpsc::Sender<SessionUpdate<SP>>>,
-    rx: mpsc::Receiver<MessageOut<SP>>,
+    rx: mpsc::Receiver<C::MessageOut>,
 ) -> Result<(), RuntimeError>
 where
     SP: SessionParameters,
+    C: SessionRunnerConfiguration<SP>,
 {
     let mut rx = rx;
     let mut messages = Vec::<(SP::Verifier, Message<SP>)>::new();
 
     loop {
-        let mut messages_out = Vec::<MessageOut<SP>>::new();
+        let mut messages_out = Vec::<C::MessageOut>::new();
 
         // Wait for a message to appear in the channel, or the channel to be closed.
         let Some(msg_out) = rx.recv().await else {
@@ -41,9 +42,9 @@ where
         }
 
         for msg_out in messages_out {
-            match msg_out {
-                MessageOut::Message { destination, message } => messages.push((destination, message)),
-                MessageOut::Error(error) => return Err(RuntimeError::new(format!("{error}"))),
+            match C::message_out_into_dms(msg_out) {
+                Ok(dms) => messages.extend(dms),
+                Err(error) => return Err(RuntimeError::new(format!("{error}"))),
             }
         }
 
@@ -74,7 +75,9 @@ where
 }
 
 /// A trait defined for `async fn`s that execute a single session.
-pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: 'static + Send + Sync {
+pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>, C: SessionRunnerConfiguration<SP>>:
+    'static + Send + Sync
+{
     /// The returned future.
     type Fut: Future<Output = Result<SessionReport<SP, P>, RuntimeError>> + 'a + Send;
 
@@ -82,14 +85,14 @@ pub trait SessionRunner<'a, SP: SessionParameters, P: ExecutableProtocol<SP>>: '
     fn call(
         &self,
         rng: &'a mut SP::Rng,
-        tx: &'a mpsc::Sender<MessageOut<SP>>,
+        tx: &'a mpsc::Sender<C::MessageOut>,
         rx: &'a mut mpsc::Receiver<SessionUpdate<SP>>,
         cancellation: CancellationToken,
         session: Session<SP, P>,
     ) -> Self::Fut;
 }
 
-impl<'a, SP, P, F, Fut> SessionRunner<'a, SP, P> for F
+impl<'a, SP, P, F, Fut, C> SessionRunner<'a, SP, P, C> for F
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
@@ -98,18 +101,19 @@ where
         + Sync
         + Fn(
             &'a mut SP::Rng,
-            &'a mpsc::Sender<MessageOut<SP>>,
+            &'a mpsc::Sender<C::MessageOut>,
             &'a mut mpsc::Receiver<SessionUpdate<SP>>,
             CancellationToken,
             Session<SP, P>,
         ) -> Fut,
     Fut: Send + Future<Output = Result<SessionReport<SP, P>, RuntimeError>> + 'a,
+    C: SessionRunnerConfiguration<SP>,
 {
     type Fut = Fut;
     fn call(
         &self,
         rng: &'a mut SP::Rng,
-        tx: &'a mpsc::Sender<MessageOut<SP>>,
+        tx: &'a mpsc::Sender<C::MessageOut>,
         rx: &'a mut mpsc::Receiver<SessionUpdate<SP>>,
         cancellation: CancellationToken,
         session: Session<SP, P>,
@@ -119,7 +123,7 @@ where
 }
 
 /// Executes the given sessions concurrently within a `tokio` runtime.
-pub async fn run_sessions_async<SP, P, F>(
+pub async fn run_sessions_async<SP, P, F, C>(
     rng: &mut SP::Rng,
     sessions: Vec<Session<SP, P>>,
     session_runner: F,
@@ -129,12 +133,13 @@ where
     SP::Signer: Send + Sync,
     SP::Rng: Clone + Send,
     P: ExecutableProtocol<SP>,
-    F: for<'a> SessionRunner<'a, SP, P>,
+    F: for<'a> SessionRunner<'a, SP, P, C>,
+    C: SessionRunnerConfiguration<SP>,
 {
     let mut tx_map = BTreeMap::new();
     let mut session_handles = BTreeMap::new();
     let mut forwarding_handles = Vec::new();
-    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<MessageOut<SP>>(100);
+    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<C::MessageOut>(100);
 
     let cancellation = CancellationToken::new();
     let session_runner = Arc::new(session_runner);
@@ -148,7 +153,7 @@ where
         let (in_tx, mut in_rx) = mpsc::channel::<SessionUpdate<SP>>(100);
         tx_map.insert(id.clone(), in_tx);
 
-        let (out_tx, mut out_rx) = mpsc::channel::<MessageOut<SP>>(100);
+        let (out_tx, mut out_rx) = mpsc::channel::<C::MessageOut>(100);
         let dispatcher_tx = dispatcher_tx.clone();
 
         // We need to match the outgoing messages with their source
@@ -175,7 +180,7 @@ where
     // Drop the last copy of the dispatcher's incoming channel so that it can finish.
     drop(dispatcher_tx);
 
-    let dispatcher_task = message_dispatcher(rng.clone(), tx_map, dispatcher_rx);
+    let dispatcher_task = message_dispatcher::<SP, C>(rng.clone(), tx_map, dispatcher_rx);
     let dispatcher = tokio::spawn(dispatcher_task);
 
     let mut reports = BTreeMap::new();

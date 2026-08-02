@@ -72,9 +72,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         // ANCHOR_END: build-c
 
         // ANCHOR: build-send-c
-        let message_c = ProtocolMessage::new::<u32>("c");
-        let c_broadcasted = broadcast(&message_c, &my_c, all_parties);
-        let c = receive(&message_c);
+        let (message_c_out, message_c_in) = broadcast_message::<_, u32>("c");
+        let c_broadcasted = message_c_out.send(&my_c, all_parties);
+        let c = message_c_in.receive();
         // ANCHOR_END: build-send-c
 
         // ANCHOR: build-collect-c
@@ -82,15 +82,17 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for DistributedRng {
         // ANCHOR_END: build-collect-c
 
         // ANCHOR: build-send-b-r
-        let message_b = ProtocolMessage::new::<u32>("b");
-        let b_broadcasted =
-            broadcast(&message_b, &my_b, all_parties).with_dependency(&all_c);
-        let b = receive(&message_b);
+        let (message_b_out, message_b_in) = broadcast_message::<_, u32>("b");
+        let b_broadcasted = message_b_out
+            .send(&my_b, all_parties)
+            .with_dependency(&all_c);
+        let b = message_b_in.receive();
 
-        let message_r = ProtocolMessage::new::<u32>("r");
-        let r_broadcasted =
-            broadcast(&message_r, &my_r, all_parties).with_dependency(&all_c);
-        let r = receive(&message_r);
+        let (message_r_out, message_r_in) = broadcast_message::<_, u32>("r");
+        let r_broadcasted = message_r_out
+            .send(&my_r, all_parties)
+            .with_dependency(&all_c);
+        let r = message_r_in.receive();
         // ANCHOR_END: build-send-b-r
 
         // ANCHOR: build-check-commitment

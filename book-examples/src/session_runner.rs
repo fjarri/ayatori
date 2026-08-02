@@ -3,13 +3,13 @@ use tokio_util::sync::CancellationToken;
 
 use ayatori::protocol_user_api::{
     ExecutableProtocol, RuntimeError, Session, SessionParameters, SessionReport,
-    SessionState, SessionUpdate, Task, tokio::MessageOut,
+    SessionRunnerConfiguration, SessionState, SessionUpdate, Task,
 };
 
 // ANCHOR: signature
-pub async fn run_session<SP, P>(
+pub async fn run_session<SP, P, C>(
     rng: &mut SP::Rng,
-    tx: &mpsc::Sender<MessageOut<SP>>,
+    tx: &mpsc::Sender<C::MessageOut>,
     rx: &mut mpsc::Receiver<SessionUpdate<SP>>,
     cancellation: CancellationToken,
     mut session: Session<SP, P>,
@@ -17,6 +17,7 @@ pub async fn run_session<SP, P>(
 where
     SP: SessionParameters,
     P: ExecutableProtocol<SP>,
+    C: SessionRunnerConfiguration<SP>,
 {
     // ANCHOR_END: signature
 
@@ -39,13 +40,8 @@ where
                     // ANCHOR_END: task_randomized
                     // ANCHOR: task_send
                     Task::Send(task) => {
-                        for (destination, message) in task.into_direct_messages() {
-                            tx.send(MessageOut::Message {
-                                destination,
-                                message,
-                            })
-                            .await
-                            .unwrap();
+                        for message_out in C::send_task_into_messages_out(task)? {
+                            tx.send(message_out).await.unwrap();
                         }
                         continue;
                     } // ANCHOR_END: task_send
@@ -64,7 +60,7 @@ where
                 // ANCHOR_END: with_update_in_progress
                 // ANCHOR: with_update_message_error
                 SessionState::InProgressWithMessageError { error, session } => {
-                    tx.send(MessageOut::Error(error)).await.unwrap();
+                    tx.send(C::MessageOut::from(error)).await.unwrap();
                     session
                 }
                 // ANCHOR_END: with_update_message_error
@@ -98,7 +94,7 @@ mod tests {
         dev::{
             BinaryFormat, TestSessionParams, TestSigner, tokio::run_sessions_async,
         },
-        protocol_user_api::{Session, SessionId, ThresholdGroup},
+        protocol_user_api::{DirectMessagesOnly, Session, SessionId, ThresholdGroup},
         signature::{Keypair, rand_core::SeedableRng},
     };
     use rand_chacha::ChaCha8Rng;
@@ -136,10 +132,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let results =
-            run_sessions_async::<SP, P, _>(&mut rng, sessions, run_session::<SP, P>)
-                .await
-                .unwrap();
+        let results = run_sessions_async::<SP, P, _, DirectMessagesOnly>(
+            &mut rng,
+            sessions,
+            run_session::<SP, P, DirectMessagesOnly>,
+        )
+        .await
+        .unwrap();
 
         let value = results.reports[&ids[0]].success_ref().unwrap();
         assert_eq!(results.reports[&ids[1]].success_ref().unwrap(), value);

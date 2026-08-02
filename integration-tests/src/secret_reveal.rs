@@ -161,9 +161,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         build_data: &Self::BuildData,
         _inputs: ArgNodes<SP>,
     ) -> Result<Self::OutputNode, RuntimeError> {
-        let message_x = ProtocolMessage::new::<u64>("X");
-        let message_y = ProtocolMessage::new::<u64>("Y");
-        let message_c = ProtocolMessage::new::<u64>("C");
+        let (message_x_out, message_x_in) = direct_message::<_, u64>("X");
+        let (message_y_out, message_y_in) = direct_message::<_, u64>("Y");
+        let (message_c_out, message_c_in) = direct_message::<_, u64>("C");
         let all_parties = build_data;
 
         let all_parties_const = constant("all_parties", all_parties.clone());
@@ -174,15 +174,15 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
         let my_x_cap = compute_mapping("X", gen_public, &[("x", (&my_x).into())]); // X_i,[]
         let my_y_cap = compute_mapping("Y", gen_dh_public, &[("y", (&my_y).into())]); // Y_i,[]
 
-        let x_cap_sent = direct_message(&message_x, &my_x_cap);
-        let y_cap_sent = direct_message(&message_y, &my_y_cap);
+        let x_cap_sent = message_x_out.send(&my_x_cap);
+        let y_cap_sent = message_y_out.send(&my_y_cap);
 
-        let x_cap = receive(&message_x); // X_j,[]
-        let y_cap = receive(&message_y); // Y_j,[]
+        let x_cap = message_x_in.receive(); // X_j,[]
+        let y_cap = message_y_in.receive(); // Y_j,[]
 
-        let message_y_echo = ProtocolMessage::new::<u64>("Y_echo");
-        let y_echo_sent = direct_message(&message_y_echo, &y_cap);
-        let y_echo = receive(&message_y_echo); // Y_i,[]
+        let (message_y_echo_out, message_y_echo_in) = direct_message::<_, u64>("Y_echo");
+        let y_echo_sent = message_y_echo_out.send(&y_cap);
+        let y_echo = message_y_echo_in.receive(); // Y_i,[]
 
         // for j: C_j,i = x_i,j + Y_j,i^(y_i,j)
         let my_c_cap = compute_mapping(
@@ -190,9 +190,9 @@ impl<SP: SessionParameters> ComposableProtocol<SP> for TestProtocol {
             encrypt_secret,
             &[("x", (&my_x).into()), ("y", (&my_y).into()), ("Y", (&y_cap).into())],
         );
-        let c_cap_sent = direct_message(&message_c, &my_c_cap);
+        let c_cap_sent = message_c_out.send(&my_c_cap);
 
-        let c_cap = receive(&message_c); // C_i,[]
+        let c_cap = message_c_in.receive(); // C_i,[]
         let x_decrypted = compute_mapping(
             "x_dec",
             decrypt_secret,

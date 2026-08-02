@@ -15,9 +15,7 @@ use crate::{
 
 #[cfg(doc)]
 use crate::{
-    protocol_author_api::{
-        broadcast, compute_mapping, compute_mapping_third_party_fallible, compute_scalar, direct_message,
-    },
+    protocol_author_api::{SendBC, SendDM, compute_mapping, compute_mapping_third_party_fallible, compute_scalar},
     protocol_user_api::Session,
 };
 
@@ -147,7 +145,7 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    /// Replaces the serialize-and-check part of a [`direct_message`] node.
+    /// Replaces the serialize-and-check part of a [`SendBC`] node.
     pub fn serialize_and_check_bc<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         F: 'static
@@ -173,7 +171,7 @@ impl<SP: SessionParameters> Replacement<SP> {
         })
     }
 
-    /// Replaces the serialize-and-check part of a [`direct_message`] node.
+    /// Replaces the serialize-and-check part of a [`SendDM`] node.
     pub fn serialize_and_check_dm<F>(name: &[&str], function: F) -> Result<Self, RuntimeError>
     where
         F: 'static
