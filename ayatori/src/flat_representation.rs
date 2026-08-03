@@ -9,4 +9,4 @@ pub(crate) use actions::{
     SendDMAction,
 };
 pub(crate) use rules::OnError;
-pub(crate) use ruleset::{Ruleset, RulesetState};
+pub(crate) use ruleset::{Ruleset, RulesetState, RulesetStateChange};

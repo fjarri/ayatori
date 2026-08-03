@@ -28,7 +28,7 @@ use crate::{
         AnyTag, AssociatedData, ComputedScalarTag, Erasable, EvidenceVerdict, FullName, MappingTag, Message, MessageId,
         RemoteSignedTag, RuntimeError, ScalarTag, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
-    flat_representation::{Action, OnError, Ruleset, RulesetState},
+    flat_representation::{Action, OnError, Ruleset, RulesetState, RulesetStateChange},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traced_error::{Traceable, TraceableResult},
     traits::{ExecutableProtocol, SessionParameters},
@@ -220,8 +220,7 @@ where
         self.storage
             .set_scalar(store_in, value)
             .or_with_context(|| format!("Failed to store the scalar result of `{store_in}`"))?;
-        self.ruleset.update_with_scalar_ready(store_in);
-        Ok(AddSessionUpdate::StateChanged)
+        Ok(self.ruleset.update_with_scalar_ready(store_in).into())
     }
 
     fn add_element(
@@ -234,24 +233,22 @@ where
             .set_elem(store_in, id, value)
             .or_with_context(|| format!("Failed to store a mapping element result of `{store_in}`"))?;
         self.ruleset.update_with_element_ready(store_in, id);
-        // The output node is a scalar, adding an element to a mapping node
-        // will not finish the protocol or make it unfinishable.
         Ok(AddSessionUpdate::StateDidNotChange)
     }
 
     #[must_use]
     fn register_provable_error(&mut self, evidence: Evidence<SP, P>) -> AddSessionUpdate<SP> {
-        self.ruleset.update_with_banned_party(evidence.guilty_party());
+        let state_change = self.ruleset.update_with_banned_party(evidence.guilty_party());
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
-        AddSessionUpdate::StateChanged
+        state_change.into()
     }
 
     #[must_use]
     fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) -> AddSessionUpdate<SP> {
-        self.ruleset.update_with_banned_party(&guilty_party);
+        let state_change = self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
-        AddSessionUpdate::StateChanged
+        state_change.into()
     }
 
     fn try_add_verified_value(
@@ -299,9 +296,9 @@ where
 
     #[must_use]
     fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) -> AddSessionUpdate<SP> {
-        self.ruleset.update_with_banned_party(&guilty_party);
+        let state_change = self.ruleset.update_with_banned_party(&guilty_party);
         self.external_bans.insert(guilty_party, reason);
-        AddSessionUpdate::StateChanged
+        state_change.into()
     }
 
     fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
@@ -690,6 +687,15 @@ enum AddSessionUpdate<SP: SessionParameters> {
     StateDidNotChange,
     MessageAttributableError(MessageAttributableError<SP>),
     SpuriousError { store_in: AnyTag, error: SpuriousError },
+}
+
+impl<SP: SessionParameters> From<RulesetStateChange> for AddSessionUpdate<SP> {
+    fn from(source: RulesetStateChange) -> Self {
+        match source {
+            RulesetStateChange::Changed => Self::StateChanged,
+            RulesetStateChange::NotChanged => Self::StateDidNotChange,
+        }
+    }
 }
 
 /// Contains the specifics about why the session was impossible to finalize.

@@ -105,6 +105,12 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum RulesetStateChange {
+    Changed,
+    NotChanged,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum RulesetState {
     InProgress,
@@ -219,7 +225,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
         })
     }
 
-    pub fn update_with_banned_party(&mut self, id: &SP::Verifier) {
+    #[must_use]
+    pub fn update_with_banned_party(&mut self, id: &SP::Verifier) -> RulesetStateChange {
         let mut impossible_collects = Vec::new();
         for rule in &mut self.collect_rules {
             rule.update_with_banned_party(id);
@@ -228,17 +235,24 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
         }
 
-        if !impossible_collects.is_empty() {
+        if impossible_collects.is_empty() {
+            RulesetStateChange::NotChanged
+        } else {
             self.state = RulesetState::ImpossibleToCollect(impossible_collects);
+            RulesetStateChange::Changed
         }
     }
 
-    pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) {
-        if let ScalarTag::Computed(computed_tag) = tag
+    #[must_use]
+    pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) -> RulesetStateChange {
+        let state_change = if let ScalarTag::Computed(computed_tag) = tag
             && computed_tag == &self.output_tag
         {
             self.state = RulesetState::ReachedOutput;
-        }
+            RulesetStateChange::Changed
+        } else {
+            RulesetStateChange::NotChanged
+        };
 
         for rule in &mut self.scalar_rules {
             rule.update_with_scalar_ready(tag);
@@ -259,6 +273,8 @@ impl<SP: SessionParameters> Ruleset<SP> {
         for rule in &mut self.send_dm_rules {
             rule.update_with_scalar_ready(tag);
         }
+
+        state_change
     }
 
     pub fn update_with_element_ready(&mut self, tag: &MappingTag, id: &SP::Verifier) {
