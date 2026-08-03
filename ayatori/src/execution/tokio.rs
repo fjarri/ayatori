@@ -44,12 +44,13 @@ where
                     Task::Deterministic(task) => task.execute(),
                     Task::Randomized(task) => task.execute(rng),
                     Task::Send(task) => {
-                        for message_out in C::send_task_into_messages_out(task)? {
+                        let (update, iter) = C::send_task_into_messages_out(task)?;
+                        for message_out in iter {
                             tx.send(message_out).await.map_err(|err| {
                                 RuntimeError::new(format!("Failed to send a message to the output channel: {err}"))
                             })?;
                         }
-                        continue;
+                        update
                     }
                 }
             } else {
@@ -166,11 +167,13 @@ where
                     tasks.spawn_blocking(move || Ok(task.execute(&mut task_rng)));
                 }
                 Task::Send(task) => {
-                    for message_out in C::send_task_into_messages_out(task)? {
+                    let (update, iter) = C::send_task_into_messages_out(task)?;
+                    for message_out in iter {
                         tx.send(message_out).await.map_err(|err| {
                             RuntimeError::new(format!("Failed to send a message to the outbound channel: {err}"))
                         })?;
                     }
+                    tasks.spawn_blocking(move || Ok(update));
                 }
             }
         }

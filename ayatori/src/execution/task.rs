@@ -7,19 +7,25 @@ use alloc::{
     vec::Vec,
 };
 
-use super::session::SessionData;
+use super::{session::SessionData, storage::Storage};
 use crate::{
     entities::{
         AnyTag, Args, ComputedMappingTag, ComputedScalarTag, DeserializeArgs, DeserializeFunction, LocalSignedBCTag,
-        LocalSignedDMTag, MappingTag, MaybeAttributableError, Message, MessageId, ReceivedTag, RemoteSignedTag,
-        RuntimeError, ScalarTag, SenderAttributableMappingFunction, SenderAttributableWithRevealMappingFunction,
-        SenderError, SenderErrorWithReveal, SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs,
-        SignedValue, SpuriousError, ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction,
-        ThirdPartyError, UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
+        LocalSignedDMTag, MappingFunction, MappingTag, MaybeAttributableError, MergedScalarTag, Message, MessageId,
+        ReceivedTag, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SenderAttributableMappingFunction,
+        SenderAttributableWithRevealMappingFunction, SenderError, SenderErrorWithReveal, SentBCTag, SentDMTag,
+        SerializeAndSignBCFunction, SerializeAndSignDMFunction, SerializeArgs, SessionId, SignedValue, SpuriousError,
+        ThirdPartyAttributableMappingFunction, ThirdPartyAttributableScalarFunction, ThirdPartyError,
+        UnattributableError, UnattributableMappingFunction, UnattributableMappingFunctionWithRng,
         UnattributableOptionalScalarFunction, UnattributableScalarFunction, UnattributableScalarFunctionWithRng, Value,
         VerificationError,
     },
-    flat_representation::OnError,
+    flat_representation::{
+        CollectAction, ComputeDeserializeElementAction, ComputeMappingElementAction, ComputeScalarAction,
+        ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, MergeScalarsAction, OnError,
+        SendBCAction, SendDMAction,
+    },
+    traced_error::TraceableResult,
     traits::SessionParameters,
 };
 
@@ -557,23 +563,69 @@ impl<SP: SessionParameters> From<SerializeAndSignElementTask<SP>> for Task<SP> {
 /// Can be converted into different types of messages, depending on what transport capabilities are available.
 #[derive_where::derive_where(Debug)]
 pub struct SendTask<SP: SessionParameters> {
+    kind: SendTaskKind<SP>,
     direct_messages: BTreeMap<SP::Verifier, SignedValue<SP>>,
     broadcast_messages: Vec<(BTreeSet<SP::Verifier>, SignedValue<SP>)>,
 }
 
+#[derive_where::derive_where(Debug)]
+enum SendTaskKind<SP: SessionParameters> {
+    BroadcastMessage {
+        store_in: SentBCTag,
+    },
+    DirectMessage {
+        store_in: SentDMTag,
+        destination: SP::Verifier,
+    },
+}
+
+impl<SP: SessionParameters> SendTaskKind<SP> {
+    fn into_update(self) -> SessionUpdate<SP> {
+        SessionUpdate(match self {
+            Self::BroadcastMessage { store_in } => SessionUpdateEnum::SentBC { store_in },
+            Self::DirectMessage { store_in, destination } => SessionUpdateEnum::SentDM { store_in, destination },
+        })
+    }
+}
+
 impl<SP: SessionParameters> SendTask<SP> {
-    pub(crate) fn new_broadcast(destinations: BTreeSet<SP::Verifier>, value: SignedValue<SP>) -> Self {
-        Self {
+    pub(crate) fn from_send_bc_action(
+        storage: &Storage<SP::Verifier>,
+        action: SendBCAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let value = storage
+            .get_scalar(&ScalarTag::from(action.to_send))
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+        let signed_value = value
+            .downcast::<SignedValue<SP>>()
+            .or_with_context(|| "Failed to downcast the value to be sent".into())?;
+        Ok(Self {
+            kind: SendTaskKind::BroadcastMessage {
+                store_in: action.store_in,
+            },
             direct_messages: BTreeMap::new(),
-            broadcast_messages: vec![(destinations, value)],
-        }
+            broadcast_messages: vec![(action.destinations, signed_value)],
+        })
     }
 
-    pub(crate) fn new_direct(destination: SP::Verifier, value: SignedValue<SP>) -> Self {
-        Self {
-            direct_messages: [(destination, value)].into(),
+    pub(crate) fn from_send_dm_action(
+        storage: &Storage<SP::Verifier>,
+        action: SendDMAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let value = storage
+            .get_elem(&MappingTag::from(action.to_send), &action.destination)
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+        let signed_value = value
+            .downcast::<SignedValue<SP>>()
+            .or_with_context(|| "Failed to downcast the value to be sent".into())?;
+        Ok(Self {
+            kind: SendTaskKind::DirectMessage {
+                store_in: action.store_in,
+                destination: action.destination.clone(),
+            },
+            direct_messages: [(action.destination, signed_value)].into(),
             broadcast_messages: Vec::new(),
-        }
+        })
     }
 
     /// Converts the task into separated broadcasts and direct messages.
@@ -582,11 +634,13 @@ impl<SP: SessionParameters> SendTask<SP> {
         self,
     ) -> Result<
         (
+            SessionUpdate<SP>,
             Vec<(BTreeSet<SP::Verifier>, Message<SP>)>,
             BTreeMap<SP::Verifier, Message<SP>>,
         ),
         RuntimeError,
     > {
+        let update = self.kind.into_update();
         let dms = self
             .direct_messages
             .into_iter()
@@ -597,11 +651,13 @@ impl<SP: SessionParameters> SendTask<SP> {
             .into_iter()
             .map(|(destinations, value)| Message::new(vec![value]).map(|message| (destinations, message)))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((bcs, dms))
+        Ok((update, bcs, dms))
     }
 
     /// Converts the task into purely direct messages for each destination.
-    pub fn into_dms(self) -> Result<BTreeMap<SP::Verifier, Message<SP>>, RuntimeError> {
+    #[expect(clippy::type_complexity)]
+    pub fn into_dms(self) -> Result<(SessionUpdate<SP>, BTreeMap<SP::Verifier, Message<SP>>), RuntimeError> {
+        let update = self.kind.into_update();
         let mut result = self
             .direct_messages
             .into_iter()
@@ -614,10 +670,12 @@ impl<SP: SessionParameters> SendTask<SP> {
             }
         }
 
-        result
+        let dms = result
             .into_iter()
             .map(|(destination, values)| Message::new(values).map(|message| (destination, message)))
-            .collect::<Result<BTreeMap<_, _>, _>>()
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        Ok((update, dms))
     }
 }
 
@@ -718,6 +776,74 @@ impl<SP: SessionParameters> From<PreprocessMessageTask<SP>> for Task<SP> {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct MergeScalarsTask {
+    store_in: MergedScalarTag,
+    result: Value,
+}
+
+impl MergeScalarsTask {
+    fn new<SP: SessionParameters>(
+        storage: &Storage<SP::Verifier>,
+        action: MergeScalarsAction,
+    ) -> Result<Self, RuntimeError> {
+        let result = storage
+            .get_one_or_both_as_value(&action.left, &action.right)
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+        Ok(Self {
+            store_in: action.store_in,
+            result,
+        })
+    }
+
+    fn execute<SP: SessionParameters>(self) -> SessionUpdate<SP> {
+        SessionUpdate(SessionUpdateEnum::MergedScalars {
+            store_in: self.store_in,
+            result: self.result,
+        })
+    }
+}
+
+impl<SP: SessionParameters> From<MergeScalarsTask> for Task<SP> {
+    fn from(source: MergeScalarsTask) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::MergeScalars(source)))
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CollectTask {
+    store_in: ScalarTag,
+    result: Value,
+}
+
+impl CollectTask {
+    fn new<SP: SessionParameters>(
+        storage: &Storage<SP::Verifier>,
+        action: CollectAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let result = storage
+            .get_mapping_as_value(&action.values, &action.sources)
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+        Ok(Self {
+            store_in: action.store_in,
+            result,
+        })
+    }
+
+    fn execute<SP: SessionParameters>(self) -> SessionUpdate<SP> {
+        SessionUpdate(SessionUpdateEnum::Collected {
+            store_in: self.store_in,
+            result: self.result,
+        })
+    }
+}
+
+impl<SP: SessionParameters> From<CollectTask> for Task<SP> {
+    fn from(source: CollectTask) -> Self {
+        Self::Deterministic(DeterministicTask(DeterministicTaskEnum::Collect(source)))
+    }
+}
+
 #[derive_where::derive_where(Debug)]
 enum DeterministicTaskEnum<SP: SessionParameters> {
     ScalarUnattributable(ScalarUnattributableTask<SP>),
@@ -729,6 +855,8 @@ enum DeterministicTaskEnum<SP: SessionParameters> {
     ElementThirdPartyAttributable(ElementThirdPartyAttributableTask<SP>),
     DeserializeElement(DeserializeElementTask<SP>),
     PreprocessMessage(PreprocessMessageTask<SP>),
+    MergeScalars(MergeScalarsTask),
+    Collect(CollectTask),
 }
 
 /// An object encapsulating a deterministic task (one that does not require an RNG).
@@ -748,6 +876,8 @@ impl<SP: SessionParameters> DeterministicTask<SP> {
             DeterministicTaskEnum::ElementThirdPartyAttributable(task) => task.execute(),
             DeterministicTaskEnum::DeserializeElement(task) => task.execute(),
             DeterministicTaskEnum::PreprocessMessage(task) => task.execute(),
+            DeterministicTaskEnum::MergeScalars(task) => task.execute(),
+            DeterministicTaskEnum::Collect(task) => task.execute(),
         }
     }
 }
@@ -787,6 +917,138 @@ pub enum Task<SP: SessionParameters> {
     Randomized(RandomizedTask<SP>),
 }
 
+impl<SP: SessionParameters> Task<SP> {
+    pub(crate) fn from_compute_scalar_action(
+        session_id: &SessionId<SP>,
+        session_verifier: &SP::Verifier,
+        storage: &Storage<SP::Verifier>,
+        action: ComputeScalarAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let arg_values = storage
+            .get_scalar_args(action.args)
+            .or_with_context(|| format!("Failed to get the arguments for `{}` from storage", action.store_in))?;
+        let args = Args::new(session_id, session_verifier, arg_values);
+
+        Ok(match action.function {
+            ScalarFunction::Unattributable(function) => {
+                ScalarUnattributableTask::new(action.store_in, function, args).into()
+            }
+            ScalarFunction::UnattributableOptional(function) => {
+                ScalarUnattributableOptionalTask::new(action.store_in, function, args).into()
+            }
+            ScalarFunction::UnattributableWithRng(function) => {
+                RngScalarUnattributableTask::new(action.store_in, function, args).into()
+            }
+            ScalarFunction::ThirdPartyAttributable(function) => {
+                ScalarThirdPartyAttributableTask::new(action.store_in, function, args).into()
+            }
+        })
+    }
+
+    pub(crate) fn from_compute_mapping_element_action(
+        session_id: &SessionId<SP>,
+        session_verifier: &SP::Verifier,
+        storage: &Storage<SP::Verifier>,
+        action: ComputeMappingElementAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let arg_values = storage
+            .get_scalar_or_mapping_args(&action.index, action.args)
+            .or_with_context(|| format!("Failed to get the arguments for `{}` from storage", action.store_in))?;
+        let args = Args::new(session_id, session_verifier, arg_values);
+        Ok(match action.function {
+            MappingFunction::Unattributable(function) => {
+                ElementUnattributableTask::new(action.store_in, function, action.index, args).into()
+            }
+            MappingFunction::UnattributableWithRng(function) => {
+                RngElementUnattributableTask::new(action.store_in, function, action.index, args).into()
+            }
+            MappingFunction::SenderAttributable(function) => {
+                ElementSenderAttributableTask::new(action.store_in, function, action.index, args, action.on_error)
+                    .into()
+            }
+            MappingFunction::SenderAttributableWithReveal(function) => ElementSenderAttributableWithRevealTask::new(
+                action.store_in,
+                function,
+                action.index,
+                args,
+                action.on_error,
+            )
+            .into(),
+            MappingFunction::ThirdPartyAttributable(function) => {
+                ElementThirdPartyAttributableTask::new(action.store_in, function, action.index, args).into()
+            }
+        })
+    }
+
+    pub(crate) fn from_compute_serialize_and_sign_scalar_action(
+        signer: &Arc<SP::Signer>,
+        session_id: &SessionId<SP>,
+        storage: &Storage<SP::Verifier>,
+        action: ComputeSerializeAndSignScalarAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let value = storage
+            .get_scalar(&action.data)
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.data))?;
+
+        let args = SerializeArgs::new(signer, session_id, action.message_name, action.serde_adapter, value);
+        Ok(SerializeAndSignScalarTask::new(action.store_in, action.function, args).into())
+    }
+
+    pub(crate) fn from_compute_serialize_and_sign_element_action(
+        signer: &Arc<SP::Signer>,
+        session_id: &SessionId<SP>,
+        storage: &Storage<SP::Verifier>,
+        action: ComputeSerializeAndSignElementAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let value = match action.data {
+            AnyTag::Scalar(tag) => storage.get_scalar(&tag),
+            AnyTag::Mapping(tag) => storage.get_elem(&tag, &action.index),
+        }
+        .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+
+        let args = SerializeArgs::new(signer, session_id, action.message_name, action.serde_adapter, value);
+        Ok(SerializeAndSignElementTask::new(action.store_in, action.function, action.index, args).into())
+    }
+
+    pub(crate) fn from_compute_deserialize_element_action(
+        storage: &Storage<SP::Verifier>,
+        action: ComputeDeserializeElementAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        let value = storage
+            .get_elem(&MappingTag::from(action.data), &action.index)
+            .or_with_context(|| format!("Failed to get the argument for `{}` from storage", action.store_in))?;
+        let args = DeserializeArgs::new(&action.expected_senders, action.serde_adapter, value);
+        Ok(DeserializeElementTask::new(action.store_in, action.function, action.index, args, action.on_error).into())
+    }
+
+    pub(crate) fn from_send_bc_action(
+        storage: &Storage<SP::Verifier>,
+        action: SendBCAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        Ok(SendTask::from_send_bc_action(storage, action)?.into())
+    }
+
+    pub(crate) fn from_send_dm_action(
+        storage: &Storage<SP::Verifier>,
+        action: SendDMAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        Ok(SendTask::from_send_dm_action(storage, action)?.into())
+    }
+
+    pub(crate) fn from_merge_scalars_action(
+        storage: &Storage<SP::Verifier>,
+        action: MergeScalarsAction,
+    ) -> Result<Self, RuntimeError> {
+        Ok(MergeScalarsTask::new::<SP>(storage, action)?.into())
+    }
+    pub(crate) fn from_collect_action(
+        storage: &Storage<SP::Verifier>,
+        action: CollectAction<SP>,
+    ) -> Result<Self, RuntimeError> {
+        Ok(CollectTask::new(storage, action)?.into())
+    }
+}
+
 /// The result of executing a task, to be passed to [`Session::with_update`].
 #[derive_where::derive_where(Debug)]
 pub struct SessionUpdate<SP: SessionParameters>(SessionUpdateEnum<SP>);
@@ -818,6 +1080,13 @@ impl<SP: SessionParameters> SessionUpdate<SP> {
 #[derive_where::derive_where(Debug)]
 pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     NoActionNeeded,
+    SentBC {
+        store_in: SentBCTag,
+    },
+    SentDM {
+        store_in: SentDMTag,
+        destination: SP::Verifier,
+    },
     Received {
         id: MessageId<SP>,
         message: Message<SP>,
@@ -864,5 +1133,13 @@ pub(crate) enum SessionUpdateEnum<SP: SessionParameters> {
     ExternalBan {
         party_id: SP::Verifier,
         reason: String,
+    },
+    MergedScalars {
+        store_in: MergedScalarTag,
+        result: Value,
+    },
+    Collected {
+        store_in: ScalarTag,
+        result: Value,
     },
 }

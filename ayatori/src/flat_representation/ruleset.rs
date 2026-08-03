@@ -6,7 +6,10 @@ use alloc::{
 };
 use core::fmt::{self, Display};
 
-use super::rules::{Action, CollectRule, MappingRule, OnError, ScalarRule, SendBCRule, SendDMRule};
+use super::{
+    actions::Action,
+    rules::{CollectRule, MappingRule, OnError, ScalarRule, SendBCRule, SendDMRule},
+};
 use crate::{
     entities::{AnyTagRef, ComputedScalarTag, MappingTag, RuntimeError, ScalarArgumentTag, ScalarTag},
     graph_representation::{AnyNode, GeneralizedNode, OutputNode, Reproducibility},
@@ -103,8 +106,8 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum RulesetState {
-    InProgress,
+pub(crate) enum RulesetStateChange {
+    NotChanged,
     ReachedOutput,
     ImpossibleToCollect(Vec<ScalarTag>),
 }
@@ -118,7 +121,6 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     send_bc_rules: Vec<SendBCRule<SP>>,
     send_dm_rules: Vec<SendDMRule<SP>>,
     arguments: BTreeMap<String, ScalarArgumentTag>,
-    state: RulesetState,
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
@@ -212,11 +214,11 @@ impl<SP: SessionParameters> Ruleset<SP> {
             send_bc_rules,
             send_dm_rules,
             arguments,
-            state: RulesetState::InProgress,
         })
     }
 
-    pub fn update_with_banned_party(&mut self, id: &SP::Verifier) {
+    #[must_use]
+    pub fn update_with_banned_party(&mut self, id: &SP::Verifier) -> RulesetStateChange {
         let mut impossible_collects = Vec::new();
         for rule in &mut self.collect_rules {
             rule.update_with_banned_party(id);
@@ -225,18 +227,15 @@ impl<SP: SessionParameters> Ruleset<SP> {
             }
         }
 
-        if !impossible_collects.is_empty() {
-            self.state = RulesetState::ImpossibleToCollect(impossible_collects);
+        if impossible_collects.is_empty() {
+            RulesetStateChange::NotChanged
+        } else {
+            RulesetStateChange::ImpossibleToCollect(impossible_collects)
         }
     }
 
-    pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) {
-        if let ScalarTag::Computed(computed_tag) = tag
-            && computed_tag == &self.output_tag
-        {
-            self.state = RulesetState::ReachedOutput;
-        }
-
+    #[must_use]
+    pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) -> RulesetStateChange {
         for rule in &mut self.scalar_rules {
             rule.update_with_scalar_ready(tag);
         }
@@ -255,6 +254,14 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
         for rule in &mut self.send_dm_rules {
             rule.update_with_scalar_ready(tag);
+        }
+
+        if let ScalarTag::Computed(computed_tag) = tag
+            && computed_tag == &self.output_tag
+        {
+            RulesetStateChange::ReachedOutput
+        } else {
+            RulesetStateChange::NotChanged
         }
     }
 
@@ -323,10 +330,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     pub fn arguments(&self) -> &BTreeMap<String, ScalarArgumentTag> {
         &self.arguments
-    }
-
-    pub fn state(&self) -> &RulesetState {
-        &self.state
     }
 
     pub fn output_tag(&self) -> &ComputedScalarTag {

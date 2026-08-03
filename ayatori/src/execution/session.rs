@@ -19,23 +19,16 @@ use super::{
         ThirdPartyErrorEvidence,
     },
     storage::Storage,
-    task::{
-        DeserializeElementTask, ElementSenderAttributableTask, ElementSenderAttributableWithRevealTask,
-        ElementThirdPartyAttributableTask, ElementUnattributableTask, PreprocessMessageTask,
-        RngElementUnattributableTask, RngScalarUnattributableTask, ScalarThirdPartyAttributableTask,
-        ScalarUnattributableOptionalTask, ScalarUnattributableTask, SendTask, SerializeAndSignElementTask,
-        SerializeAndSignScalarTask, SessionUpdate, SessionUpdateEnum, Task,
-    },
+    task::{PreprocessMessageTask, SessionUpdate, SessionUpdateEnum, Task},
 };
 #[cfg(feature = "dev")]
 use crate::dev::Replacement;
 use crate::{
     entities::{
-        AnyTag, Args, AssociatedData, ComputedScalarTag, DeserializeArgs, Erasable, EvidenceVerdict, MappingFunction,
-        MappingTag, Message, MessageId, RemoteSignedTag, RuntimeError, ScalarFunction, ScalarTag, SerializeArgs,
-        SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
+        AnyTag, AssociatedData, ComputedScalarTag, Erasable, EvidenceVerdict, FullName, MappingTag, Message, MessageId,
+        RemoteSignedTag, RuntimeError, ScalarTag, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
-    flat_representation::{Action, OnError, Ruleset, RulesetState},
+    flat_representation::{Action, OnError, Ruleset, RulesetStateChange},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traced_error::{Traceable, TraceableResult},
     traits::{ExecutableProtocol, SessionParameters},
@@ -223,36 +216,89 @@ where
         &self.verifier
     }
 
-    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), RuntimeError> {
+    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         self.storage
             .set_scalar(store_in, value)
             .or_with_context(|| format!("Failed to store the scalar result of `{store_in}`"))?;
-        self.ruleset.update_with_scalar_ready(store_in);
-        Ok(())
+        Ok(self.ruleset.update_with_scalar_ready(store_in).into())
     }
 
-    fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), RuntimeError> {
+    fn add_element(
+        &mut self,
+        store_in: &MappingTag,
+        id: &SP::Verifier,
+        value: Value,
+    ) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         self.storage
             .set_elem(store_in, id, value)
             .or_with_context(|| format!("Failed to store a mapping element result of `{store_in}`"))?;
         self.ruleset.update_with_element_ready(store_in, id);
-        Ok(())
+        Ok(AddSessionUpdate::StateDidNotChange)
     }
 
-    fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
-        self.ruleset.update_with_banned_party(evidence.guilty_party());
+    #[must_use]
+    fn register_provable_error(&mut self, evidence: Evidence<SP, P>) -> AddSessionUpdate<SP> {
+        let state_change = self.ruleset.update_with_banned_party(evidence.guilty_party());
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
+        state_change.into()
     }
 
-    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) {
-        self.ruleset.update_with_banned_party(&guilty_party);
+    #[must_use]
+    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) -> AddSessionUpdate<SP> {
+        let state_change = self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
+        state_change.into()
     }
 
-    fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
-        self.ruleset.update_with_banned_party(&guilty_party);
+    fn try_add_verified_value(
+        &mut self,
+        store_in: &MappingTag,
+        id: &SP::Verifier,
+        value: Value,
+    ) -> Result<AddSessionUpdate<SP>, RuntimeError> {
+        if let Ok(existing_value) = self.storage.get_elem(store_in, id) {
+            let typed_existing_value = existing_value
+                .downcast_ref::<VerifiedValue<SP>>()
+                .or_with_context(|| format!("Failed to downcast a stored signed message `{store_in}`"))?;
+            let typed_received_value = value
+                .downcast_ref::<VerifiedValue<SP>>()
+                .or_with_context(|| format!("Failed to downcast a newly received message `{store_in}`"))?;
+
+            // Both values are signed, contain the same named value, but are different.
+            // This is a provable failure.
+            // Note that the payload or metadata of either value may still be invalid
+            // (it is possible that it has not been checked yet at this point),
+            // but it does not matter since we already got our evidence.
+            if typed_existing_value.metadata() != typed_received_value.metadata()
+                || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
+            {
+                let evidence = EvidenceKind::ConflictingMessages(ConflictingMessagesEvidence::new(
+                    typed_existing_value,
+                    typed_received_value,
+                ));
+                return Ok(self.register_provable_error(Evidence::new(&self.data.id, id, evidence)));
+            }
+
+            // The message is a duplicate, we cannot do anything at this point.
+            // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
+            // For now we can only report both message IDs that delivered these values,
+            // and let the user deal with it, if possible.
+            let error = MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
+                first: typed_existing_value.message_id().clone(),
+                second: typed_existing_value.message_id().clone(),
+            });
+            return Ok(AddSessionUpdate::MessageAttributableError(error));
+        }
+
+        self.add_element(store_in, id, value)
+    }
+
+    #[must_use]
+    fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) -> AddSessionUpdate<SP> {
+        let state_change = self.ruleset.update_with_banned_party(&guilty_party);
         self.external_bans.insert(guilty_party, reason);
+        state_change.into()
     }
 
     fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
@@ -291,13 +337,15 @@ where
     }
 
     /// Registers a received message.
-    fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
+    #[must_use]
+    fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) -> AddSessionUpdate<SP> {
         let tasks = message
             .into_values()
             .into_iter()
             .map(|signed_value| PreprocessMessageTask::new(&self.data, message_id.clone(), signed_value))
             .collect::<Vec<_>>();
         self.preprocessing_tasks.extend(tasks);
+        AddSessionUpdate::StateDidNotChange
     }
 
     /// Attempts to make a task to execute.
@@ -308,111 +356,17 @@ where
             return Ok(Some(task.into()));
         }
 
-        while let Some(action) = self.ruleset.pop_action() {
-            match action {
-                Action::SendBC {
-                    store_in,
-                    to_send,
-                    destinations,
-                } => {
-                    let value = self
-                        .storage
-                        .get_scalar(&ScalarTag::from(to_send))
-                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-                    let signed_value = value
-                        .downcast::<SignedValue<SP>>()
-                        .or_with_context(|| "Failed to downcast the value to be sent".into())?;
-                    // Note that we record the fact that the message was *sent*, not *delivered*.
-                    //
-                    // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
-                    // and we can get away with it because it does not change the state.
-                    // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_scalar(&ScalarTag::from(store_in), Value::new(()))?;
-                    return Ok(Some(SendTask::new_broadcast(destinations, signed_value).into()));
+        if let Some(action) = self.ruleset.pop_action() {
+            return Ok(Some(match action {
+                Action::SendBC(action) => Task::from_send_bc_action(&self.storage, action)?,
+                Action::SendDM(action) => Task::from_send_dm_action(&self.storage, action)?,
+                Action::ComputeScalar(action) => {
+                    Task::from_compute_scalar_action(&self.data.id, self.verifier(), &self.storage, action)?
                 }
-                Action::SendDM {
-                    store_in,
-                    to_send,
-                    destination,
-                } => {
-                    let value = self
-                        .storage
-                        .get_elem(&MappingTag::from(to_send), &destination)
-                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-                    let signed_value = value
-                        .downcast::<SignedValue<SP>>()
-                        .or_with_context(|| "Failed to downcast the value to be sent".into())?;
-                    // Note that we record the fact that the message was *sent*, not *delivered*.
-                    //
-                    // TODO: This is the only place where we use `add_element()` outside of `with_update()`,
-                    // and we can get away with it because it does not change the state.
-                    // Can we enforce it in types somehow? In general, `add_element()` never changes state.
-                    self.add_element(&MappingTag::from(store_in), &destination, Value::new(()))?;
-                    return Ok(Some(SendTask::new_direct(destination, signed_value).into()));
+                Action::ComputeMappingElement(action) => {
+                    Task::from_compute_mapping_element_action(&self.data.id, self.verifier(), &self.storage, action)?
                 }
-                Action::ComputeScalar {
-                    store_in,
-                    function,
-                    args,
-                } => {
-                    let arg_values = self
-                        .storage
-                        .get_scalar_args(args)
-                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
-                    let args = Args::new(&self.data.id, self.verifier(), arg_values);
-                    return Ok(Some(match function {
-                        ScalarFunction::Unattributable(function) => {
-                            ScalarUnattributableTask::new(store_in, function, args).into()
-                        }
-                        ScalarFunction::UnattributableOptional(function) => {
-                            ScalarUnattributableOptionalTask::new(store_in, function, args).into()
-                        }
-                        ScalarFunction::UnattributableWithRng(function) => {
-                            RngScalarUnattributableTask::new(store_in, function, args).into()
-                        }
-                        ScalarFunction::ThirdPartyAttributable(function) => {
-                            ScalarThirdPartyAttributableTask::new(store_in, function, args).into()
-                        }
-                    }));
-                }
-                Action::ComputeMappingElement {
-                    store_in,
-                    function,
-                    index,
-                    args,
-                    on_error,
-                } => {
-                    let arg_values = self
-                        .storage
-                        .get_scalar_or_mapping_args(&index, args)
-                        .or_with_context(|| format!("Failed to get the arguments for `{store_in}` from storage"))?;
-                    let args = Args::new(&self.data.id, self.verifier(), arg_values);
-                    return Ok(Some(match function {
-                        MappingFunction::Unattributable(function) => {
-                            ElementUnattributableTask::new(store_in, function, index, args).into()
-                        }
-                        MappingFunction::UnattributableWithRng(function) => {
-                            RngElementUnattributableTask::new(store_in, function, index, args).into()
-                        }
-                        MappingFunction::SenderAttributable(function) => {
-                            ElementSenderAttributableTask::new(store_in, function, index, args, on_error).into()
-                        }
-                        MappingFunction::SenderAttributableWithReveal(function) => {
-                            ElementSenderAttributableWithRevealTask::new(store_in, function, index, args, on_error)
-                                .into()
-                        }
-                        MappingFunction::ThirdPartyAttributable(function) => {
-                            ElementThirdPartyAttributableTask::new(store_in, function, index, args).into()
-                        }
-                    }));
-                }
-                Action::ComputeSerializeAndSignScalar {
-                    store_in,
-                    function,
-                    data,
-                    message_name,
-                    serde_adapter,
-                } => {
+                Action::ComputeSerializeAndSignScalar(action) => {
                     let signer = self.signer.as_ref().ok_or_else(|| {
                         // This can happen if a serialization node somehow remains
                         // in an evidence verification subtree.
@@ -420,23 +374,9 @@ where
                             "Attempted to execute a serialize-and-sign node in a session without a signer",
                         )
                     })?;
-
-                    let value = self
-                        .storage
-                        .get_scalar(&data)
-                        .or_with_context(|| format!("Failed to get the argument for `{data}` from storage"))?;
-
-                    let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
-                    return Ok(Some(SerializeAndSignScalarTask::new(store_in, function, args).into()));
+                    Task::from_compute_serialize_and_sign_scalar_action(signer, &self.data.id, &self.storage, action)?
                 }
-                Action::ComputeSerializeAndSignElement {
-                    store_in,
-                    function,
-                    index,
-                    data,
-                    message_name,
-                    serde_adapter,
-                } => {
+                Action::ComputeSerializeAndSignElement(action) => {
                     let signer = self.signer.as_ref().ok_or_else(|| {
                         // This can happen if a serialization node somehow remains
                         // in an evidence verification subtree.
@@ -444,57 +384,14 @@ where
                             "Attempted to execute a serialize-and-sign node in a session without a signer",
                         )
                     })?;
-
-                    let value = match data {
-                        AnyTag::Scalar(tag) => self.storage.get_scalar(&tag),
-                        AnyTag::Mapping(tag) => self.storage.get_elem(&tag, &index),
-                    }
-                    .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-
-                    let args = SerializeArgs::new(signer, &self.data.id, message_name, serde_adapter, value);
-                    return Ok(Some(
-                        SerializeAndSignElementTask::new(store_in, function, index, args).into(),
-                    ));
+                    Task::from_compute_serialize_and_sign_element_action(signer, &self.data.id, &self.storage, action)?
                 }
-                Action::ComputeDeserializeElement {
-                    store_in,
-                    function,
-                    index,
-                    data,
-                    serde_adapter,
-                    expected_senders,
-                    on_error,
-                } => {
-                    let value = self
-                        .storage
-                        .get_elem(&MappingTag::from(data), &index)
-                        .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?;
-                    let args = DeserializeArgs::new(&expected_senders, serde_adapter, value);
-                    return Ok(Some(
-                        DeserializeElementTask::new(store_in, function, index, args, on_error).into(),
-                    ));
+                Action::ComputeDeserializeElement(action) => {
+                    Task::from_compute_deserialize_element_action(&self.storage, action)?
                 }
-                Action::MergeScalar { store_in, left, right } => {
-                    self.add_scalar(
-                        &ScalarTag::from(store_in.clone()),
-                        self.storage
-                            .get_one_or_both_as_value(&left, &right)
-                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
-                    )?;
-                }
-                Action::Collect {
-                    store_in,
-                    values,
-                    sources,
-                } => {
-                    self.add_scalar(
-                        &store_in,
-                        self.storage
-                            .get_mapping_as_value(&values, &sources)
-                            .or_with_context(|| format!("Failed to get the argument for `{store_in}` from storage"))?,
-                    )?;
-                }
-            }
+                Action::MergeScalar(action) => Task::from_merge_scalars_action(&self.storage, action)?,
+                Action::Collect(action) => Task::from_collect_action(&self.storage, action)?,
+            }));
         }
 
         Ok(None)
@@ -504,16 +401,10 @@ where
     pub fn with_update(mut self, result: SessionUpdate<SP>) -> Result<SessionState<SP, P>, RuntimeError> {
         let new_state = self.with_update_inner(result)?;
         Ok(match new_state {
-            AddSessionUpdate::StateChanged => {
-                let state = self.ruleset.state().clone();
-                match state {
-                    RulesetState::InProgress => SessionState::InProgress(self),
-                    RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
-                    RulesetState::ImpossibleToCollect(tags) => {
-                        let report = self.make_report(SessionOutcome::Unfinishable(UnfinishableOutcome(tags)));
-                        SessionState::Unfinishable(report)
-                    }
-                }
+            AddSessionUpdate::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
+            AddSessionUpdate::ImpossibleToCollect(tags) => {
+                let report = self.make_report(SessionOutcome::Unfinishable(UnfinishableOutcome(tags)));
+                SessionState::Unfinishable(report)
             }
             AddSessionUpdate::StateDidNotChange => SessionState::InProgress(self),
             AddSessionUpdate::MessageAttributableError(error) => {
@@ -530,77 +421,34 @@ where
     fn with_update_inner(&mut self, result: SessionUpdate<SP>) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         match result.into_inner() {
             SessionUpdateEnum::NoActionNeeded => Ok(AddSessionUpdate::StateDidNotChange),
-            SessionUpdateEnum::Received { id, message } => {
-                self.add_message(&id, message);
-                Ok(AddSessionUpdate::StateDidNotChange)
+            SessionUpdateEnum::SentBC { store_in } => self.add_scalar(&ScalarTag::from(store_in), Value::new(())),
+            SessionUpdateEnum::SentDM { store_in, destination } => {
+                self.add_element(&MappingTag::from(store_in), &destination, Value::new(()))
             }
+            SessionUpdateEnum::Received { id, message } => Ok(self.add_message(&id, message)),
             SessionUpdateEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
             SessionUpdateEnum::SpuriousError { store_in, error } => {
                 Ok(AddSessionUpdate::SpuriousError { store_in, error })
             }
-            SessionUpdateEnum::ComputedScalar { store_in, result } => {
-                self.add_scalar(&store_in, result)?;
-                Ok(AddSessionUpdate::StateChanged)
-            }
+            SessionUpdateEnum::ComputedScalar { store_in, result }
+            | SessionUpdateEnum::Collected { store_in, result } => self.add_scalar(&store_in, result),
             SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index,
                 result,
-            } => {
-                self.add_element(&store_in, &index, result)?;
-                Ok(AddSessionUpdate::StateChanged)
-            }
+            } => self.add_element(&store_in, &index, result),
             SessionUpdateEnum::SenderError {
                 store_in,
                 guilty_party,
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => {
-                    self.register_attributable_error(guilty_party, &store_in);
-                    Ok(AddSessionUpdate::StateChanged)
-                }
+                OnError::Escalate => Ok(self.register_attributable_error(guilty_party, &store_in)),
                 OnError::CollectEvidence(message_names) => {
-                    let mut signed_values = Vec::new();
-                    for name in message_names {
-                        let value = self
-                            .storage
-                            .get_elem(
-                                &MappingTag::from(RemoteSignedTag::new_with_full_name(&name)),
-                                &guilty_party,
-                            )
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to get the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?;
-                        let signed_value = value
-                            .downcast_ref::<VerifiedValue<SP>>()
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to downcast the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?
-                            .clone()
-                            .unverify();
-                        signed_values.push(signed_value);
-                    }
-                    let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
-                        &self.verifier,
-                        &store_in,
-                        signed_values,
-                        error,
-                    ));
-                    self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                    Ok(AddSessionUpdate::StateChanged)
+                    let signed_values = collect_evidence(&self.storage, &guilty_party, &message_names)
+                        .or_with_context(|| format!("Failed to collect evidence for {store_in} failure"))?;
+                    let evidence = SenderErrorEvidence::new(&self.verifier, &store_in, signed_values, error);
+                    Ok(self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence.into())))
                 }
             },
             SessionUpdateEnum::SenderErrorWithReveal {
@@ -609,103 +457,24 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => {
-                    self.register_attributable_error(guilty_party, &store_in);
-                    Ok(AddSessionUpdate::StateChanged)
-                }
+                OnError::Escalate => Ok(self.register_attributable_error(guilty_party, &store_in)),
                 OnError::CollectEvidence(message_names) => {
-                    let mut signed_values = Vec::new();
-                    for name in message_names {
-                        let value = self
-                            .storage
-                            .get_elem(
-                                &MappingTag::from(RemoteSignedTag::new_with_full_name(&name)),
-                                &guilty_party,
-                            )
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to get the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?;
-                        let signed_value = value
-                            .downcast_ref::<VerifiedValue<SP>>()
-                            .or_with_context(|| {
-                                format!(
-                                    concat!(
-                                        "Failed to downcast the signed message `{}` ",
-                                        "to attach to the evidence of `{}` failure"
-                                    ),
-                                    name, store_in
-                                )
-                            })?
-                            .clone()
-                            .unverify();
-                        signed_values.push(signed_value);
-                    }
-                    let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
-                        &self.verifier,
-                        &store_in,
-                        signed_values,
-                        error,
-                    ));
-                    self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                    Ok(AddSessionUpdate::StateChanged)
+                    let signed_values = collect_evidence(&self.storage, &guilty_party, &message_names)
+                        .or_with_context(|| format!("Failed to collect evidence for {store_in} failure"))?;
+                    let evidence = SenderErrorWithRevealEvidence::new(&self.verifier, &store_in, signed_values, error);
+                    Ok(self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence.into())))
                 }
             },
             SessionUpdateEnum::ThirdPartyError { store_in, error } => {
                 let (guilty_party, error) = error.unpack();
-                let evidence =
-                    EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
-                self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                Ok(AddSessionUpdate::StateChanged)
+                let evidence = ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error);
+                Ok(self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence.into())))
             }
             SessionUpdateEnum::Preprocessed {
                 store_in,
                 source,
                 value,
-            } => {
-                if let Ok(existing_value) = self.storage.get_elem(&store_in, &source) {
-                    let typed_existing_value = existing_value
-                        .downcast_ref::<VerifiedValue<SP>>()
-                        .or_with_context(|| format!("Failed to downcast a stored signed message `{store_in}`"))?;
-                    let typed_received_value = value
-                        .downcast_ref::<VerifiedValue<SP>>()
-                        .or_with_context(|| format!("Failed to downcast a newly received message `{store_in}`"))?;
-
-                    // Both values are signed, contain the same named value, but are different.
-                    // This is a provable failure.
-                    // Note that the payload or metadata of either value may still be invalid
-                    // (it is possible that it has not been checked yet at this point),
-                    // but it does not matter since we already got our evidence.
-                    if typed_existing_value.metadata() != typed_received_value.metadata()
-                        || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
-                    {
-                        let evidence = EvidenceKind::ConflictingMessages(ConflictingMessagesEvidence::new(
-                            typed_existing_value,
-                            typed_received_value,
-                        ));
-                        self.register_provable_error(Evidence::new(&self.data.id, &source, evidence));
-                        return Ok(AddSessionUpdate::StateChanged);
-                    }
-
-                    // The message is a duplicate, we cannot do anything at this point.
-                    // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
-                    // For now we can only report both message IDs that delivered these values,
-                    // and let the user deal with it, if possible.
-                    let error = MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
-                        first: typed_existing_value.message_id().clone(),
-                        second: typed_existing_value.message_id().clone(),
-                    });
-                    return Ok(AddSessionUpdate::MessageAttributableError(error));
-                }
-
-                self.add_element(&store_in, &source, value)?;
-                Ok(AddSessionUpdate::StateChanged)
-            }
+            } => self.try_add_verified_value(&store_in, &source, value),
             SessionUpdateEnum::MessageError {
                 message_id,
                 description,
@@ -716,12 +485,35 @@ where
                 });
                 Ok(AddSessionUpdate::MessageAttributableError(error))
             }
-            SessionUpdateEnum::ExternalBan { party_id, reason } => {
-                self.register_banned_party(party_id, reason);
-                Ok(AddSessionUpdate::StateChanged)
+            SessionUpdateEnum::ExternalBan { party_id, reason } => Ok(self.register_banned_party(party_id, reason)),
+            SessionUpdateEnum::MergedScalars { store_in, result } => {
+                self.add_scalar(&ScalarTag::from(store_in), result)
             }
         }
     }
+}
+
+fn collect_evidence<SP: SessionParameters>(
+    storage: &Storage<SP::Verifier>,
+    guilty_party: &SP::Verifier,
+    message_names: &BTreeSet<FullName>,
+) -> Result<Vec<SignedValue<SP>>, RuntimeError> {
+    let mut signed_values = Vec::new();
+    for name in message_names {
+        let value = storage
+            .get_elem(
+                &MappingTag::from(RemoteSignedTag::new_with_full_name(name)),
+                guilty_party,
+            )
+            .or_with_context(|| format!("Failed to get the signed message `{name}`"))?;
+        let signed_value = value
+            .downcast_ref::<VerifiedValue<SP>>()
+            .or_with_context(|| format!("Failed to downcast the signed message `{name}`"))?
+            .clone()
+            .unverify();
+        signed_values.push(signed_value);
+    }
+    Ok(signed_values)
 }
 
 /// A wrapper for a session that has reached the output.
@@ -885,10 +677,21 @@ pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
 }
 
 enum AddSessionUpdate<SP: SessionParameters> {
-    StateChanged,
     StateDidNotChange,
+    ReachedOutput,
+    ImpossibleToCollect(Vec<ScalarTag>),
     MessageAttributableError(MessageAttributableError<SP>),
     SpuriousError { store_in: AnyTag, error: SpuriousError },
+}
+
+impl<SP: SessionParameters> From<RulesetStateChange> for AddSessionUpdate<SP> {
+    fn from(source: RulesetStateChange) -> Self {
+        match source {
+            RulesetStateChange::NotChanged => Self::StateDidNotChange,
+            RulesetStateChange::ReachedOutput => Self::ReachedOutput,
+            RulesetStateChange::ImpossibleToCollect(tags) => Self::ImpossibleToCollect(tags),
+        }
+    }
 }
 
 /// Contains the specifics about why the session was impossible to finalize.

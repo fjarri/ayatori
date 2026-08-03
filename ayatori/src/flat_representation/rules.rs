@@ -6,9 +6,16 @@ use core::fmt::{self, Display};
 
 use itertools::Itertools;
 
-use super::conditions::{
-    ElementCondition, ElementConditionWithState, QuorumCondition, QuorumConditionWithState, ScalarCondition,
-    ScalarConditionWithState,
+use super::{
+    actions::{
+        Action, CollectAction, ComputeDeserializeElementAction, ComputeMappingElementAction, ComputeScalarAction,
+        ComputeSerializeAndSignElementAction, ComputeSerializeAndSignScalarAction, MergeScalarsAction, SendBCAction,
+        SendDMAction,
+    },
+    conditions::{
+        ElementCondition, ElementConditionWithState, QuorumCondition, QuorumConditionWithState, ScalarCondition,
+        ScalarConditionWithState,
+    },
 };
 use crate::{
     entities::{
@@ -22,66 +29,6 @@ use crate::{
     },
     traits::SessionParameters,
 };
-
-#[derive_where::derive_where(Debug)]
-pub(crate) enum Action<SP: SessionParameters> {
-    ComputeScalar {
-        store_in: ComputedScalarTag,
-        function: ScalarFunction<SP>,
-        args: BTreeMap<String, ScalarTag>,
-    },
-    ComputeMappingElement {
-        store_in: ComputedMappingTag,
-        index: SP::Verifier,
-        function: MappingFunction<SP>,
-        args: BTreeMap<String, AnyTag>,
-        on_error: OnError,
-    },
-    ComputeSerializeAndSignScalar {
-        store_in: LocalSignedBCTag,
-        function: SerializeAndSignBCFunction<SP>,
-        data: ScalarTag,
-        message_name: FullName,
-        serde_adapter: SerdeAdapter<SP::WireFormat>,
-    },
-    ComputeSerializeAndSignElement {
-        store_in: LocalSignedDMTag,
-        index: SP::Verifier,
-        function: SerializeAndSignDMFunction<SP>,
-        data: AnyTag,
-        message_name: FullName,
-        serde_adapter: SerdeAdapter<SP::WireFormat>,
-    },
-    ComputeDeserializeElement {
-        store_in: ReceivedTag,
-        index: SP::Verifier,
-        function: DeserializeFunction<SP>,
-        data: RemoteSignedTag,
-        serde_adapter: SerdeAdapter<SP::WireFormat>,
-        expected_senders: BTreeSet<SP::Verifier>,
-        on_error: OnError,
-    },
-    SendBC {
-        store_in: SentBCTag,
-        to_send: LocalSignedBCTag,
-        destinations: BTreeSet<SP::Verifier>,
-    },
-    SendDM {
-        store_in: SentDMTag,
-        to_send: LocalSignedDMTag,
-        destination: SP::Verifier,
-    },
-    Collect {
-        store_in: ScalarTag,
-        values: MappingTag,
-        sources: BTreeSet<SP::Verifier>,
-    },
-    MergeScalar {
-        store_in: MergedScalarTag,
-        left: ScalarTag,
-        right: ScalarTag,
-    },
-}
 
 #[derive(Debug, Clone)]
 pub(crate) enum OnError {
@@ -188,25 +135,27 @@ impl<SP: SessionParameters> ScalarRule<SP> {
                 store_in,
                 function,
                 args,
-            } => Action::ComputeScalar {
+            } => Action::ComputeScalar(ComputeScalarAction {
                 store_in,
                 function,
                 args,
-            },
+            }),
             ScalarRuleKind::SerializeAndSign {
                 store_in,
                 function,
                 data,
                 message_name,
                 serde_adapter,
-            } => Action::ComputeSerializeAndSignScalar {
+            } => Action::ComputeSerializeAndSignScalar(ComputeSerializeAndSignScalarAction {
                 store_in,
                 function,
                 data,
                 message_name,
                 serde_adapter,
-            },
-            ScalarRuleKind::Merge { store_in, left, right } => Action::MergeScalar { store_in, left, right },
+            }),
+            ScalarRuleKind::Merge { store_in, left, right } => {
+                Action::MergeScalar(MergeScalarsAction { store_in, left, right })
+            }
         }
     }
 }
@@ -268,11 +217,11 @@ impl<SP: SessionParameters> CollectRule<SP> {
     }
 
     pub fn into_action(self) -> Action<SP> {
-        Action::Collect {
+        Action::Collect(CollectAction {
             store_in: self.store_in,
             values: self.values,
             sources: self.quorum_condition.available_ids(),
-        }
+        })
     }
 }
 
@@ -407,27 +356,27 @@ impl<SP: SessionParameters> MappingRule<SP> {
                 function,
                 args,
                 on_error,
-            } => Action::ComputeMappingElement {
+            } => Action::ComputeMappingElement(ComputeMappingElementAction {
                 store_in: store_in.clone(),
                 index: id,
                 function: function.clone(),
                 args: args.clone(),
                 on_error: on_error.clone(),
-            },
+            }),
             MappingRuleKind::SerializeAndSign {
                 store_in,
                 function,
                 data,
                 message_name,
                 serde_adapter,
-            } => Action::ComputeSerializeAndSignElement {
+            } => Action::ComputeSerializeAndSignElement(ComputeSerializeAndSignElementAction {
                 store_in: store_in.clone(),
                 index: id,
                 function: function.clone(),
                 data: data.clone(),
                 message_name: message_name.clone(),
                 serde_adapter: serde_adapter.clone(),
-            },
+            }),
             MappingRuleKind::Deserialize {
                 store_in,
                 function,
@@ -435,7 +384,7 @@ impl<SP: SessionParameters> MappingRule<SP> {
                 serde_adapter,
                 expected_senders,
                 on_error,
-            } => Action::ComputeDeserializeElement {
+            } => Action::ComputeDeserializeElement(ComputeDeserializeElementAction {
                 store_in: store_in.clone(),
                 index: id,
                 function: function.clone(),
@@ -443,7 +392,7 @@ impl<SP: SessionParameters> MappingRule<SP> {
                 serde_adapter: serde_adapter.clone(),
                 expected_senders: expected_senders.clone(),
                 on_error: on_error.clone(),
-            },
+            }),
         }
     }
 }
@@ -481,11 +430,11 @@ impl<SP: SessionParameters> SendBCRule<SP> {
     }
 
     pub fn into_action(self) -> Action<SP> {
-        Action::SendBC {
+        Action::SendBC(SendBCAction {
             store_in: self.store_in,
             to_send: self.to_send,
             destinations: self.destinations,
-        }
+        })
     }
 }
 
@@ -528,11 +477,11 @@ impl<SP: SessionParameters> SendDMRule<SP> {
     }
 
     pub fn make_action(&self, id: SP::Verifier) -> Action<SP> {
-        Action::SendDM {
+        Action::SendDM(SendDMAction {
             store_in: self.store_in.clone(),
             to_send: self.to_send.clone(),
             destination: id,
-        }
+        })
     }
 }
 
