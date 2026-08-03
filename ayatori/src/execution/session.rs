@@ -216,36 +216,92 @@ where
         &self.verifier
     }
 
-    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<(), RuntimeError> {
+    fn add_scalar(&mut self, store_in: &ScalarTag, value: Value) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         self.storage
             .set_scalar(store_in, value)
             .or_with_context(|| format!("Failed to store the scalar result of `{store_in}`"))?;
         self.ruleset.update_with_scalar_ready(store_in);
-        Ok(())
+        Ok(AddSessionUpdate::StateChanged)
     }
 
-    fn add_element(&mut self, store_in: &MappingTag, id: &SP::Verifier, value: Value) -> Result<(), RuntimeError> {
+    fn add_element(
+        &mut self,
+        store_in: &MappingTag,
+        id: &SP::Verifier,
+        value: Value,
+    ) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         self.storage
             .set_elem(store_in, id, value)
             .or_with_context(|| format!("Failed to store a mapping element result of `{store_in}`"))?;
         self.ruleset.update_with_element_ready(store_in, id);
-        Ok(())
+        // The output node is a scalar, adding an element to a mapping node
+        // will not finish the protocol or make it unfinishable.
+        Ok(AddSessionUpdate::StateDidNotChange)
     }
 
-    fn register_provable_error(&mut self, evidence: Evidence<SP, P>) {
+    #[must_use]
+    fn register_provable_error(&mut self, evidence: Evidence<SP, P>) -> AddSessionUpdate<SP> {
         self.ruleset.update_with_banned_party(evidence.guilty_party());
         self.provable_errors.insert(evidence.guilty_party().clone(), evidence);
+        AddSessionUpdate::StateChanged
     }
 
-    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) {
+    #[must_use]
+    fn register_attributable_error(&mut self, guilty_party: SP::Verifier, tag: &MappingTag) -> AddSessionUpdate<SP> {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.attributable_errors
             .insert(guilty_party, format!("Error when calculating {tag}"));
+        AddSessionUpdate::StateChanged
     }
 
-    fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) {
+    fn try_add_verified_value(
+        &mut self,
+        store_in: &MappingTag,
+        id: &SP::Verifier,
+        value: Value,
+    ) -> Result<AddSessionUpdate<SP>, RuntimeError> {
+        if let Ok(existing_value) = self.storage.get_elem(store_in, id) {
+            let typed_existing_value = existing_value
+                .downcast_ref::<VerifiedValue<SP>>()
+                .or_with_context(|| format!("Failed to downcast a stored signed message `{store_in}`"))?;
+            let typed_received_value = value
+                .downcast_ref::<VerifiedValue<SP>>()
+                .or_with_context(|| format!("Failed to downcast a newly received message `{store_in}`"))?;
+
+            // Both values are signed, contain the same named value, but are different.
+            // This is a provable failure.
+            // Note that the payload or metadata of either value may still be invalid
+            // (it is possible that it has not been checked yet at this point),
+            // but it does not matter since we already got our evidence.
+            if typed_existing_value.metadata() != typed_received_value.metadata()
+                || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
+            {
+                let evidence = EvidenceKind::ConflictingMessages(ConflictingMessagesEvidence::new(
+                    typed_existing_value,
+                    typed_received_value,
+                ));
+                return Ok(self.register_provable_error(Evidence::new(&self.data.id, id, evidence)));
+            }
+
+            // The message is a duplicate, we cannot do anything at this point.
+            // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
+            // For now we can only report both message IDs that delivered these values,
+            // and let the user deal with it, if possible.
+            let error = MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
+                first: typed_existing_value.message_id().clone(),
+                second: typed_existing_value.message_id().clone(),
+            });
+            return Ok(AddSessionUpdate::MessageAttributableError(error));
+        }
+
+        self.add_element(store_in, id, value)
+    }
+
+    #[must_use]
+    fn register_banned_party(&mut self, guilty_party: SP::Verifier, reason: String) -> AddSessionUpdate<SP> {
         self.ruleset.update_with_banned_party(&guilty_party);
         self.external_bans.insert(guilty_party, reason);
+        AddSessionUpdate::StateChanged
     }
 
     fn make_report(self, outcome: SessionOutcome<SP, P>) -> SessionReport<SP, P> {
@@ -284,13 +340,15 @@ where
     }
 
     /// Registers a received message.
-    fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) {
+    #[must_use]
+    fn add_message(&mut self, message_id: &MessageId<SP>, message: Message<SP>) -> AddSessionUpdate<SP> {
         let tasks = message
             .into_values()
             .into_iter()
             .map(|signed_value| PreprocessMessageTask::new(&self.data, message_id.clone(), signed_value))
             .collect::<Vec<_>>();
         self.preprocessing_tasks.extend(tasks);
+        AddSessionUpdate::StateDidNotChange
     }
 
     /// Attempts to make a task to execute.
@@ -372,55 +430,34 @@ where
     fn with_update_inner(&mut self, result: SessionUpdate<SP>) -> Result<AddSessionUpdate<SP>, RuntimeError> {
         match result.into_inner() {
             SessionUpdateEnum::NoActionNeeded => Ok(AddSessionUpdate::StateDidNotChange),
-            SessionUpdateEnum::SentBC { store_in } => {
-                self.add_scalar(&ScalarTag::from(store_in), Value::new(()))?;
-                Ok(AddSessionUpdate::StateDidNotChange)
-            }
+            SessionUpdateEnum::SentBC { store_in } => self.add_scalar(&ScalarTag::from(store_in), Value::new(())),
             SessionUpdateEnum::SentDM { store_in, destination } => {
-                self.add_element(&MappingTag::from(store_in), &destination, Value::new(()))?;
-                Ok(AddSessionUpdate::StateDidNotChange)
+                self.add_element(&MappingTag::from(store_in), &destination, Value::new(()))
             }
-            SessionUpdateEnum::Received { id, message } => {
-                self.add_message(&id, message);
-                Ok(AddSessionUpdate::StateDidNotChange)
-            }
+            SessionUpdateEnum::Received { id, message } => Ok(self.add_message(&id, message)),
             SessionUpdateEnum::RuntimeError(error) => Err(error.with_context("Task returned a runtime error")),
             SessionUpdateEnum::SpuriousError { store_in, error } => {
                 Ok(AddSessionUpdate::SpuriousError { store_in, error })
             }
-            SessionUpdateEnum::ComputedScalar { store_in, result } => {
-                self.add_scalar(&store_in, result)?;
-                Ok(AddSessionUpdate::StateChanged)
-            }
+            SessionUpdateEnum::ComputedScalar { store_in, result }
+            | SessionUpdateEnum::Collected { store_in, result } => self.add_scalar(&store_in, result),
             SessionUpdateEnum::ComputedMappingElement {
                 store_in,
                 index,
                 result,
-            } => {
-                self.add_element(&store_in, &index, result)?;
-                Ok(AddSessionUpdate::StateChanged)
-            }
+            } => self.add_element(&store_in, &index, result),
             SessionUpdateEnum::SenderError {
                 store_in,
                 guilty_party,
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => {
-                    self.register_attributable_error(guilty_party, &store_in);
-                    Ok(AddSessionUpdate::StateChanged)
-                }
+                OnError::Escalate => Ok(self.register_attributable_error(guilty_party, &store_in)),
                 OnError::CollectEvidence(message_names) => {
                     let signed_values = collect_evidence(&self.storage, &guilty_party, &message_names)
                         .or_with_context(|| format!("Failed to collect evidence for {store_in} failure"))?;
-                    let evidence = EvidenceKind::SenderError(SenderErrorEvidence::new(
-                        &self.verifier,
-                        &store_in,
-                        signed_values,
-                        error,
-                    ));
-                    self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                    Ok(AddSessionUpdate::StateChanged)
+                    let evidence = SenderErrorEvidence::new(&self.verifier, &store_in, signed_values, error);
+                    Ok(self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence.into())))
                 }
             },
             SessionUpdateEnum::SenderErrorWithReveal {
@@ -429,73 +466,24 @@ where
                 error,
                 on_error,
             } => match on_error {
-                OnError::Escalate => {
-                    self.register_attributable_error(guilty_party, &store_in);
-                    Ok(AddSessionUpdate::StateChanged)
-                }
+                OnError::Escalate => Ok(self.register_attributable_error(guilty_party, &store_in)),
                 OnError::CollectEvidence(message_names) => {
                     let signed_values = collect_evidence(&self.storage, &guilty_party, &message_names)
                         .or_with_context(|| format!("Failed to collect evidence for {store_in} failure"))?;
-                    let evidence = EvidenceKind::SenderErrorWithReveal(SenderErrorWithRevealEvidence::new(
-                        &self.verifier,
-                        &store_in,
-                        signed_values,
-                        error,
-                    ));
-                    self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                    Ok(AddSessionUpdate::StateChanged)
+                    let evidence = SenderErrorWithRevealEvidence::new(&self.verifier, &store_in, signed_values, error);
+                    Ok(self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence.into())))
                 }
             },
             SessionUpdateEnum::ThirdPartyError { store_in, error } => {
                 let (guilty_party, error) = error.unpack();
-                let evidence =
-                    EvidenceKind::ThirdPartyError(ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error));
-                self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence));
-                Ok(AddSessionUpdate::StateChanged)
+                let evidence = ThirdPartyErrorEvidence::new(&self.verifier, &store_in, error);
+                Ok(self.register_provable_error(Evidence::new(&self.data.id, &guilty_party, evidence.into())))
             }
             SessionUpdateEnum::Preprocessed {
                 store_in,
                 source,
                 value,
-            } => {
-                if let Ok(existing_value) = self.storage.get_elem(&store_in, &source) {
-                    let typed_existing_value = existing_value
-                        .downcast_ref::<VerifiedValue<SP>>()
-                        .or_with_context(|| format!("Failed to downcast a stored signed message `{store_in}`"))?;
-                    let typed_received_value = value
-                        .downcast_ref::<VerifiedValue<SP>>()
-                        .or_with_context(|| format!("Failed to downcast a newly received message `{store_in}`"))?;
-
-                    // Both values are signed, contain the same named value, but are different.
-                    // This is a provable failure.
-                    // Note that the payload or metadata of either value may still be invalid
-                    // (it is possible that it has not been checked yet at this point),
-                    // but it does not matter since we already got our evidence.
-                    if typed_existing_value.metadata() != typed_received_value.metadata()
-                        || typed_existing_value.serialized_value() != typed_received_value.serialized_value()
-                    {
-                        let evidence = EvidenceKind::ConflictingMessages(ConflictingMessagesEvidence::new(
-                            typed_existing_value,
-                            typed_received_value,
-                        ));
-                        self.register_provable_error(Evidence::new(&self.data.id, &source, evidence));
-                        return Ok(AddSessionUpdate::StateChanged);
-                    }
-
-                    // The message is a duplicate, we cannot do anything at this point.
-                    // If the payload/metadata are invalid, the later checks will produce verifiable evidence.
-                    // For now we can only report both message IDs that delivered these values,
-                    // and let the user deal with it, if possible.
-                    let error = MessageAttributableError::DuplicateMessages(DuplicateMessagesError {
-                        first: typed_existing_value.message_id().clone(),
-                        second: typed_existing_value.message_id().clone(),
-                    });
-                    return Ok(AddSessionUpdate::MessageAttributableError(error));
-                }
-
-                self.add_element(&store_in, &source, value)?;
-                Ok(AddSessionUpdate::StateChanged)
-            }
+            } => self.try_add_verified_value(&store_in, &source, value),
             SessionUpdateEnum::MessageError {
                 message_id,
                 description,
@@ -506,17 +494,9 @@ where
                 });
                 Ok(AddSessionUpdate::MessageAttributableError(error))
             }
-            SessionUpdateEnum::ExternalBan { party_id, reason } => {
-                self.register_banned_party(party_id, reason);
-                Ok(AddSessionUpdate::StateChanged)
-            }
+            SessionUpdateEnum::ExternalBan { party_id, reason } => Ok(self.register_banned_party(party_id, reason)),
             SessionUpdateEnum::MergedScalars { store_in, result } => {
-                self.add_scalar(&ScalarTag::from(store_in), result)?;
-                Ok(AddSessionUpdate::StateDidNotChange)
-            }
-            SessionUpdateEnum::Collected { store_in, result } => {
-                self.add_scalar(&store_in, result)?;
-                Ok(AddSessionUpdate::StateDidNotChange)
+                self.add_scalar(&ScalarTag::from(store_in), result)
             }
         }
     }

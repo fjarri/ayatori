@@ -221,6 +221,12 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorEvidence<SP, P
     }
 }
 
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> From<SenderErrorEvidence<SP, P>> for EvidenceKind<SP, P> {
+    fn from(source: SenderErrorEvidence<SP, P>) -> Self {
+        Self::SenderError(source)
+    }
+}
+
 #[derive_where::derive_where(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SenderErrorWithRevealEvidence<SP: SessionParameters, P: ExecutableProtocol<SP>> {
     reported_by: SP::Verifier,
@@ -267,6 +273,14 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> SenderErrorWithRevealEvid
         .or_with_context(|| "Failed to build the reproduction subtree".into())?;
 
         run_evidence_verification_session(session, &self.reported_by, guilty_party, &self.signed_values)
+    }
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> From<SenderErrorWithRevealEvidence<SP, P>>
+    for EvidenceKind<SP, P>
+{
+    fn from(source: SenderErrorWithRevealEvidence<SP, P>) -> Self {
+        Self::SenderErrorWithReveal(source)
     }
 }
 
@@ -408,5 +422,11 @@ impl<SP: SessionParameters, P: ExecutableProtocol<SP>> ThirdPartyErrorEvidence<S
         verification
             .call(guilty_party, session_id, self.error.associated_data())
             .or_with_context(|| "Failed to run the associated verification function".into())
+    }
+}
+
+impl<SP: SessionParameters, P: ExecutableProtocol<SP>> From<ThirdPartyErrorEvidence<SP, P>> for EvidenceKind<SP, P> {
+    fn from(source: ThirdPartyErrorEvidence<SP, P>) -> Self {
+        Self::ThirdPartyError(source)
     }
 }
