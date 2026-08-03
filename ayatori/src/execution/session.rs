@@ -28,7 +28,7 @@ use crate::{
         AnyTag, AssociatedData, ComputedScalarTag, Erasable, EvidenceVerdict, FullName, MappingTag, Message, MessageId,
         RemoteSignedTag, RuntimeError, ScalarTag, SessionId, SignedValue, SpuriousError, Value, VerifiedValue,
     },
-    flat_representation::{Action, OnError, Ruleset, RulesetState, RulesetStateChange},
+    flat_representation::{Action, OnError, Ruleset, RulesetStateChange},
     graph_representation::{AnyNode, ArgNodes, OutputNode, PartyBuildData, PrivateInputs, PublicInputs},
     traced_error::{Traceable, TraceableResult},
     traits::{ExecutableProtocol, SessionParameters},
@@ -401,16 +401,10 @@ where
     pub fn with_update(mut self, result: SessionUpdate<SP>) -> Result<SessionState<SP, P>, RuntimeError> {
         let new_state = self.with_update_inner(result)?;
         Ok(match new_state {
-            AddSessionUpdate::StateChanged => {
-                let state = self.ruleset.state().clone();
-                match state {
-                    RulesetState::InProgress => SessionState::InProgress(self),
-                    RulesetState::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
-                    RulesetState::ImpossibleToCollect(tags) => {
-                        let report = self.make_report(SessionOutcome::Unfinishable(UnfinishableOutcome(tags)));
-                        SessionState::Unfinishable(report)
-                    }
-                }
+            AddSessionUpdate::ReachedOutput => SessionState::ReachedOutput(ReachedOutputSession(self)),
+            AddSessionUpdate::ImpossibleToCollect(tags) => {
+                let report = self.make_report(SessionOutcome::Unfinishable(UnfinishableOutcome(tags)));
+                SessionState::Unfinishable(report)
             }
             AddSessionUpdate::StateDidNotChange => SessionState::InProgress(self),
             AddSessionUpdate::MessageAttributableError(error) => {
@@ -683,8 +677,9 @@ pub enum SessionOutcome<SP: SessionParameters, P: ExecutableProtocol<SP>> {
 }
 
 enum AddSessionUpdate<SP: SessionParameters> {
-    StateChanged,
     StateDidNotChange,
+    ReachedOutput,
+    ImpossibleToCollect(Vec<ScalarTag>),
     MessageAttributableError(MessageAttributableError<SP>),
     SpuriousError { store_in: AnyTag, error: SpuriousError },
 }
@@ -692,8 +687,9 @@ enum AddSessionUpdate<SP: SessionParameters> {
 impl<SP: SessionParameters> From<RulesetStateChange> for AddSessionUpdate<SP> {
     fn from(source: RulesetStateChange) -> Self {
         match source {
-            RulesetStateChange::Changed => Self::StateChanged,
             RulesetStateChange::NotChanged => Self::StateDidNotChange,
+            RulesetStateChange::ReachedOutput => Self::ReachedOutput,
+            RulesetStateChange::ImpossibleToCollect(tags) => Self::ImpossibleToCollect(tags),
         }
     }
 }

@@ -105,15 +105,9 @@ impl<SP: SessionParameters> PropagatedGroups<SP> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum RulesetStateChange {
-    Changed,
-    NotChanged,
-}
-
 #[derive(Debug, Clone)]
-pub(crate) enum RulesetState {
-    InProgress,
+pub(crate) enum RulesetStateChange {
+    NotChanged,
     ReachedOutput,
     ImpossibleToCollect(Vec<ScalarTag>),
 }
@@ -127,7 +121,6 @@ pub(crate) struct Ruleset<SP: SessionParameters> {
     send_bc_rules: Vec<SendBCRule<SP>>,
     send_dm_rules: Vec<SendDMRule<SP>>,
     arguments: BTreeMap<String, ScalarArgumentTag>,
-    state: RulesetState,
 }
 
 impl<SP: SessionParameters> Ruleset<SP> {
@@ -221,7 +214,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
             send_bc_rules,
             send_dm_rules,
             arguments,
-            state: RulesetState::InProgress,
         })
     }
 
@@ -238,22 +230,12 @@ impl<SP: SessionParameters> Ruleset<SP> {
         if impossible_collects.is_empty() {
             RulesetStateChange::NotChanged
         } else {
-            self.state = RulesetState::ImpossibleToCollect(impossible_collects);
-            RulesetStateChange::Changed
+            RulesetStateChange::ImpossibleToCollect(impossible_collects)
         }
     }
 
     #[must_use]
     pub fn update_with_scalar_ready(&mut self, tag: &ScalarTag) -> RulesetStateChange {
-        let state_change = if let ScalarTag::Computed(computed_tag) = tag
-            && computed_tag == &self.output_tag
-        {
-            self.state = RulesetState::ReachedOutput;
-            RulesetStateChange::Changed
-        } else {
-            RulesetStateChange::NotChanged
-        };
-
         for rule in &mut self.scalar_rules {
             rule.update_with_scalar_ready(tag);
         }
@@ -274,7 +256,13 @@ impl<SP: SessionParameters> Ruleset<SP> {
             rule.update_with_scalar_ready(tag);
         }
 
-        state_change
+        if let ScalarTag::Computed(computed_tag) = tag
+            && computed_tag == &self.output_tag
+        {
+            RulesetStateChange::ReachedOutput
+        } else {
+            RulesetStateChange::NotChanged
+        }
     }
 
     pub fn update_with_element_ready(&mut self, tag: &MappingTag, id: &SP::Verifier) {
@@ -342,10 +330,6 @@ impl<SP: SessionParameters> Ruleset<SP> {
 
     pub fn arguments(&self) -> &BTreeMap<String, ScalarArgumentTag> {
         &self.arguments
-    }
-
-    pub fn state(&self) -> &RulesetState {
-        &self.state
     }
 
     pub fn output_tag(&self) -> &ComputedScalarTag {
